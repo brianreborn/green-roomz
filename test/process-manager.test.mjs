@@ -298,3 +298,21 @@ test('embedding and reranker backends never get a quantized KV cache (they fail 
   const text = manifest.agents.find((a) => a.alias === 'general-text-speculator');
   assert.equal(manager.buildLaunch(text, { id: 'x', args: ['--device', 'none'] }).args.includes('--cache-type-k'), true);
 });
+
+test('waitForReady tolerates whisper/sd-server which have no /health (404 on it)', async () => {
+  const manifest = sampleManifest();
+  manifest.runtimes.stable_diffusion.command = process.execPath;
+  const registry = new AgentRegistry(manifest);
+  const agent = manifest.agents.find((a) => a.alias === 'image-generation-agent');
+  registry.setStatus(agent.alias, 'cold');
+  const child = new FakeChild();
+  let hits = 0;
+  const manager = new ProcessManager({
+    manifest, registry, hostAdapter: { applyPriority() {} },
+    spawnImpl: () => child,
+    fetchImpl: async (url) => { hits += 1; return { status: url.endsWith('/health') ? 404 : 200, ok: !url.endsWith('/health') && true, async arrayBuffer() { return new ArrayBuffer(0); } }; },
+  });
+  const rec = await manager.start(agent);          // must not time out on the 404 /health
+  assert.equal(rec.state, 'ready');
+  await manager.stop(agent.alias);
+});

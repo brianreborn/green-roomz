@@ -7,6 +7,15 @@ import { profileAdmitted } from './memory.mjs';
 
 const MAX_LOG_CHARS = 64 * 1024;
 
+// How to tell each backend has finished loading its model.
+const okStatus = (r) => r.ok ?? (r.status >= 200 && r.status < 300);
+const anyAnswer = (r) => r.ok ?? (r.status != null && r.status < 500);
+const READY_PROBE = {
+  'llama-server': { path: '/health', ready: okStatus },
+  'whisper-server': { path: '/', ready: anyAnswer },
+  'stable-diffusion': { path: '/', ready: anyAnswer },
+};
+
 export function vulkanAllThreadCount(logicalCpus = os.cpus().length) {
   const n = Number(logicalCpus);
   const logical = Number.isFinite(n) && n > 0 ? Math.trunc(n) : 8;
@@ -280,10 +289,15 @@ export class ProcessManager {
   async waitForReady(agent, record, signal) {
     const timeoutMs = this.manifest.gateway.cold_start_timeout_ms;
     const deadline = Date.now() + timeoutMs;
+    const runtimeKind = this.manifest.runtimes[agent.runtime]?.kind;
+    // llama-server returns /health 503 while the model loads, 200 when ready -> need .ok.
+    // whisper-server / sd-server have no /health (it 404s); they only start listening
+    // once the model is loaded, so any HTTP answer on their root path means ready.
+    const probe = READY_PROBE[runtimeKind] ?? READY_PROBE['llama-server'];
     while (Date.now() < deadline) {
       if (record.child.exitCode !== null) throw new Error(`process exited with ${record.child.exitCode}`);
       try {
-        const response = await this.fetch(`http://127.0.0.1:${agent.port}/health`, {
+        const response = await this.fetch(`http://127.0.0.1:${agent.port}${probe.path}`, {
           signal: AbortSignal.timeout(1500),
           headers: { connection: 'close' },
         });
@@ -291,7 +305,7 @@ export class ProcessManager {
           if (typeof response.arrayBuffer === 'function') await response.arrayBuffer();
           else if (response.body?.cancel) await response.body.cancel();
         } catch {}
-        if (response.ok) return;
+        if (probe.ready(response)) return;
       } catch {}
       await sleep(200, signal);
     }
