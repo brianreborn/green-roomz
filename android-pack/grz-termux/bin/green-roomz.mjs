@@ -120,6 +120,7 @@ async function cmdServe(ctx, args) {
   const server = await gateway.listen(argValue(args, '--host'), argValue(args, '--port'));
   const address = server.address();
   console.error(`green-roomz listening on http://${address.address}:${address.port}`);
+  setInterval(() => {}, 60000);
   const nexus = ctx.registry.agents.get('tool-router-agent');
   if (nexus && ctx.registry.status(nexus.alias).state !== 'unavailable') {
     try {

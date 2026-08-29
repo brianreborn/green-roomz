@@ -1,0 +1,11 @@
+{
+  "backendScript": "C:\\LocalAI\\native-engines.ps1",
+  "gatewayEntry":  "C:\\LocalAI\\android-pack\\grz-termux\\bin\\green-roomz.mjs",
+  "gatewayArgs":   ["serve", "--manifest", "C:\\LocalAI\\android-pack\\grz-termux\\config\\agents.windows.json"],
+  "gatewayPort":   8080,
+  "hosts": {
+    "SHALOM": {
+      "notes": "Primary Windows workstation with AMD Vulkan GPU"
+    }
+  }
+}

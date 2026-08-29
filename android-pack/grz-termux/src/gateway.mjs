@@ -641,8 +641,7 @@ export class Gateway {
         }
 
         this.observeHop('success', alias, { ticket: issuedSession, payload: { reason, hops: hops.slice() } });
-        if (session?.id) this.sessions.setAgentAlias(issuedSession, alias);
-        else this.sessions.setAgentAlias(issuedSession, alias);
+        this.sessions.setAgentAlias(issuedSession, alias);
         const headers = hopHeaders(alias, reason);
         for (const [key, value] of Object.entries(headers)) response.setHeader(key, value);
         return deliverPeek({ peek, request, response, body: payload, headers });
@@ -666,9 +665,9 @@ export class Gateway {
 
   listen(host, port) {
     const address = this.bindAddress(host);
-    const listenPort = Number(port ?? this.manifest.gateway.port ?? 8080);
+    const listenPort = port != null ? Number(port) : (this.manifest.gateway.port ?? 8080);
     const server = createServer((req, res) => {
-      Promise.resolve(this.handle(req, res)).catch((error) => { if (!res.headersSent) jsonResponse(res, 500, { error: { message: String(error.message), type: 'internal_error' } }); });
+      Promise.resolve(this.handle(req, res)).catch((error) => { const cors = corsHeaders(this.manifest, req.headers.origin); if (!res.headersSent) jsonResponse(res, 500, { error: { message: String(error.message), type: 'internal_error' } }, cors); });
     });
     return new Promise((resolve, reject) => {
       server.once('error', reject);

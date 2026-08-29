@@ -256,7 +256,7 @@ export class ProcessManager {
   }
 
   async waitForReady(agent, record, signal) {
-    const timeoutMs = this.manifest.gateway.cold_start_timeout_ms;
+    const timeoutMs = this.manifest.gateway?.cold_start_timeout_ms ?? 180000;
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
       if (record.child.exitCode !== null) throw new Error(`process exited with ${record.child.exitCode}`);
