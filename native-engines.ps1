@@ -22,23 +22,24 @@ Write-Host "$Hourglass Initializing async Vulkan abstraction layer..." -Foregrou
 
 # Use WScript.Shell COM routing to spin up a truly unprivileged, raw background thread process
 $WshShell = New-Object -ComObject WScript.Shell
-$ExecCmd = "`"$BinaryPath`" -hf Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF:Q4_K_M --host 127.0.0.1 --port 8080 --n-gpu-layers 99"
+$ExecCmd = "`"$BinaryPath`" -hf Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF:Q4_K_M --host 127.0.0.1 --port 8081 --n-gpu-layers 99"
 $WshShell.Run($ExecCmd, 0, $false)
 
-# Hardened Loop: Dynamically poll the network port instead of guessing with a static sleep timer
 Write-Host "$Gear Streaming weights from HF and warming VRAM. Waiting for port 8081..." -ForegroundColor Yellow
 $PortBound = $false
 $RetryCount = 0
-$MaxRetries = 40 # Up to 120 seconds for big pipeline weights caching operations
+$MaxRetries = 480 # Up to 120 seconds (250ms polling intervals)
 
 while (-not $PortBound -and $RetryCount -lt $MaxRetries) {
     $CheckPort = Get-NetTCPConnection -LocalPort 8081 -ErrorAction SilentlyContinue
     if ($CheckPort) {
         $PortBound = $true
     } else {
-        Start-Sleep -Seconds 3
+        Start-Sleep -Milliseconds 250
         $RetryCount++
-        Write-Progress -Activity "Loading LocalAI Backend Engine" -Status "Streaming weights layer (Attempt $RetryCount/$MaxRetries)..."
+        if ($RetryCount % 4 -eq 0) {
+            Write-Progress -Activity "Loading LocalAI Backend Engine" -Status "Streaming weights layer (Attempt $($RetryCount/4)/120s)..."
+        }
     }
 }
 
@@ -58,7 +59,7 @@ $Payload = @{
 } | ConvertTo-Json -Depth 5 -Compress
 
 try {
-    $Response = Invoke-RestMethod -Uri "http://127.0.0" -Method Post -ContentType "application/json" -Body $Payload
+    $Response = Invoke-RestMethod -Uri "http://127.0.0.1:8081/v1/chat/completions" -Method Post -ContentType "application/json" -Body $Payload
     Write-Host "$Check RESTART_DONE. Local engine is fully live on shalom!" -ForegroundColor Green
     Write-Host "$Robot Response: " -ForegroundColor White
     $Response.choices.message.content

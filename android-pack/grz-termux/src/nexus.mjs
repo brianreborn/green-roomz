@@ -212,6 +212,12 @@ export async function consultNexus({ processes, registry, fetchImpl = fetch, bod
 
   const admitOk = (alias) => alias && aliasCanAdmit(registry, alias, processes);
 
+  // Fast-path heuristic routing: if offline intent matcher has high confidence (code, translation, etc.), bypass HTTP LLM round-trip
+  const fastOffline = offlinePlan(stripped, registry, visited);
+  if (fastOffline?.route && fastOffline.confidence >= 0.75 && !routeIsBad(fastOffline, registry, visited, stripped) && admitOk(fastOffline.route)) {
+    return { ...fastOffline, reason: `fast_offline_${fastOffline.reason ?? 'heuristic'}` };
+  }
+
   const ask = async (constraint) => {
     if (!candidates.length) return { route: null, confidence: 0, reason: 'no_admittable_specialist' };
     if (!live) return offlinePlan(stripped, registry, visited);
