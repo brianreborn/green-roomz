@@ -284,3 +284,17 @@ test('buildLaunch defaults the KV cache to q8_0, honours an explicit profile cho
   const f16 = manager.buildLaunch({ ...agent, kv_cache: 'f16' }, { id: 'cpu-2', args: ['--device', 'none'] });
   assert.equal(f16.args.includes('--cache-type-k'), false);
 });
+
+test('embedding and reranker backends never get a quantized KV cache (they fail to decode with one)', () => {
+  const manifest = sampleManifest();
+  const registry = new AgentRegistry(manifest);
+  const manager = new ProcessManager({ manifest, registry, spawnImpl() { throw new Error('no spawn'); } });
+  for (const alias of ['semantic-embedding-agent', 'retrieval-rerank-agent']) {
+    const agent = manifest.agents.find((a) => a.alias === alias);
+    const launch = manager.buildLaunch(agent, { id: 'x', args: ['--device', 'none'] });
+    assert.equal(launch.args.includes('--cache-type-k'), false, `${alias} must not get --cache-type-k`);
+  }
+  // a text agent still does
+  const text = manifest.agents.find((a) => a.alias === 'general-text-speculator');
+  assert.equal(manager.buildLaunch(text, { id: 'x', args: ['--device', 'none'] }).args.includes('--cache-type-k'), true);
+});

@@ -158,12 +158,16 @@ export class ProcessManager {
           ...(agent.draft_args ?? []),
         );
       }
-      // Default the KV cache to q8_0 (near-lossless, ~half the KV bytes) unless a
-      // profile/agent already chose. Big lever on a memory-tight box; opt out
-      // per-agent with kv_cache: "f16".
+      // Default the KV cache to q8_0 (near-lossless, ~half the KV bytes) for
+      // autoregressive text/vision agents. Embedding and reranker backends run
+      // a single forward pass with no generative KV cache; a quantized cache
+      // type makes them fail to decode, so leave those alone. Opt a profile/agent
+      // out with kv_cache: "f16".
+      const caps = new Set(agent.native_capabilities ?? []);
+      const usesKvCache = !caps.has('embedding') && !caps.has('reranking');
       const kv = profile?.kv_cache ?? agent.kv_cache ?? 'q8_0';
-      if (kv !== 'f16' && !args.includes('--cache-type-k')) args.push('--cache-type-k', kv);
-      if (kv !== 'f16' && !args.includes('--cache-type-v')) args.push('--cache-type-v', kv);
+      if (usesKvCache && kv !== 'f16' && !args.includes('--cache-type-k')) args.push('--cache-type-k', kv);
+      if (usesKvCache && kv !== 'f16' && !args.includes('--cache-type-v')) args.push('--cache-type-v', kv);
     } else if (runtime.kind === 'whisper-server') {
       args.push('--port', String(agent.port), '--model', agent.model, ...(profile?.args ?? []));
     } else if (runtime.kind === 'stable-diffusion') {
