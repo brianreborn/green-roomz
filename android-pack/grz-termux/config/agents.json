@@ -1,0 +1,38 @@
+﻿{
+  "runtimes": {},
+  "agents": [
+    {
+      "id": "tool-router-agent",
+      "alias": "tool-router-agent",
+      "runtime": "logical",
+      "availability": "ready",
+      "owned_by": "external",
+      "resident": false,
+      "backend_url": "http://127.0.0",
+      "native_capabilities": ["text", "json"],
+      "gateway_accepted_capabilities": ["text", "file"]
+    },
+    {
+      "id": "qwenstral-code-speculator",
+      "alias": "qwenstral-code-speculator",
+      "runtime": "logical",
+      "availability": "ready",
+      "owned_by": "external",
+      "resident": false,
+      "backend_url": "http://127.0.0",
+      "native_capabilities": ["text", "json", "code"],
+      "gateway_accepted_capabilities": ["text", "file"]
+    },
+    {
+      "id": "general-text-speculator",
+      "alias": "general-text-speculator",
+      "runtime": "logical",
+      "availability": "ready",
+      "owned_by": "external",
+      "resident": false,
+      "backend_url": "http://127.0.0",
+      "native_capabilities": ["text", "json"],
+      "gateway_accepted_capabilities": ["text", "file"]
+    }
+  ]
+}

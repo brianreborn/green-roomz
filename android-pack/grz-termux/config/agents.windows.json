@@ -1,0 +1,133 @@
+{
+  "schema_version": 1,
+  "manifest_version": "0.1.0-windows-vulkan",
+  "product": "Green-Roomz",
+  "gateway": {
+    "host": "127.0.0.1",
+    "port": 8080,
+    "policy": "responsive",
+    "request_body_limit_bytes": 16777216,
+    "cold_start_timeout_ms": 180000,
+    "retry_initial_ms": 150,
+    "retry_max_ms": 2000,
+    "retry_deadline_ms": 180000,
+    "session_ttl_ms": 3600000,
+    "session_limit": 64,
+    "cors_origins": ["http://localhost", "http://127.0.0.1"]
+  },
+  "runtimes": {},
+  "agents": [
+    {
+      "alias": "tool-router-agent",
+      "description": "Resident CPU / Native router on Vulkan port 8081",
+      "runtime": "logical",
+      "availability": "ready",
+      "owned_by": "external",
+      "resident": true,
+      "backend_url": "http://127.0.0.1:8081",
+      "native_capabilities": ["text", "routing", "json"],
+      "gateway_accepted_capabilities": ["text", "image", "audio", "file"]
+    },
+    {
+      "alias": "qwenstral-code-speculator",
+      "description": "Native code generation specialist on Vulkan port 8081",
+      "runtime": "logical",
+      "availability": "ready",
+      "owned_by": "external",
+      "resident": false,
+      "backend_url": "http://127.0.0.1:8081",
+      "native_capabilities": ["text", "json", "code"],
+      "gateway_accepted_capabilities": ["text", "file"]
+    },
+    {
+      "alias": "general-text-speculator",
+      "description": "Native text generation specialist on Vulkan port 8081",
+      "runtime": "logical",
+      "availability": "ready",
+      "owned_by": "external",
+      "resident": false,
+      "backend_url": "http://127.0.0.1:8081",
+      "native_capabilities": ["text", "json", "translation-on-request"],
+      "gateway_accepted_capabilities": ["text", "file"]
+    },
+    {
+      "alias": "vision-layout-agent",
+      "description": "Document OCR and visual extraction",
+      "runtime": "logical",
+      "availability": "unavailable",
+      "owned_by": "external",
+      "backend_url": "http://127.0.0.1:8081",
+      "native_capabilities": ["text", "image"],
+      "gateway_accepted_capabilities": ["text", "image", "file"]
+    },
+    {
+      "alias": "audio-transcription-agent",
+      "description": "Speech transcription",
+      "runtime": "logical",
+      "availability": "unavailable",
+      "owned_by": "external",
+      "backend_url": "http://127.0.0.1:8182",
+      "native_capabilities": ["audio"],
+      "gateway_accepted_capabilities": ["audio", "file"]
+    },
+    {
+      "alias": "semantic-embedding-agent",
+      "description": "Text embeddings",
+      "runtime": "logical",
+      "availability": "unavailable",
+      "owned_by": "external",
+      "backend_url": "http://127.0.0.1:8185",
+      "native_capabilities": ["text", "embedding"],
+      "gateway_accepted_capabilities": ["text", "file"]
+    },
+    {
+      "alias": "retrieval-rerank-agent",
+      "description": "Cross-encoder relevance scoring",
+      "runtime": "logical",
+      "availability": "unavailable",
+      "owned_by": "external",
+      "backend_url": "http://127.0.0.1:8186",
+      "native_capabilities": ["text", "reranking"],
+      "gateway_accepted_capabilities": ["text"]
+    },
+    {
+      "alias": "safety-policy-agent",
+      "description": "Structured policy classification",
+      "runtime": "logical",
+      "availability": "unavailable",
+      "owned_by": "external",
+      "backend_url": "http://127.0.0.1:8188",
+      "native_capabilities": ["text", "classification", "json"],
+      "gateway_accepted_capabilities": ["text"]
+    },
+    {
+      "alias": "speech-synthesis-agent",
+      "description": "Text-to-speech synthesis",
+      "runtime": "logical",
+      "availability": "unavailable",
+      "owned_by": "external",
+      "backend_url": "http://127.0.0.1:8189",
+      "native_capabilities": ["text", "audio-output"],
+      "gateway_accepted_capabilities": ["text"]
+    },
+    {
+      "alias": "image-generation-agent",
+      "description": "Image generation",
+      "runtime": "logical",
+      "availability": "unavailable",
+      "owned_by": "external",
+      "backend_url": "http://127.0.0.1:8190",
+      "native_capabilities": ["text", "image-output", "image-edit"],
+      "gateway_accepted_capabilities": ["text", "image"]
+    },
+    {
+      "alias": "security-monitor-agent",
+      "description": "Async mailbox security monitor",
+      "runtime": "logical",
+      "availability": "ready",
+      "native_capabilities": ["text", "json"],
+      "gateway_accepted_capabilities": ["text"],
+      "system_policy": "policies/security-monitor.md"
+    }
+  ]
+}

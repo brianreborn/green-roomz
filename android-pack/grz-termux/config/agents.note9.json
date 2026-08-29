@@ -1,0 +1,190 @@
+{
+  "schema_version": 1,
+  "manifest_version": "0.1.0-note9-arm64",
+  "product": "Green-Roomz",
+  "gateway": {
+    "host": "127.0.0.1",
+    "port": 8080,
+    "policy": "responsive",
+    "request_body_limit_bytes": 16777216,
+    "cold_start_timeout_ms": 180000,
+    "retry_initial_ms": 150,
+    "retry_max_ms": 2000,
+    "retry_deadline_ms": 180000,
+    "session_ttl_ms": 3600000,
+    "session_limit": 64,
+    "cors_origins": ["http://localhost", "http://127.0.0.1"]
+  },
+  "runtimes": {
+    "llama_server": {
+      "kind": "llama-server",
+      "command": "${HOME}/grz-runtime/run-llama-server.sh",
+      "base_args": ["--host", "127.0.0.1", "--parallel", "1", "--prio", "-1", "--split-mode", "none"],
+      "env": {
+        "GGML_VULKAN": "0",
+        "LD_LIBRARY_PATH": "${HOME}/grz-runtime/lib:${HOME}/grz-runtime/bin"
+      }
+    },
+    "whisper": {
+      "kind": "whisper-server",
+      "command": "/data/local/tmp/grz/missing/whisper-server",
+      "base_args": ["--host", "127.0.0.1"],
+      "env": {}
+    },
+    "piper": {
+      "kind": "piper",
+      "command": "/data/local/tmp/grz/missing/piper",
+      "base_args": [],
+      "env": {}
+    },
+    "stable_diffusion": {
+      "kind": "stable-diffusion",
+      "command": "/data/local/tmp/grz/missing/sd-server",
+      "base_args": ["--listen-ip", "127.0.0.1"],
+      "env": {}
+    }
+  },
+  "agents": [
+    {
+      "alias": "vision-layout-agent",
+      "description": "Document OCR, tables, and structural visual extraction",
+      "runtime": "llama_server",
+      "port": 8181,
+      "native_capabilities": ["text", "image"],
+      "gateway_accepted_capabilities": ["text", "image", "file"],
+      "model": "/data/local/tmp/grz/missing/vision.gguf",
+      "required_artifacts": ["model"],
+      "system_policy": "policies/vision-layout.md",
+      "context_size": 4096,
+      "profiles": []
+    },
+    {
+      "alias": "audio-transcription-agent",
+      "description": "Verbatim and technical-normalized speech transcription",
+      "runtime": "whisper",
+      "port": 8182,
+      "native_capabilities": ["audio"],
+      "gateway_accepted_capabilities": ["audio", "file"],
+      "model": "/data/local/tmp/grz/missing/whisper.bin",
+      "required_artifacts": ["model"],
+      "system_policy": "policies/audio-transcription.md",
+      "profiles": []
+    },
+    {
+      "alias": "qwenstral-code-speculator",
+      "description": "Code generation, transformation, and schema-constrained output",
+      "runtime": "llama_server",
+      "port": 8183,
+      "native_capabilities": ["text", "json", "code"],
+      "gateway_accepted_capabilities": ["text", "file"],
+      "model": "/data/local/tmp/grz/missing/code.gguf",
+      "required_artifacts": ["model"],
+      "system_policy": "policies/code-structured.md",
+      "context_size": 4096,
+      "profiles": [
+        {"id": "cpu-4", "args": ["--load-mode", "mmap", "--fit", "off", "--device", "none", "--no-op-offload", "--threads", "4", "--threads-batch", "4", "--n-gpu-layers", "0"]}
+      ]
+    },
+    {
+      "alias": "general-text-speculator",
+      "description": "General reasoning, writing, verification, and explicit translation",
+      "runtime": "llama_server",
+      "port": 8184,
+      "native_capabilities": ["text", "json", "translation-on-request"],
+      "gateway_accepted_capabilities": ["text", "file"],
+      "model": "/data/local/tmp/grz/missing/text.gguf",
+      "required_artifacts": ["model"],
+      "system_policy": "policies/general-text.md",
+      "context_size": 4096,
+      "profiles": [
+        {"id": "cpu-4", "args": ["--load-mode", "mmap", "--fit", "off", "--device", "none", "--no-op-offload", "--threads", "4", "--threads-batch", "4", "--n-gpu-layers", "0"]}
+      ]
+    },
+    {
+      "alias": "semantic-embedding-agent",
+      "description": "Text embeddings for retrieval, clustering, and memory",
+      "runtime": "llama_server",
+      "port": 8185,
+      "native_capabilities": ["text", "embedding"],
+      "gateway_accepted_capabilities": ["text", "file"],
+      "model": "/data/local/tmp/grz/missing/embed.gguf",
+      "required_artifacts": ["model"],
+      "context_size": 4096,
+      "extra_args": ["--embeddings", "--pooling", "last"],
+      "profiles": []
+    },
+    {
+      "alias": "retrieval-rerank-agent",
+      "description": "Cross-encoder relevance scoring for retrieved passages",
+      "runtime": "llama_server",
+      "port": 8186,
+      "native_capabilities": ["text", "reranking"],
+      "gateway_accepted_capabilities": ["text"],
+      "model": "/data/local/tmp/grz/missing/rerank.gguf",
+      "required_artifacts": ["model"],
+      "context_size": 4096,
+      "extra_args": ["--reranking"],
+      "profiles": []
+    },
+    {
+      "alias": "tool-router-agent",
+      "description": "Resident CPU nexus: route each turn to a specialist and accept HANDOFF",
+      "runtime": "llama_server",
+      "port": 8187,
+      "resident": true,
+      "native_capabilities": ["text", "routing", "json"],
+      "gateway_accepted_capabilities": ["text", "image", "audio", "file"],
+      "model": "/data/local/tmp/grz/models/Qwenstral-Small-3.1-0.5B.Q4_K_M.gguf",
+      "required_artifacts": ["model"],
+      "system_policy": "policies/tool-router.md",
+      "context_size": 2048,
+      "profiles": [
+        {"id": "cpu-4", "args": ["--load-mode", "mmap", "--fit", "off", "--device", "none", "--no-op-offload", "--threads", "4", "--threads-batch", "4", "--n-gpu-layers", "0"]}
+      ]
+    },
+    {
+      "alias": "safety-policy-agent",
+      "description": "Structured input and output policy classification",
+      "runtime": "llama_server",
+      "port": 8188,
+      "native_capabilities": ["text", "classification", "json"],
+      "gateway_accepted_capabilities": ["text"],
+      "model": "/data/local/tmp/grz/missing/guard.gguf",
+      "required_artifacts": ["model"],
+      "system_policy": "policies/safety.md",
+      "context_size": 2048,
+      "profiles": []
+    },
+    {
+      "alias": "speech-synthesis-agent",
+      "description": "Local text-to-speech synthesis",
+      "runtime": "piper",
+      "port": 8189,
+      "native_capabilities": ["text", "audio-output"],
+      "gateway_accepted_capabilities": ["text"],
+      "model": "/data/local/tmp/grz/missing/voice.onnx",
+      "required_artifacts": ["model"],
+      "profiles": []
+    },
+    {
+      "alias": "image-generation-agent",
+      "description": "Queued local image generation and editing",
+      "runtime": "stable_diffusion",
+      "port": 8190,
+      "native_capabilities": ["text", "image-output", "image-edit"],
+      "gateway_accepted_capabilities": ["text", "image"],
+      "model": "/data/local/tmp/grz/missing/sd.gguf",
+      "required_artifacts": ["model"],
+      "system_policy": "policies/image-generation.md",
+      "profiles": []
+    },
+    {
+      "alias": "security-monitor-agent",
+      "description": "Async mailbox security monitor (PQ-style ring). Producers push and return immediately; not a GGUF.",
+      "runtime": "logical",
+      "native_capabilities": ["text", "json"],
+      "gateway_accepted_capabilities": ["text"],
+      "system_policy": "policies/security-monitor.md"
+    }
+  ]
+}
