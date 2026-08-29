@@ -853,3 +853,26 @@ test('mixed image and audio on chat is not 400', async (t) => {
   assert.notEqual(result.status, 500);
   assert.equal(result.status, 200);
 });
+
+test('auto-route to a cold non-fallback specialist yields a real general-text answer, not the router echo', async (t) => {
+  const urls = [];
+  const { server } = await withServer(t, {}, {
+    ready: ['tool-router-agent', 'general-text-speculator'], // code stays cold/unavailable
+    stubEnsure: true,
+    fetchImpl: async (url) => {
+      urls.push(String(url));
+      if (String(url).includes(':18187')) {
+        return jsonFetch({ choices: [{ message: { role: 'assistant', content: JSON.stringify({ route: 'qwenstral-code-speculator', confidence: 0.4, reason: 'guess' }) } }] });
+      }
+      return jsonFetch({ choices: [{ message: { role: 'assistant', content: 'real-answer' } }] });
+    },
+  });
+  const res = await request(server, {
+    path: '/v1/chat/completions', method: 'POST', headers: { 'content-type': 'application/json' },
+    body: { messages: [{ role: 'user', content: 'what is 2 plus 2' }] },
+  });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.choices[0].message.content, 'real-answer');
+  assert.equal(res.headers['x-green-roomz-effective-alias'], 'general-text-speculator');
+  assert.equal(urls.some((u) => u.includes(':18183')), false, 'did not spontaneously cold-start the 7B code model');
+});

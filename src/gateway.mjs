@@ -757,14 +757,17 @@ export class Gateway {
           continue;
         }
 
-        // Nexus-picked cold specialists: do not mmap a 4B/7B and wedge --parallel 1.
-        // Only an explicit slash/lock targeting this alias may cold-start it.
+        // Cold-start policy for a nexus-picked specialist. An explicit slash/lock
+        // may start anything. Auto-routing may start the general-text fallback
+        // (so a plain question gets a real answer instead of the router's echo),
+        // but still won't spontaneously mmap a 4B/7B code/vision model - those
+        // stay opt-in via /code, /vision, etc. Idle eviction bounds the warm set.
         const alreadyReady = this.registry.status(alias).state === 'ready';
-        const mayColdStart = slashOrLock;
+        const mayColdStart = slashOrLock || alias === FALLBACK_ALIAS;
         if (!mayColdStart && !alreadyReady && alias !== NEXUS_ALIAS) {
           visited.add(alias);
           hops.push(alias);
-          notes.push(stripControls(`${alias} cold; using resident`));
+          notes.push(stripControls(`${alias} cold; falling back`));
           this.observeHop('agent_unavailable', alias, { ticket: issuedSession, payload: { reason: 'cold_skipped', hops: hops.slice() } });
           continue;
         }
@@ -820,6 +823,26 @@ export class Gateway {
         return deliverPeek({ peek, request, response, body: payload, headers });
       }
 
+      // Nothing was picked / everything was cold. Prefer a real answer from the
+      // general-text fallback (cold-start it) over echoing the 0.5B router.
+      if (!peekedSpecialist && !visited.has(FALLBACK_ALIAS)
+          && isRoutableAlias(this.registry, FALLBACK_ALIAS)
+          && aliasCanAdmit(this.registry, FALLBACK_ALIAS, this.processes)) {
+        try {
+          hops.push(FALLBACK_ALIAS);
+          const agent = this.registry.get(FALLBACK_ALIAS);
+          await this.processes.ensure(agent, { signal: request.abortSignal });
+          const payload = prepareInferenceBody(body, agent);
+          const path = String((pathname ?? request.url.split('?')[0])).replace(/\/route$/, '') || '/v1/chat/completions';
+          this.observeHop('success', FALLBACK_ALIAS, { ticket: issuedSession, payload: { reason: 'text_fallback', hops: hops.slice() } });
+          this.sessions.setAgentAlias(issuedSession, FALLBACK_ALIAS);
+          const headers = hopHeaders(FALLBACK_ALIAS, 'text_fallback');
+          for (const [key, value] of Object.entries(headers)) response.setHeader(key, value);
+          return await proxyJson({ request, response, body: payload, target: `http://127.0.0.1:${agent.port}${path}`, config: this.manifest.gateway, signal: request.abortSignal, fetchImpl: this.fetchImpl });
+        } catch (error) {
+          notes.push(stripControls(`text fallback failed: ${error?.message ?? error}`));
+        }
+      }
       if (!peekedSpecialist && this.registry.agents.has(NEXUS_ALIAS) && this.registry.status(NEXUS_ALIAS).state !== 'unavailable') {
         return await this.completeOnResident(request, response, body, issuedSession, cors, hops, 'resident_fallback');
       }
