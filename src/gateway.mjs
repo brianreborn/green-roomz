@@ -514,6 +514,50 @@ export class Gateway {
     );
   }
 
+  async completeSpeech(request, response, body, issuedSession, cors, hops) {
+    const alias = 'speech-synthesis-agent';
+    const agent = this.registry.get(alias);
+    const availability = this.registry.status(alias);
+    if (!agent || (availability.state === 'unavailable' && !(availability.missing ?? []).every((m) => m.startsWith('runtime:')))) {
+      throw new UnavailableError(`${alias} is unavailable`, availability.missing);
+    }
+    const runtime = this.manifest.runtimes[agent.runtime];
+    const text = latestUserMessageText(stripSlashCommand(body)).trim();
+    if (!text) throw new ValidationError('/tts needs text to speak');
+    if (text.length > 4000) throw new ValidationError('/tts text is capped at 4000 characters');
+
+    const execFile = this.execFileImpl ?? (await import('node:child_process')).execFile;
+    const { mkdtemp, readFile, rm } = await import('node:fs/promises');
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'grz-tts-'));
+    const out = path.join(dir, 'speech.wav');
+    try {
+      await new Promise((resolve, reject) => {
+        const child = execFile(runtime.command, ['--model', agent.model, '--output_file', out],
+          { timeout: 30_000, windowsHide: true }, (err) => (err ? reject(err) : resolve()));
+        child.stdin.end(text);
+      });
+      const wav = await readFile(out);
+      this.observeHop('success', alias, { ticket: issuedSession, payload: { reason: 'tts', hops: hops.slice() } });
+      this.sessions.setAgentAlias(issuedSession, alias);
+      const dataUrl = `data:audio/wav;base64,${wav.toString('base64')}`;
+      return jsonResponse(response, 200, {
+        id: `grz-native-${alias}`,
+        object: 'chat.completion',
+        model: alias,
+        choices: [{
+          index: 0,
+          message: { role: 'assistant', content: '', audio: { data: dataUrl, format: 'wav', transcript: text } },
+          finish_reason: 'stop',
+        }],
+        usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+      }, this.routeHeaders(issuedSession, { requestedAlias: body.model ?? null, effectiveAlias: alias, reason: 'tts' }, cors, { hops: hops.join(',') }));
+    } finally {
+      await rm(dir, { recursive: true, force: true }).catch(() => {});
+    }
+  }
+
   routeHeaders(issuedSession, routed, cors, extra = {}) {
     return {
       'x-session-id': headerSafe(issuedSession),
@@ -734,7 +778,14 @@ export class Gateway {
 
         if (!alias || visited.has(alias) || alias === NEXUS_ALIAS) break;
         if (alias === 'speech-synthesis-agent') {
-          throw new ValidationError('/tts is not on /v1/chat/completions; speech-synthesis-agent has no persistent server');
+          const slashOrLock = Boolean(hard.effectiveAlias === alias);
+          if (!slashOrLock) {   // never auto-route into TTS; only /tts or lock_alias
+            visited.add(alias); hops.push(alias);
+            notes.push(stripControls('speech-synthesis-agent skipped (not slash-selected)'));
+            continue;
+          }
+          hops.push(alias);
+          return await this.completeSpeech(request, response, body, issuedSession, cors, hops);
         }
         const slashOrLock = Boolean(hard.effectiveAlias && hard.effectiveAlias === alias);
         const native = NATIVE_CHAT[alias];

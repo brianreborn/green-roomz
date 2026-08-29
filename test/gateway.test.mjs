@@ -771,13 +771,34 @@ test('/vision without an image is 400', async (t) => {
   assert.equal(result.status, 400);
 });
 
-test('/tts on chat completions is 400', async (t) => {
-  const { server } = await withServer(t, {}, { stubEnsure: true, fetchImpl: async () => jsonFetch({ choices: [{ message: { content: 'no' } }] }) });
+test('/tts synthesizes audio via the piper one-shot and returns it as an audio message', async (t) => {
+  const { writeFileSync } = await import('node:fs');
+  const { server, gateway, registry } = await withServer(t, {}, { stubEnsure: true });
+  registry.setStatus('speech-synthesis-agent', 'cold');
+  let stdinText = '';
+  gateway.execFileImpl = (cmd, args, opts, cb) => {
+    const out = args[args.indexOf('--output_file') + 1];
+    return {
+      stdin: { end(t) { stdinText = t; writeFileSync(out, Buffer.from('RIFF0000WAVEfmt ')); queueMicrotask(() => cb(null)); } },
+    };
+  };
   const result = await request(server, {
-    path: '/v1/chat/completions',
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: { messages: [{ role: 'user', content: '/tts hello' }] },
+    path: '/v1/chat/completions', method: 'POST', headers: { 'content-type': 'application/json' },
+    body: { messages: [{ role: 'user', content: '/tts hello there' }] },
+  });
+  assert.equal(result.status, 200);
+  assert.equal(result.headers['x-green-roomz-effective-alias'], 'speech-synthesis-agent');
+  assert.equal(stdinText, 'hello there');
+  assert.match(result.body.choices[0].message.audio.data, /^data:audio\/wav;base64,/);
+  assert.equal(result.body.choices[0].message.audio.transcript, 'hello there');
+});
+
+test('/tts with no text is a 400', async (t) => {
+  const { server, registry } = await withServer(t, {}, { stubEnsure: true });
+  registry.setStatus('speech-synthesis-agent', 'cold');
+  const result = await request(server, {
+    path: '/v1/chat/completions', method: 'POST', headers: { 'content-type': 'application/json' },
+    body: { messages: [{ role: 'user', content: '/tts' }] },
   });
   assert.equal(result.status, 400);
 });

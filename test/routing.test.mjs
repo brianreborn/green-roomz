@@ -71,10 +71,12 @@ test('/router pins the resident nexus', () => {
   assert.equal(routed.reason, 'slash_router');
 });
 
-test('/tts is rejected on the chat path', () => {
-  assert.throws(() => routeRequest({
+test('/tts routes to speech-synthesis-agent (piper is run as a one-shot by the gateway)', () => {
+  const routed = routeRequest({
     messages: [{ role: 'user', content: '/tts say hello' }],
-  }, registry()), ValidationError);
+  }, registry());
+  assert.equal(routed.effectiveAlias, 'speech-synthesis-agent');
+  assert.equal(routed.reason, 'slash_tts');
 });
 
 test('an explicit text model remains selected across mixed text history', () => {

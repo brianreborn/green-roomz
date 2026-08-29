@@ -296,7 +296,7 @@ export function hardRuleRoute(body, registry) {
     throw new ValidationError('/audio requires an attached audio part');
   }
   if (slash?.token === 'tts' || slash?.token === 'speak') {
-    throw new ValidationError('/tts is not on /v1/chat/completions; speech-synthesis-agent has no persistent server');
+    return finish(body, registry, 'speech-synthesis-agent', 'slash_tts', modality);
   }
   if (modality.image && modality.audio) {
     if (slash?.token === 'vision') return finish(body, registry, 'vision-layout-agent', 'slash_vision', modality);
