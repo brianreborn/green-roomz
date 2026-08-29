@@ -120,6 +120,9 @@ function finish(body, registry, alias, reason, modality) {
   };
 }
 
+/** Model ids that mean "route this for me" rather than pinning a specific agent. */
+const AUTO_MODEL_IDS = new Set(['auto', 'green-roomz', 'green-roomz-auto', 'default', 'gpt-4', 'gpt-4o', 'gpt-3.5-turbo']);
+
 const SLASH_ALIASES = Object.freeze({
   vision: 'vision-layout-agent',
   audio: 'audio-transcription-agent',
@@ -312,12 +315,14 @@ export function hardRuleRoute(body, registry) {
     return finish(body, registry, MONITOR_ALIAS, 'mailbox', modality);
   }
   const requested = body?.model ?? null;
-  if (requested) {
+  // `model: "auto"` / "green-roomz" / "default" => let the nexus route (for OpenAI
+  // clients that must send some model id but want routing, e.g. Continue).
+  if (requested && !AUTO_MODEL_IDS.has(String(requested).toLowerCase())) {
     const reason = body.lock_alias === true ? 'lock_alias' : 'requested_alias';
-    if (requested === NEXUS_ALIAS && registry.agents.has(requested) && registry.status(requested).state !== 'unavailable') {
+    if (requested === NEXUS_ALIAS && body.lock_alias === true && registry.agents.has(requested) && registry.status(requested).state !== 'unavailable') {
       return finish(body, registry, requested, reason, modality);
     }
-    if (isRoutableAlias(registry, requested)) {
+    if (requested !== NEXUS_ALIAS && isRoutableAlias(registry, requested)) {
       return finish(body, registry, requested, reason, modality);
     }
   }

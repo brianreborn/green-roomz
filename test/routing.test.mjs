@@ -207,3 +207,17 @@ test('stripSlashCommand replaces array text parts', () => {
   assert.equal(stripped.messages[1].content[0].text, 'hello');
   assert.equal(stripped.messages[1].content[1].text, 'keep');
 });
+
+test('model "auto" / OpenAI ids route via the nexus instead of pinning', () => {
+  for (const model of ['auto', 'green-roomz', 'gpt-4o', 'default']) {
+    const r = routeRequest({ model, messages: [{ role: 'user', content: 'hi' }] }, registry());
+    assert.equal(r.reason, 'nexus', `${model} should be nexus-routed`);
+  }
+});
+
+test('model "tool-router-agent" without lock_alias is nexus-routed, not pinned to the 0.5B', () => {
+  const r = routeRequest({ model: 'tool-router-agent', messages: [{ role: 'user', content: 'hi' }] }, registry());
+  assert.equal(r.reason, 'nexus');
+  const pinned = routeRequest({ model: 'tool-router-agent', lock_alias: true, messages: [{ role: 'user', content: 'hi' }] }, registry());
+  assert.equal(pinned.effectiveAlias, 'tool-router-agent');
+});
