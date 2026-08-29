@@ -177,7 +177,9 @@ test('visited blocks looping the same specialist', async (t) => {
     ready: ['tool-router-agent', 'qwenstral-code-speculator', 'general-text-speculator'],
     fetchImpl: nexusThenSpecialists(
       [{ route: 'qwenstral-code-speculator', confidence: 1, reason: 'always code' }],
-      () => sseFetch('HANDOFF {"reason":"not my job","suggest":"qwenstral-code-speculator"}'),
+      (url) => (String(url).includes(':18184')
+        ? sseFetch('sure, hi')                                                   // general-text answers
+        : sseFetch('HANDOFF {"reason":"not my job","suggest":"qwenstral-code-speculator"}')), // code hands off
     ),
   });
   const original = processes.ensure;
@@ -186,6 +188,7 @@ test('visited blocks looping the same specialist', async (t) => {
     if (ensured.filter((alias) => alias === agent.alias && alias !== 'tool-router-agent').length > 1) {
       throw new Error(`loop ensure ${agent.alias}`);
     }
+    if (['tool-router-agent', 'general-text-speculator'].includes(agent.alias)) return { alias: agent.alias, state: 'ready' };
     return original(agent);
   };
   const result = await request(server, {
@@ -194,9 +197,10 @@ test('visited blocks looping the same specialist', async (t) => {
     headers: { 'content-type': 'application/json' },
     body: { messages: [{ role: 'user', content: 'hello' }] },
   });
-  assert.equal(result.status, 422);
-  assert.equal(result.body.error.type, 'route_exhausted');
-  assert.ok(result.body.error.visited.includes('qwenstral-code-speculator'));
+  // The same specialist is never tried twice, and instead of failing closed the
+  // turn lands on the general-text fallback.
+  assert.equal(result.status, 200);
+  assert.equal(result.headers['x-green-roomz-effective-alias'], 'general-text-speculator');
   assert.equal(ensured.filter((alias) => alias === 'qwenstral-code-speculator').length, 1);
 });
 

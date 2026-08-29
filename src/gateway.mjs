@@ -874,11 +874,12 @@ export class Gateway {
         return deliverPeek({ peek, request, response, body: payload, headers });
       }
 
-      // Nothing was picked / everything was cold. Prefer a real answer from the
-      // general-text fallback (cold-start it) over echoing the 0.5B router.
-      if (!peekedSpecialist && !visited.has(FALLBACK_ALIAS)
-          && isRoutableAlias(this.registry, FALLBACK_ALIAS)
-          && aliasCanAdmit(this.registry, FALLBACK_ALIAS, this.processes)) {
+      // The loop ended without a real answer (nothing picked, everything cold,
+      // a handoff with nowhere to go, a peek timeout, hop budget spent). The
+      // general-text model is the safety net for ANY of those - a chat request
+      // always gets a chat answer. This is unconditional: a prior peek/handoff
+      // does not disqualify the fallback.
+      if (!visited.has(FALLBACK_ALIAS) && isRoutableAlias(this.registry, FALLBACK_ALIAS)) {
         try {
           hops.push(FALLBACK_ALIAS);
           const agent = this.registry.get(FALLBACK_ALIAS);
@@ -891,10 +892,13 @@ export class Gateway {
           for (const [key, value] of Object.entries(headers)) response.setHeader(key, value);
           return await proxyJson({ request, response, body: payload, target: `http://127.0.0.1:${agent.port}${path}`, config: this.manifest.gateway, signal: request.abortSignal, fetchImpl: this.fetchImpl });
         } catch (error) {
+          if (response.writableEnded || response.headersSent) throw error;
           notes.push(stripControls(`text fallback failed: ${error?.message ?? error}`));
         }
       }
-      if (!peekedSpecialist && this.registry.agents.has(NEXUS_ALIAS) && this.registry.status(NEXUS_ALIAS).state !== 'unavailable') {
+      // General-text is genuinely gone (no model file). The resident 0.5B is a
+      // router, not a chat model - only worth it if it is literally all we have.
+      if (this.registry.agents.has(NEXUS_ALIAS) && this.registry.status(NEXUS_ALIAS).state !== 'unavailable') {
         return await this.completeOnResident(request, response, body, issuedSession, cors, hops, 'resident_fallback');
       }
       this.observeHop('route_exhausted', hops[hops.length - 1] ?? '', { ticket: issuedSession, payload: { hops: hops.slice(), visited: [...visited] } });
