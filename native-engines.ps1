@@ -22,7 +22,7 @@ Write-Host "$Hourglass Initializing async Vulkan abstraction layer..." -Foregrou
 
 # Use WScript.Shell COM routing to spin up a truly unprivileged, raw background thread process
 $WshShell = New-Object -ComObject WScript.Shell
-$ExecCmd = "`"$BinaryPath`" -hf Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF:Q4_K_M --host 127.0.0.1 --port 8081 --n-gpu-layers 99"
+$ExecCmd = "`"$BinaryPath`" -hf Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF:Q4_K_M --host 127.0.0.1 --port 8081 --n-gpu-layers 99 --threads 4 --batch-size 512 --ubatch-size 512 --split-mode none"
 $WshShell.Run($ExecCmd, 0, $false)
 
 Write-Host "$Gear Streaming weights from HF and warming VRAM. Waiting for port 8081..." -ForegroundColor Yellow
@@ -31,7 +31,7 @@ $RetryCount = 0
 $MaxRetries = 480 # Up to 120 seconds (250ms polling intervals)
 
 while (-not $PortBound -and $RetryCount -lt $MaxRetries) {
-    $CheckPort = Get-NetTCPConnection -LocalPort 8081 -ErrorAction SilentlyContinue
+    $CheckPort = Get-NetTCPConnection -LocalPort 8081 -State Listen -ErrorAction SilentlyContinue
     if ($CheckPort) {
         $PortBound = $true
     } else {
