@@ -216,11 +216,24 @@ export class ProcessManager {
     // Starting a specialist must never stop or unload it — two llama-server
     // processes at once is required (nexus :8187 CPU + specialist vulkan).
     if (this.starting.has(agent.alias)) return this.starting.get(agent.alias);
-    const promise = Promise.resolve()
+
+    const bringUp = async () => {
       // Make room before starting another specialist on a memory-tight box:
       // evict the LRU warm one now rather than waiting for the idle sweep.
-      .then(() => (isResidentAgent(agent) ? null : this.evictForNewSpecialist(agent)))
-      .then(() => this.start(agent, { signal }));
+      if (!isResidentAgent(agent)) await this.evictForNewSpecialist(agent);
+      return this.start(agent, { signal });
+    };
+    // The resident nexus starts immediately (it runs alongside everything).
+    // Every other cold start is serialized on one chain - two big models
+    // mmapping/allocating at once is the thrash that locked the box up before.
+    let promise;
+    if (isResidentAgent(agent)) {
+      promise = bringUp();
+    } else {
+      const prev = this.coldStartChain ?? Promise.resolve();
+      promise = prev.catch(() => {}).then(bringUp);
+      this.coldStartChain = promise.catch(() => {});
+    }
     this.starting.set(agent.alias, promise.finally(() => this.starting.delete(agent.alias)));
     return this.starting.get(agent.alias);
   }
@@ -307,6 +320,15 @@ export class ProcessManager {
       freeMemoryBytes = this.hostAdapter?.sampleResources?.()?.freeMemoryBytes;
     } catch {
       freeMemoryBytes = undefined;
+    }
+    // Hard floor: refuse to spawn into a box that is already about to thrash,
+    // even after eviction. A clean 503 beats an OOM/lockup. Configurable.
+    const minFree = this.manifest.gateway?.min_free_bytes ?? 384 * 1024 * 1024;
+    if (Number.isFinite(freeMemoryBytes) && freeMemoryBytes < minFree) {
+      throw new UnavailableError(
+        `${agent.alias}: host memory critically low (${Math.round(freeMemoryBytes / 1e6)} MB free < ${Math.round(minFree / 1e6)} MB floor) - retry shortly`,
+        { code: 'memory_floor' },
+      );
     }
     const includeDraft = shouldAttachDraft(agent);
     for (const profile of this.profilesFor(agent)) {

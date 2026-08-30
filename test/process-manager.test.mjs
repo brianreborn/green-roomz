@@ -388,3 +388,35 @@ test('checkpoint/restore: save the slot KV to a named file, restore it, checkpoi
 
   rmSync(dir, { recursive: true, force: true });
 });
+
+test('anti-thrash: cold-starts are serialized and a critically-low box gets a 503, not an OOM', async () => {
+  const manifest = sampleManifest();
+  const registry = new AgentRegistry(manifest);
+  registry.setStatus('qwenstral-code-speculator', 'cold');
+  registry.setStatus('general-text-speculator', 'cold');
+  let free = 200 * 1024 * 1024;   // critically low
+  let inFlight = 0; let maxInFlight = 0;
+  const manager = new ProcessManager({
+    manifest, registry,
+    hostAdapter: { applyPriority() {}, sampleResources: () => ({ freeMemoryBytes: free }) },
+    spawnImpl: () => new FakeChild(),
+    fetchImpl: async () => ({ ok: true }),
+  });
+  const realStartProfile = manager.startProfile.bind(manager);
+  manager.startProfile = async (...args) => {
+    inFlight += 1; maxInFlight = Math.max(maxInFlight, inFlight);
+    try { await new Promise((r) => setTimeout(r, 15)); return await realStartProfile(...args); }
+    finally { inFlight -= 1; }
+  };
+
+  await assert.rejects(
+    () => manager.ensure(manifest.agents.find((a) => a.alias === 'qwenstral-code-speculator')),
+    (e) => /critically low/.test(e.message) && e.status === 503,
+  );
+
+  free = 40 * 1024 ** 3;   // plenty now
+  const a = manager.ensure(manifest.agents.find((x) => x.alias === 'qwenstral-code-speculator'));
+  const b = manager.ensure(manifest.agents.find((x) => x.alias === 'general-text-speculator'));
+  await Promise.all([a, b]);
+  assert.equal(maxInFlight, 1, 'never two specialists cold-starting at once');
+});

@@ -76,6 +76,7 @@ export const ORCHESTRATOR_BOUNDED_KEYS = Object.freeze([
   'idle_evict_ms',
   'checkpoint_dir',
   'checkpoint_keep',
+  'min_free_bytes',
   'suspend_evicted',
   'max_warm_specialists',
   'headers_timeout_ms',
