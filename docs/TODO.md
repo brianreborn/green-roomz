@@ -132,10 +132,11 @@ Analysis in `docs/model-lifecycle.md`. Built: SIGSTOP/SIGCONT, `coldStartChain`,
 ## Council / variants
 
 Built: variants expansion, `pinned`, council fan-out, 3 judges, scorecard,
-`council-stats`. Ideas list also in `docs/council.md` §"Ideas not yet built".
+`council-stats`, **`/council` slash + `/council on|off` session default**
+(commits 9e671ba, a5664fe), **weighted field-vote from the scorecard** (09c527c),
+**`disagreements.jsonl`** split-turn log (c3a4c81), **`deploy` compiles + `--prime`**
+(3408903). Ideas list also in `docs/council.md`.
 
-- [ ] **`/council` slash command** + session default (`/council on qwen,internvl`).
-      Currently council is `body.council` JSON only.
 - [ ] **Download alt vision GGUFs** to actually populate the vision variants:
       InternVL2-2B, Qwen2-VL-2B, SmolVLM2-2.2B, moondream2. Only qwen2.5-vl-3b on
       disk today, so council-of-vision has nothing to fan out to.
@@ -144,11 +145,9 @@ Built: variants expansion, `pinned`, council fan-out, 3 judges, scorecard,
       are wired, the dedicated profile is not).
 - [ ] **Cascade / escalate** — run the cheap variant alone; convene the council
       only when its `/confidence` is low or its JSON fails the schema.
-- [ ] **Weighted vote** — weight each variant by its running scorecard agreement.
 - [ ] **Cross-host council** — fan out to note9 + qodesh + shalom over the peer
       allowlist. Blocked on host bring-ups (#2-#5).
 - [ ] **Judge = security-monitor** for policy-sensitive turns.
-- [ ] **Disagreement-as-signal** — log split turns to a fine-tune / human-review queue.
 - [ ] **Checkpoint the winner's KV** (`snapshotModel`) so the next similar request warm-starts from it.
 - [ ] **Council over profiles** (same model, `vulkan-all` vs `cpu-4`) to catch a quant/offload bug.
 - [ ] **N-of-M quorum** — return once M agree, cancel the rest.
