@@ -128,8 +128,15 @@ green-roomz subtree. It lives in green-roomz now because that is where the
 prompts are served and the kernel-faith machinery already sits; moving the
 fragment sources up to green-agentz is a follow-up (see `docs/TODO.md`).
 
+## Try it
+
+`skills/green-stock-prompt/` is a walk-through skill: compile, read what an agent
+runs, move an alias in/out of `MFL_ALIASES`, add a frame
+(`references/example-frame.md` is a ready "Brevity" layer), `--check`, prime.
+
 ## See also
 
+- `skills/green-stock-prompt/SKILL.md` — the hands-on version of this doc
 - Architecture plates (rendered): https://claude.ai/code/artifact/c8af7585-7538-498f-bb1e-a7459e69e319
 - `green-agentz/docs/memory-feedback-loop-requirements.md` — MFL-1..25
 - memory `stock-prompt-compile-intent`

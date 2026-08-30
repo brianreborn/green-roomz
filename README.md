@@ -37,11 +37,17 @@ The gateway listens on `127.0.0.1:8080` by default. Set `GREEN_ROOMZ_API_KEY` to
 
 ```text
 green-roomz validate [--manifest path]
+green-roomz compile [--manifest path] [--check]
 green-roomz serve [--manifest path] [--host address] [--port number]
 green-roomz benchmark [alias|all] [--manifest path] [--quick] [--force]
 green-roomz deploy [--manifest path] [--quick]
 green-roomz fingerprint
 ```
+
+`compile` writes the layered "stock" system prompts to `build/prompts/` (agency /
+memory-feedback-loop / confidence frames + each agent kernel). See
+[docs/stock-prompts.md](docs/stock-prompts.md) and the hands-on skill
+[skills/green-stock-prompt/](skills/green-stock-prompt/SKILL.md).
 
 Benchmarking never runs on every request. Results are cached by host fingerprint, driver/runtime identity, agent manifest digest, artifact identity, and candidate profile. A changed fingerprint causes requalification.
 
