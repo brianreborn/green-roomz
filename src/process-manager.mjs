@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
-import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { UnavailableError } from './errors.mjs';
 import { sleep } from './util.mjs';
 import { agentFootprintBytes, headroomBytes, profileAdmitted } from './memory.mjs';
@@ -136,6 +136,11 @@ export class ProcessManager {
     // Disk-backed KV checkpoints. Off unless a dir is configured.
     this.checkpointDir = g.checkpoint_dir ?? process.env.GREEN_ROOMZ_CHECKPOINT_DIR ?? null;
     this.checkpointKeep = g.checkpoint_keep ?? 3;
+    // `(alias) -> hex sha of the agent's current compiled stock prompt`, or null.
+    // Injected at serve time. When set, a cold start whose `default` prime
+    // snapshot still matches is restored so the model wakes holding its stock
+    // prompt instead of an empty context. See `green-roomz prime`.
+    this.stockPromptSha = null;
   }
 
   checkpointPathFor(alias) {
@@ -169,7 +174,7 @@ export class ProcessManager {
    * The descriptor is tiny; the only real payload is the .bin. Restore anywhere
    * the same binary + GGUF exist.
    */
-  async snapshotModel(alias, tag = String(Date.now())) {
+  async snapshotModel(alias, tag = String(Date.now()), extra = {}) {
     const rec = this.processes.get(alias);
     if (!this.checkpointDir || !rec || rec.child.exitCode !== null) return null;
     const agent = this.manifest.agents.find((a) => a.alias === alias);
@@ -182,10 +187,37 @@ export class ProcessManager {
       data: { model: agent.model, bytes: artifactSizeBytes(agent.model), projector: agent.projector ?? null },
       profileId: rec.profileId,
       state: kv ? kv.filename : null,
+      ...extra,
     };
     const file = path.join(this.checkpointPathFor(alias), `${tag}.snapshot.json`);
     try { writeFileSync(file, JSON.stringify(descriptor, null, 2)); } catch { return null; }
     return { ...descriptor, descriptor: file };
+  }
+
+  /**
+   * On a cold start: if a `default` prime snapshot exists and still matches
+   * (same compiled stock prompt, same model, same runtime binary), restore its
+   * KV so the model wakes already holding its stock prompt. Best-effort — any
+   * mismatch or failure is silently skipped; prime is regenerated at deploy time.
+   */
+  async maybeRestoreDefault(agent, record) {
+    if (!this.checkpointDir || typeof this.stockPromptSha !== 'function') return false;
+    const descPath = path.join(this.checkpointPathFor(agent.alias), 'default.snapshot.json');
+    if (!existsSync(descPath)) return false;
+    let desc;
+    try { desc = JSON.parse(readFileSync(descPath, 'utf8')); } catch { return false; }
+    const want = this.stockPromptSha(agent.alias);
+    if (!want || desc?.prime?.promptSha !== want) return false;
+    if (desc?.data?.model && agent.model && desc.data.model !== agent.model) return false;
+    if (desc?.code?.command && record?.command && desc.code.command !== record.command) return false;
+    try {
+      const ok = await this.restoreModel(agent.alias, desc.state ?? 'default.bin');
+      if (ok) {
+        record.primed = true;
+        record.logs = `${record.logs}\n[prime] restored default KV (${want.slice(0, 12)})\n`.slice(-MAX_LOG_CHARS);
+      }
+      return ok;
+    } catch { return false; }
   }
 
   /** Restore a saved slot KV into a running model (default: its newest checkpoint). */
@@ -425,6 +457,7 @@ export class ProcessManager {
       await this.waitForReady(agent, record, signal);
       record.state = 'ready';
       this.registry.setStatus(agent.alias, 'ready', { pid: child.pid, profileId: profile.id });
+      await this.maybeRestoreDefault(agent, record).catch(() => {});
       return record;
     } catch (error) {
       await this.stopRecord(record);

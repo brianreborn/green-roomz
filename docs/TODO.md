@@ -64,10 +64,12 @@ Open:
       fall back to the raw kernel if frames are missing. `build/prompts/` is the
       committed snapshot, not read at runtime. `stockSystemPrompt()` exported
       from gateway.mjs. Verified live against the real manifest.
-- [ ] **Wire `prime`** (commit 4) — `green-roomz prime`: start each cognitive
-      agent with its compiled prompt, `n_predict:1` + `cache_prompt:true`,
-      `snapshotModel(alias,'default')`; descriptor records prompt SHA + llama
-      build id. `serve` restores `default.bin` on cold start when both match.
+- [x] **`prime`** (commit 4) — `green-roomz prime [--only a,b]`: ensure + one
+      `max_tokens:1` `cache_prompt:true` turn + `snapshotModel(alias,'default',
+      {prime:{promptSha}})`, then stop. `serve` sets `ProcessManager.stockPromptSha`;
+      `maybeRestoreDefault` restores `default.bin` on cold start when promptSha +
+      model + binary all match. Unit-tested; **live-verify on a host with a
+      runnable llama-server** (needs a model — not doable on the box that built this).
 - [x] **Kernel wart** — the shared `First line if this is NOT your job: HANDOFF …`
       preamble is now `policies/frames/handoff.md`, stripped from the four
       narrow-job kernels (code + 3 transducers). `safety.md` keeps its inline

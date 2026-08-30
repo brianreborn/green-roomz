@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { existsSync, mkdtempSync, readFileSync as rfs, rmSync, truncateSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync as rfs, rmSync, truncateSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { ProcessManager, orderProfiles, vulkanAllThreadCount, withVulkanAllThreads } from '../src/process-manager.mjs';
@@ -435,14 +435,55 @@ test('snapshotModel writes a code+data+config+state descriptor; the .bin is the 
     command: '/opt/llama-server', args: ['--port', '18183', '--model', '/m/code.gguf', '--no-warmup'],
     profileId: 'cpu-4', createdAt: Date.now(),
   });
-  const snap = await manager.snapshotModel(alias, 'snapA');
+  const snap = await manager.snapshotModel(alias, 'snapA', { prime: { promptSha: 'abc123' } });
   assert.equal(snap.code.command, '/opt/llama-server');
   assert.ok(snap.code.args.includes('--no-warmup'));
   assert.equal(snap.state, 'snapA.bin');            // the KV file
   assert.equal(snap.profileId, 'cpu-4');
+  assert.equal(snap.prime.promptSha, 'abc123');     // extra descriptor fields merge through
   assert.ok(existsSync(snap.descriptor));
   const d = JSON.parse(rfs(snap.descriptor, 'utf8'));
   assert.equal(d.alias, alias);
   assert.ok('model' in d.data);
+  assert.equal(d.prime.promptSha, 'abc123');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('maybeRestoreDefault: restores the default KV only when the prime snapshot still matches', async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'grz-prime-'));
+  const manifest = sampleManifest();
+  manifest.gateway.checkpoint_dir = dir;
+  const restoreCalls = [];
+  const manager = new ProcessManager({
+    manifest, registry: new AgentRegistry(manifest), spawnImpl() { throw new Error('no'); },
+    fetchImpl: async (url) => { if (/action=restore/.test(String(url))) restoreCalls.push(String(url)); return { ok: true, status: 200 }; },
+  });
+  const agent = manifest.agents.find((a) => a.alias === 'general-text-speculator');
+  const record = { alias: agent.alias, owned: true, resident: false, state: 'ready', child: new FakeChild(), command: '/opt/llama-server', logs: '' };
+  manager.processes.set(agent.alias, record);
+
+  // no resolver -> no restore
+  assert.equal(await manager.maybeRestoreDefault(agent, record), false);
+
+  const descDir = path.join(dir, agent.alias.replace(/[^a-z0-9-]/gi, '_'));
+  mkdirSync(descDir, { recursive: true });
+  const writeDesc = (obj) => writeFileSync(path.join(descDir, 'default.snapshot.json'), JSON.stringify(obj));
+
+  writeDesc({ state: 'default.bin', data: { model: agent.model }, code: { command: '/opt/llama-server' }, prime: { promptSha: 'MATCH' } });
+  manager.stockPromptSha = () => 'MATCH';
+  assert.equal(await manager.maybeRestoreDefault(agent, record), true);
+  assert.equal(restoreCalls.length, 1);
+  assert.equal(record.primed, true);
+
+  // stale prompt -> skipped
+  manager.stockPromptSha = () => 'DIFFERENT';
+  assert.equal(await manager.maybeRestoreDefault(agent, record), false);
+  assert.equal(restoreCalls.length, 1);
+
+  // wrong binary -> skipped
+  manager.stockPromptSha = () => 'MATCH';
+  writeDesc({ state: 'default.bin', data: { model: agent.model }, code: { command: '/other/llama-server' }, prime: { promptSha: 'MATCH' } });
+  assert.equal(await manager.maybeRestoreDefault(agent, record), false);
+
   rmSync(dir, { recursive: true, force: true });
 });

@@ -89,17 +89,20 @@ Selection: `MFL_ALIASES` / `HANDOFF_ALIASES` / `stockPromptLayers()` in
    node --input-type=module -e "import {loadManifest} from './src/config.mjs'; import {prepareInferenceBody} from './src/gateway.mjs'; const m=await loadManifest(); for (const a of m.agents.filter(x=>!x.variant_of)) { const b=prepareInferenceBody({messages:[{role:'user',content:'hi'}]},a); const s=b.messages[0]?.content||'(none)'; console.log(a.alias.padEnd(28), (s.match(/^# .+\$/gm)||[]).join(' | ')); }"
    ```
 
-7. **Prime the "default installation" (optional — not yet wired, `green-roomz
-   prime` lands in a later commit).**
+7. **Prime the "default installation" (optional).** Needs a checkpoint dir
+   (`gateway.checkpoint_dir` or `GREEN_ROOMZ_CHECKPOINT_DIR`) and a runnable
+   llama-server for each target.
    ```
-   node bin/green-roomz.mjs prime --only general-text-speculator,qwenstral-code-speculator
+   GREEN_ROOMZ_CHECKPOINT_DIR=./data/checkpoints \
+     node bin/green-roomz.mjs prime --only general-text-speculator,qwenstral-code-speculator
    ```
-   Starts each cognitive agent with its compiled prompt, runs one token
-   (`n_predict: 1`, `cache_prompt: true`), and snapshots the KV as
-   `<checkpoint_dir>/<alias>/default.bin` + `default.snapshot.json` (records the
-   prompt SHA and llama.cpp build id). `serve` restores it on cold start when
-   both still match — the model wakes holding its stock prompt, not an empty
-   context. Regenerate at deploy time; do not ship the `.bin`.
+   Starts each agent with its compiled prompt, runs one token
+   (`max_tokens: 1`, `cache_prompt: true`), snapshots the KV as
+   `<dir>/<alias_>/default.bin` + `default.snapshot.json` (records `prime.promptSha`,
+   the runtime command, and the model path), then stops it. `serve` restores it
+   on cold start when the prompt SHA, model, and binary all still match — the
+   model wakes holding its stock prompt, not an empty context. Regenerate at
+   deploy time; do not ship the `.bin`.
 
 ## Try it — the smallest loop
 

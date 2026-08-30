@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { loadManifest, loadDeclaredKernel } from '../src/config.mjs';
-import { compileManifestPrompts, stockPromptLayers } from '../src/compile-prompt.mjs';
+import { compileManifestPrompts, compileStockPrompt, stockPromptLayers, sha256 } from '../src/compile-prompt.mjs';
 import { AgentRegistry } from '../src/registry.mjs';
 import { ProcessManager } from '../src/process-manager.mjs';
 import { PolicyGate } from '../src/scheduler.mjs';
@@ -28,6 +28,7 @@ function usage() {
 Commands:
   validate [--manifest path]
   compile [--manifest path] [--check]   (write build/prompts/ stock system prompts)
+  prime [--manifest path] [--only a,b]  (snapshot each agent's stock-prompt KV as "default")
   serve [--manifest path] [--host address] [--port number]
   deploy [--manifest path] [--host address] [--port number] [--quick]
   benchmark [alias|all] [--manifest path] [--quick] [--force]
@@ -119,6 +120,9 @@ async function cmdServe(ctx, args) {
     await applyStoreWinners(ctx.processes, { objective });
   } catch {}
   const gateway = new Gateway(ctx);
+  // A cold start restores its `default` prime snapshot when it still matches the
+  // live compiled stock prompt — model wakes holding its system prompt.
+  ctx.processes.stockPromptSha = stockPromptShaResolver(ctx);
   // Launch harness may inject trusted peer IPs (e.g. deploy/adb-peer.mjs resolves
   // the one adb-attached Android device's shared-subnet IP). Repeatable.
   const injectedPeers = args.reduce((acc, a, i) => (a === '--allow-peer' && args[i + 1] ? [...acc, args[i + 1]] : acc), []);
@@ -235,6 +239,63 @@ async function cmdCompile(ctx, args) {
   console.error(`wrote build/prompts/ (${prompts.size} agents + index.json)`);
 }
 
+function stockPromptShaResolver(ctx) {
+  return (alias) => {
+    const agent = ctx.registry.agents.get(alias) ?? ctx.manifest.agents.find((a) => a.alias === alias);
+    if (!agent) return null;
+    const kernelText = loadDeclaredKernel(agent);
+    if (!kernelText) return null;
+    try { return sha256(compileStockPrompt(agent, { kernelText })); } catch { return null; }
+  };
+}
+
+async function cmdPrime(ctx, args) {
+  if (!ctx.processes.checkpointDir) {
+    console.error('prime needs a checkpoint dir — set gateway.checkpoint_dir or GREEN_ROOMZ_CHECKPOINT_DIR');
+    process.exitCode = 1;
+    return;
+  }
+  const only = argValue(args, '--only');
+  const onlySet = only ? new Set(only.split(',').map((s) => s.trim())) : null;
+  const targets = ctx.manifest.agents.filter((a) =>
+    a.runtime === 'llama_server' && !a.variant_of && loadDeclaredKernel(a)
+    && (!onlySet || onlySet.has(a.alias)));
+  if (!targets.length) {
+    console.error(onlySet ? `no primeable llama_server agents match --only ${only}` : 'no primeable llama_server agents');
+    return;
+  }
+  for (const agent of targets) {
+    const prompt = compileStockPrompt(agent, { kernelText: loadDeclaredKernel(agent) });
+    try {
+      await ctx.processes.ensure(agent);
+      const res = await fetch(`http://127.0.0.1:${agent.port}/v1/chat/completions`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          model: agent.alias,
+          messages: [{ role: 'system', content: prompt }, { role: 'user', content: '.' }],
+          max_tokens: 1,
+          temperature: 0,
+          stream: false,
+          cache_prompt: true,
+        }),
+        signal: AbortSignal.timeout(120_000),
+      });
+      await res.text();
+      const snap = await ctx.processes.snapshotModel(agent.alias, 'default', {
+        prime: { promptSha: sha256(prompt), bytes: Buffer.byteLength(prompt, 'utf8'), at: new Date().toISOString() },
+      });
+      console.error(snap?.state
+        ? `primed ${agent.alias} -> ${agent.alias.replace(/[^a-z0-9-]/gi, '_')}/${snap.state} (prompt ${sha256(prompt).slice(0, 12)})`
+        : `prime ${agent.alias}: snapshot failed (checkpoint save returned no file)`);
+    } catch (error) {
+      console.error(`prime ${agent.alias}: ${error.message}`);
+    } finally {
+      await ctx.processes.stop(agent.alias, { checkpoint: false }).catch(() => {});
+    }
+  }
+}
+
 async function cmdDeploy(ctx, args) {
   const objective = POLICIES[ctx.manifest.gateway.policy]?.objective ?? 'throughput';
   try {
@@ -269,6 +330,7 @@ async function main(argv) {
   if (command === 'benchmark') return cmdBenchmark(ctx, args);
   if (command === 'council-stats') return cmdCouncilStats(ctx, args);
   if (command === 'compile') return cmdCompile(ctx, args);
+  if (command === 'prime') return cmdPrime(ctx, args);
   if (command === 'serve') return cmdServe(ctx, args);
   if (command === 'deploy') return cmdDeploy(ctx, args);
   if (command === 'stop') {

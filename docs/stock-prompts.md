@@ -125,17 +125,22 @@ hot) and match the codebase's existing no-cache `loadDeclaredKernel` pattern.
 green-roomz prime [--manifest path] [--only alias,alias]
 ```
 
-For each primeable agent (`llama_server`, not resident, not the nexus): start it
-with its compiled stock prompt as the system message, run a single token
-(`n_predict: 1`, `cache_prompt: true` — needed for the primed KV to persist),
-then `snapshotModel(alias, 'default')`. Result:
-`<checkpoint_dir>/<alias>/default.bin` plus `default.snapshot.json`, whose
-descriptor records the compiled-prompt SHA and the llama.cpp build id.
+Needs a checkpoint dir (`gateway.checkpoint_dir` or `GREEN_ROOMZ_CHECKPOINT_DIR`).
+For each primeable agent (`llama_server`, non-variant, has a `system_policy`;
+`--only a,b` to narrow): `ensure()` it, POST one `/v1/chat/completions` turn with
+the compiled stock prompt as the system message, `max_tokens: 1`,
+`cache_prompt: true` (so the prompt tokens stay in the slot cache), then
+`snapshotModel(alias, 'default', { prime: { promptSha, bytes, at } })`. Result:
+`<checkpoint_dir>/<alias_>/default.bin` + `default.snapshot.json` — the descriptor
+carries `code` (runtime command + args), `data` (model path + size), and
+`prime.promptSha`. The agent is stopped afterward (`checkpoint: false`).
 
-On `serve`, after a cold start, if `default.snapshot.json` exists and both its
-prompt SHA and build id still match, `restoreModel` the KV — the model wakes
-already holding its stock prompt instead of an empty context. A mismatch is
-ignored; prime is regenerated at deploy time, not shipped.
+On `serve`, `ProcessManager.stockPromptSha` is set to a resolver over the live
+compiled prompts. After any cold start, `maybeRestoreDefault` restores
+`default.bin` **iff** `default.snapshot.json` exists and its `prime.promptSha`,
+`data.model`, and `code.command` all still match — the model wakes already
+holding its stock prompt instead of an empty context. Any mismatch or failure is
+silently skipped; prime is regenerated at deploy time, the `.bin` is not shipped.
 
 ## Where this belongs
 
