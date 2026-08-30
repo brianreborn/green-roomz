@@ -8,6 +8,8 @@ import {
 } from '../src/compile-prompt.mjs';
 import { loadManifest, loadDeclaredKernel } from '../src/config.mjs';
 import { MICROKERNEL_MAX_CHARS } from '../src/constants.mjs';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 test('stockPromptLayers: kernel-only for nexus and the critical agents', () => {
   assert.deepEqual(stockPromptLayers('tool-router-agent'), []);
@@ -78,4 +80,15 @@ test('compileManifestPrompts: every non-variant agent, index carries frame + age
   // the nexus compiled prompt stays within the microkernel bound
   assert.ok(index.agents['tool-router-agent'].bytes <= MICROKERNEL_MAX_CHARS);
   assert.deepEqual(index.agents['tool-router-agent'].layers, []);
+});
+
+test('build/prompts/ is committed fresh — run `green-roomz compile` if this fails', async () => {
+  const manifest = await loadManifest();
+  const { prompts, index } = compileManifestPrompts(manifest, loadDeclaredKernel);
+  const dir = fileURLToPath(new URL('../build/prompts/', import.meta.url));
+  const read = (name) => readFileSync(dir + name, 'utf8').replace(/\r\n/g, '\n');
+  for (const [alias, text] of prompts) {
+    assert.equal(read(`${alias}.md`), text, `build/prompts/${alias}.md is stale`);
+  }
+  assert.equal(read('index.json'), `${JSON.stringify(index, null, 2)}\n`, 'build/prompts/index.json is stale');
 });
