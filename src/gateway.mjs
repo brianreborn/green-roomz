@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { fieldVote, similarityVote, resolveJudgeChoice, judgePrompt } from './council.mjs';
+import { fieldVote, similarityVote, resolveJudgeChoice, judgePrompt, parseJsonLoose } from './council.mjs';
 import { AGENCY_ROLE, DEFAULT_FAITH, DEFAULT_FEAR, FALLBACK_ALIAS, MAX_SPECIALIST_HOPS, MONITOR_ALIAS, NEXUS_ALIAS, REBUKE_OP, UPSTREAM_MAX_BUFFER_BYTES, UPSTREAM_TIMEOUT_MS, YOLO_TOKEN } from './constants.mjs';
 import { loadDeclaredKernel } from './config.mjs';
 import { compileStockPrompt } from './compile-prompt.mjs';
@@ -77,7 +77,7 @@ export function parseCouncilRequest(body, registry) {
     }
   }
   if (!aliases || aliases.length < 2) return null;
-  return { aliases: [...new Set(aliases)], judge, parallel: spec.parallel };
+  return { aliases: [...new Set(aliases)], judge, parallel: spec.parallel, cascade: spec.cascade === true };
 }
 
 /** Normalize a Node remoteAddress (drops the v4-in-v6 prefix). */
@@ -641,10 +641,25 @@ export class Gateway {
 
     // Parallel only if every variant can admit without eviction; else serial
     // (each run evicts the previous - slow, but the memory-tight path).
-    const canParallel = spec.parallel ?? spec.aliases.every((a) => aliasCanAdmit(this.registry, a, this.processes) && this.registry.status(a).state === 'ready');
-    const candidates = canParallel
-      ? await Promise.all(spec.aliases.map(runOne))
-      : await spec.aliases.reduce(async (acc, a) => [...(await acc), await runOne(a)], Promise.resolve([]));
+    const runMany = async (list) => {
+      if (!list.length) return [];
+      const par = spec.parallel ?? list.every((a) => aliasCanAdmit(this.registry, a, this.processes) && this.registry.status(a).state === 'ready');
+      return par
+        ? Promise.all(list.map(runOne))
+        : list.reduce(async (acc, a) => [...(await acc), await runOne(a)], Promise.resolve([]));
+    };
+
+    // Cascade: run the base variant alone; convene the rest only if it looks doubtful.
+    const schemaExpected = body?.response_format?.type === 'json_schema' || body?.json_schema != null;
+    let candidates;
+    let escalated = null;
+    if (spec.cascade && spec.aliases.length > 1) {
+      const first = await runOne(spec.aliases[0]);
+      escalated = this.shouldEscalate(first, spec, schemaExpected);
+      candidates = escalated ? [first, ...(await runMany(spec.aliases.slice(1)))] : [first];
+    } else {
+      candidates = await runMany(spec.aliases);
+    }
 
     const usable = candidates.filter((c) => c.ok);
     const verdict = await this.judgeCouncil(spec.judge, latestUserMessageText(stripped), usable, request);
@@ -653,11 +668,11 @@ export class Gateway {
       ? JSON.stringify(verdict.consensus)
       : (usable.find((c) => c.alias === winnerAlias)?.content ?? '');
 
-    this.recordCouncil({ task: detectModalities(body).image ? 'vision' : 'text', spec, candidates, verdict, userText: latestUserMessageText(stripped) });
+    this.recordCouncil({ task: detectModalities(body).image ? 'vision' : 'text', spec, candidates, verdict, userText: latestUserMessageText(stripped), solo: escalated === false });
     this.sessions.setAgentAlias(issuedSession, winnerAlias);
 
-    const headers = this.routeHeaders(issuedSession, { requestedAlias: body.model ?? null, effectiveAlias: winnerAlias, reason: `council_${spec.judge}` }, cors, { hops: spec.aliases.join(',') });
-    headers['x-green-roomz-council'] = headerSafe(JSON.stringify({ judge: spec.judge, winner: winnerAlias, outlier: verdict.outlier, agreement: verdict.agreement }));
+    const headers = this.routeHeaders(issuedSession, { requestedAlias: body.model ?? null, effectiveAlias: winnerAlias, reason: `council_${spec.judge}${escalated === false ? '_solo' : ''}` }, cors, { hops: candidates.map((c) => c.alias).join(',') });
+    headers['x-green-roomz-council'] = headerSafe(JSON.stringify({ judge: spec.judge, winner: winnerAlias, outlier: verdict.outlier, agreement: verdict.agreement, ...(spec.cascade ? { cascade: true, escalated: escalated === true } : {}) }));
     return jsonResponse(response, usable.length ? 200 : 502, {
       id: `grz-council-${issuedSession}`,
       object: 'chat.completion',
@@ -670,6 +685,7 @@ export class Gateway {
         winner: winnerAlias,
         outlier: verdict.outlier,
         agreement: verdict.agreement,
+        ...(spec.cascade ? { cascade: true, escalated: escalated === true } : {}),
         ...(spec.judge === 'field-vote' ? { votes: verdict.votes, abstained: verdict.abstained } : {}),
       },
     }, headers);
@@ -699,6 +715,16 @@ export class Gateway {
       }
       return weights;
     } catch { return {}; }
+  }
+
+  /** Cascade gate: does this lone answer warrant convening the full council? */
+  shouldEscalate(result, spec, schemaExpected) {
+    if (!result?.ok) return true;
+    if (spec.judge === 'field-vote' || schemaExpected) {
+      const j = parseJsonLoose(result.content);
+      if (!j || typeof j !== 'object' || Array.isArray(j)) return true;
+    }
+    return false;
   }
 
   async judgeCouncil(judge, userText, usable, request) {
@@ -739,13 +765,14 @@ export class Gateway {
     }
   }
 
-  recordCouncil({ task, spec, candidates, verdict, userText }) {
+  recordCouncil({ task, spec, candidates, verdict, userText, solo = false }) {
     if (!this.councilDir) return;
     try {
       mkdirSync(this.councilDir, { recursive: true });
       const row = {
-        ts: Date.now(), task, judge: spec.judge, aliases: spec.aliases,
+        ts: Date.now(), task, judge: spec.judge, aliases: candidates.map((c) => c.alias),
         winner: verdict.winner, outlier: verdict.outlier, agreement: verdict.agreement,
+        ...(solo ? { solo: true } : {}),
         results: candidates.map((c) => ({
           alias: c.alias, ok: c.ok, ms: c.ms,
           verdict: c.alias === verdict.winner ? 'winner' : c.alias === verdict.outlier ? 'outlier' : (c.ok ? 'agreed' : 'failed'),

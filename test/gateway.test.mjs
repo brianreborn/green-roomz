@@ -1057,6 +1057,44 @@ test('council: /council on sets a session default that fans out later turns', as
   assert.equal(afterOff.body.council, undefined, 'council default cleared');
 });
 
+test('council: cascade runs the base variant alone when its JSON is clean, escalates when it is not', async (t) => {
+  const build = async (baseAnswer) => {
+    const manifest = sampleManifest();
+    const vl = manifest.agents.find((a) => a.alias === 'vision-layout-agent');
+    manifest.agents.push({ ...vl, alias: 'vision-layout-agent@b', variant_of: 'vision-layout-agent', port: 18281, model: '/tmp/b.gguf' });
+    manifest.agents.push({ ...vl, alias: 'vision-layout-agent@c', variant_of: 'vision-layout-agent', port: 18282, model: '/tmp/c.gguf' });
+    const registry = await new AgentRegistry(manifest).inspect();
+    for (const a of ['vision-layout-agent', 'vision-layout-agent@b', 'vision-layout-agent@c', 'tool-router-agent']) registry.setStatus(a, 'ready');
+    const processes = new ProcessManager({ manifest, registry, spawnImpl() { throw new Error('no'); } });
+    processes.ensure = async (agent) => ({ alias: agent.alias, state: 'ready' });
+    const hits = [];
+    const gateway = new Gateway({
+      manifest, registry, processes, sessions: new SessionLedger(), policy: new PolicyGate('maximize'),
+      fetchImpl: async (url) => {
+        const port = Number(String(url).match(/:(\d+)\//)[1]);
+        hits.push(port);
+        return jsonFetch({ choices: [{ message: { role: 'assistant', content: port === 18181 ? baseAnswer : '{"brand":"Acme"}' } }] });
+      },
+    });
+    const server = await gateway.listen('127.0.0.1', 0);
+    t.after(() => server.close());
+    const res = await request(server, {
+      path: '/v1/chat/completions', method: 'POST', headers: { 'content-type': 'application/json' },
+      body: { council: { of: 'vision-layout-agent', cascade: true }, messages: [{ role: 'user', content: 'extract brand' }] },
+    });
+    return { res, hits };
+  };
+
+  const clean = await build('{"brand":"Acme"}');
+  assert.equal(clean.res.body.council.escalated, false);
+  assert.equal(clean.res.body.council.variants.length, 1);
+  assert.deepEqual(clean.hits, [18181]); // only the base variant was called
+
+  const dirty = await build('sorry, I cannot read the label');
+  assert.equal(dirty.res.body.council.escalated, true);
+  assert.equal(dirty.res.body.council.variants.length, 3);
+});
+
 test('council: a split turn (agreement < 0.6) is logged to disagreements.jsonl', async (t) => {
   const { mkdtempSync, readFileSync, existsSync } = await import('node:fs');
   const os = await import('node:os');

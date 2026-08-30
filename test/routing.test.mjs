@@ -211,21 +211,21 @@ test('stripSlashCommand replaces array text parts', () => {
 
 test('parseCouncilArgs: pulls targets / judge / parallelism off the front, leaves the prompt', () => {
   assert.deepEqual(parseCouncilArgs('vision-layout-agent similarity what brand is this'),
-    { targets: ['vision-layout-agent'], judge: 'similarity', parallel: undefined, rest: 'what brand is this' });
+    { targets: ['vision-layout-agent'], judge: 'similarity', parallel: undefined, cascade: false, rest: 'what brand is this' });
   assert.deepEqual(parseCouncilArgs('code,general-text-speculator serial refactor it'),
-    { targets: ['qwenstral-code-speculator', 'general-text-speculator'], judge: null, parallel: false, rest: 'refactor it' });
+    { targets: ['qwenstral-code-speculator', 'general-text-speculator'], judge: null, parallel: false, cascade: false, rest: 'refactor it' });
   // a bare verb is not a target — the whole thing is the prompt
   assert.deepEqual(parseCouncilArgs('extract the label fields as JSON'),
-    { targets: null, judge: null, parallel: undefined, rest: 'extract the label fields as JSON' });
+    { targets: null, judge: null, parallel: undefined, cascade: false, rest: 'extract the label fields as JSON' });
   // judge-first, no target
   assert.deepEqual(parseCouncilArgs('field-vote read this'),
-    { targets: null, judge: 'field-vote', parallel: undefined, rest: 'read this' });
+    { targets: null, judge: 'field-vote', parallel: undefined, cascade: false, rest: 'read this' });
 });
 
 test('parseSlashCommand: /council carries a council spec and strips to the prompt', () => {
   const p = parseSlashCommand({ messages: [{ role: 'user', content: '/council vision-layout-agent similarity what is this' }] });
   assert.equal(p.token, 'council');
-  assert.deepEqual(p.council, { targets: ['vision-layout-agent'], judge: 'similarity', parallel: undefined });
+  assert.deepEqual(p.council, { targets: ['vision-layout-agent'], judge: 'similarity', parallel: undefined, cascade: false });
   assert.equal(p.rest, 'what is this');
   const stripped = stripSlashCommand({ messages: [{ role: 'user', content: '/council code refactor this' }] });
   assert.equal(stripped.messages[0].content, 'refactor this');
@@ -234,7 +234,7 @@ test('parseSlashCommand: /council carries a council spec and strips to the promp
 test('/council on|off toggles a session default; on + prompt also runs this turn', () => {
   const on = parseSlashCommand({ messages: [{ role: 'user', content: '/council on vision-layout-agent similarity' }] });
   assert.equal(on.setting, 'council');
-  assert.deepEqual(on.councilDefault, { targets: ['vision-layout-agent'], judge: 'similarity', parallel: undefined });
+  assert.deepEqual(on.councilDefault, { targets: ['vision-layout-agent'], judge: 'similarity', parallel: undefined, cascade: false });
   assert.equal(on.settingOnly, true);
   assert.equal(on.council, undefined);
 

@@ -174,9 +174,10 @@ export function parseCouncilArgs(rawRest) {
   let targets = null;
   let judge = null;
   let parallel;
-  for (let guard = 0; guard < 4 && rest; guard += 1) {
+  let cascade = false;
+  for (let guard = 0; guard < 5 && rest; guard += 1) {
     const { head, rest: next } = takeToken(rest);
-    if (!targets && !judge && parallel === undefined && looksLikeCouncilTarget(head)) {
+    if (!targets && !judge && parallel === undefined && !cascade && looksLikeCouncilTarget(head)) {
       targets = head.includes(',')
         ? head.split(',').map((t) => SLASH_ALIASES[t] ?? t)
         : [SLASH_ALIASES[head] ?? head];
@@ -185,9 +186,10 @@ export function parseCouncilArgs(rawRest) {
     }
     if (!judge && COUNCIL_JUDGE_TOKENS[head]) { judge = COUNCIL_JUDGE_TOKENS[head]; rest = next; continue; }
     if (parallel === undefined && (head === 'serial' || head === 'parallel')) { parallel = head === 'parallel'; rest = next; continue; }
+    if (!cascade && (head === 'cascade' || head === 'escalate')) { cascade = true; rest = next; continue; }
     break;
   }
-  return { targets, judge, parallel, rest };
+  return { targets, judge, parallel, cascade, rest };
 }
 
 function takeToken(rest) {
@@ -289,7 +291,7 @@ export function parseSlashCommand(body) {
     const { head, rest: afterHead } = takeToken(rawRest);
     const toggle = head === 'on' || head === 'off' ? head : null;
     const c = parseCouncilArgs(toggle ? afterHead : rawRest);
-    const spec = { targets: c.targets, judge: c.judge, parallel: c.parallel };
+    const spec = { targets: c.targets, judge: c.judge, parallel: c.parallel, cascade: c.cascade };
     const out = { token, alias: null, rest: c.rest, council: spec };
     if (toggle) {
       out.setting = 'council';

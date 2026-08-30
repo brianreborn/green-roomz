@@ -6,7 +6,7 @@
  */
 import { stripEscapes } from './util.mjs';
 
-function parseJsonLoose(text) {
+export function parseJsonLoose(text) {
   const t = stripEscapes(String(text ?? '')).trim().replace(/^```(?:json)?\s*|\s*```$/g, '');
   try { return JSON.parse(t); } catch {}
   const m = /\{[\s\S]*\}/.exec(t);

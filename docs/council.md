@@ -34,7 +34,14 @@ POST /v1/chat/completions
   "messages": [ ... image + "extract the label fields as JSON" ... ] }
 ```
 
-`council` = `true` (all variants of `model`) or `{ of, variants[], judge, parallel }`.
+`council` = `true` (all variants of `model`) or
+`{ of, variants[], judge, parallel, cascade }`.
+
+**Cascade** (`cascade: true` or `/council cascade …`): run the base variant
+alone first; convene the rest only if that answer is doubtful — an upstream
+error/empty, or (field-vote judge / `json_schema` requested) it doesn't parse to
+a JSON object. The cheap path records a `solo` scorecard row; the response
+carries `council.cascade` + `council.escalated`.
 
 ### `/council` slash — the same thing from any OpenAI client
 
@@ -101,8 +108,6 @@ human-review or fine-tune set.
 
 - **Cross-host council** — fan out to note9 + qodesh + shalom variants over the
   peer allowlist. Needs the host bring-ups (issues #2–#5).
-- **Cascade / escalate** — try the cheap variant alone; only convene the council
-  when its `/confidence` is low or its JSON fails the schema.
 - **Judge = the security-monitor** for policy-sensitive turns (it already
   observes hops; let it also adjudicate).
 - **Checkpoint the winner's KV** (`snapshotModel`) so the next similar request
