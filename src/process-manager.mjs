@@ -352,7 +352,12 @@ export class ProcessManager {
    * and anything currently starting are never touched. Keeps a 16 GB box from
    * drowning in mmap'd model files.
    */
-  /** Before a new specialist starts, drop LRU warm ones so at most maxWarm-1 remain. */
+  /**
+   * Before a new specialist starts, drop LRU warm ones so at most maxWarm-1
+   * remain, then WAIT for their sockets to actually close - a big model that
+   * mmaps GPU/host memory must be fully gone before the next one allocates, or
+   * the box OOMs on cold start. Eviction cannot be lazy here.
+   */
   async evictForNewSpecialist(incomingAlias) {
     const warm = [...this.processes.values()].filter((r) =>
       r.owned && !r.resident && r.alias !== incomingAlias
@@ -360,8 +365,24 @@ export class ProcessManager {
     if (warm.length < Math.max(1, this.maxWarmSpecialists)) return [];
     warm.sort((a, b) => (a.lastUsedAt ?? a.createdAt ?? 0) - (b.lastUsedAt ?? b.createdAt ?? 0));
     const drop = warm.slice(0, warm.length - Math.max(0, this.maxWarmSpecialists - 1));
+    const ports = drop.map((r) => this.manifest.agents.find((a) => a.alias === r.alias)?.port).filter(Boolean);
     await Promise.all(drop.map((r) => this.stop(r.alias)));
+    await this.waitForPortsFree(ports);
     return drop.map((r) => r.alias);
+  }
+
+  /** Poll until nothing answers on these loopback ports (evicted model fully released). */
+  async waitForPortsFree(ports, { timeoutMs = 8000 } = {}) {
+    if (!ports?.length) return;
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const alive = await Promise.all(ports.map(async (p) => {
+        try { await this.fetch(`http://127.0.0.1:${p}/health`, { signal: AbortSignal.timeout(400), headers: { connection: 'close' } }); return true; }
+        catch { return false; }
+      }));
+      if (!alive.some(Boolean)) return;
+      await sleep(150);
+    }
   }
 
   async sweepIdle(now = Date.now()) {
