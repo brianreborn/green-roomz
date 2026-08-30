@@ -93,6 +93,10 @@ winner to `default_variant` → drop the council. Auto-pruning a persistent
 outlier is **not** automatic (the outlier is sometimes the only one right); it
 is surfaced for the operator.
 
+**Disagreements** — a turn where `agreement < 0.6` is a hard case. Its prompt and
+every candidate answer are appended to `<council_dir>/disagreements.jsonl` for a
+human-review or fine-tune set.
+
 ## Ideas not yet built
 
 - **Cross-host council** — fan out to note9 + qodesh + shalom variants over the
@@ -101,8 +105,6 @@ is surfaced for the operator.
   when its `/confidence` is low or its JSON fails the schema.
 - **Judge = the security-monitor** for policy-sensitive turns (it already
   observes hops; let it also adjudicate).
-- **Disagreement as a signal** — a turn where the council splits is a hard case:
-  log the prompt for a fine-tune set or a human review queue.
 - **Checkpoint the winner's KV** (`snapshotModel`) so the next similar request
   warm-starts from the model that won last time.
 - **Council over profiles, not just variants** — same model, `vulkan-all` vs

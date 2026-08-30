@@ -1057,6 +1057,43 @@ test('council: /council on sets a session default that fans out later turns', as
   assert.equal(afterOff.body.council, undefined, 'council default cleared');
 });
 
+test('council: a split turn (agreement < 0.6) is logged to disagreements.jsonl', async (t) => {
+  const { mkdtempSync, readFileSync, existsSync } = await import('node:fs');
+  const os = await import('node:os');
+  const nodePath = await import('node:path');
+  const dir = mkdtempSync(nodePath.join(os.tmpdir(), 'grz-disagree-'));
+
+  const manifest = sampleManifest();
+  manifest.gateway.council_dir = dir;
+  const vl = manifest.agents.find((a) => a.alias === 'vision-layout-agent');
+  manifest.agents.push({ ...vl, alias: 'vision-layout-agent@b', variant_of: 'vision-layout-agent', port: 18281, model: '/tmp/b.gguf' });
+  manifest.agents.push({ ...vl, alias: 'vision-layout-agent@c', variant_of: 'vision-layout-agent', port: 18282, model: '/tmp/c.gguf' });
+  const registry = await new AgentRegistry(manifest).inspect();
+  for (const a of ['vision-layout-agent', 'vision-layout-agent@b', 'vision-layout-agent@c', 'tool-router-agent']) registry.setStatus(a, 'ready');
+  const processes = new ProcessManager({ manifest, registry, spawnImpl() { throw new Error('no'); } });
+  processes.ensure = async (agent) => ({ alias: agent.alias, state: 'ready' });
+
+  const answers = { 18181: '{"brand":"Acme"}', 18281: '{"brand":"Beta"}', 18282: '{"brand":"Gamma"}' }; // three-way split
+  const gateway = new Gateway({
+    manifest, registry, processes, sessions: new SessionLedger(), policy: new PolicyGate('maximize'),
+    fetchImpl: async (url) => jsonFetch({ choices: [{ message: { role: 'assistant', content: answers[Number(String(url).match(/:(\d+)\//)[1])] } }] }),
+  });
+  const server = await gateway.listen('127.0.0.1', 0);
+  t.after(() => server.close());
+
+  await request(server, {
+    path: '/v1/chat/completions', method: 'POST', headers: { 'content-type': 'application/json' },
+    body: { council: { of: 'vision-layout-agent' }, messages: [{ role: 'user', content: 'what brand is on the label' }] },
+  });
+
+  const file = nodePath.join(dir, 'disagreements.jsonl');
+  assert.ok(existsSync(file), 'disagreements.jsonl written');
+  const entry = JSON.parse(readFileSync(file, 'utf8').trim());
+  assert.ok(entry.agreement < 0.6);
+  assert.equal(entry.prompt, 'what brand is on the label');
+  assert.equal(entry.answers.length, 3);
+});
+
 test('council: a /council slash message triggers the fan-out (same as the JSON form)', async (t) => {
   const manifest = sampleManifest();
   const vl = manifest.agents.find((a) => a.alias === 'vision-layout-agent');

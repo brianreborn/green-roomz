@@ -653,7 +653,7 @@ export class Gateway {
       ? JSON.stringify(verdict.consensus)
       : (usable.find((c) => c.alias === winnerAlias)?.content ?? '');
 
-    this.recordCouncil({ task: detectModalities(body).image ? 'vision' : 'text', spec, candidates, verdict });
+    this.recordCouncil({ task: detectModalities(body).image ? 'vision' : 'text', spec, candidates, verdict, userText: latestUserMessageText(stripped) });
     this.sessions.setAgentAlias(issuedSession, winnerAlias);
 
     const headers = this.routeHeaders(issuedSession, { requestedAlias: body.model ?? null, effectiveAlias: winnerAlias, reason: `council_${spec.judge}` }, cors, { hops: spec.aliases.join(',') });
@@ -739,7 +739,7 @@ export class Gateway {
     }
   }
 
-  recordCouncil({ task, spec, candidates, verdict }) {
+  recordCouncil({ task, spec, candidates, verdict, userText }) {
     if (!this.councilDir) return;
     try {
       mkdirSync(this.councilDir, { recursive: true });
@@ -752,6 +752,15 @@ export class Gateway {
         })),
       };
       appendFileSync(path.join(this.councilDir, 'scores.jsonl'), JSON.stringify(row) + '\n');
+
+      // A split turn is a hard case — log it for a human review / fine-tune set.
+      if (typeof verdict.agreement === 'number' && verdict.agreement < 0.6) {
+        appendFileSync(path.join(this.councilDir, 'disagreements.jsonl'), JSON.stringify({
+          ts: row.ts, task, agreement: verdict.agreement, outlier: verdict.outlier,
+          prompt: String(userText ?? '').slice(0, 2000),
+          answers: candidates.map((c) => ({ alias: c.alias, ok: c.ok, content: String(c.content ?? '').slice(0, 2000) })),
+        }) + '\n');
+      }
     } catch { /* best effort */ }
   }
 
