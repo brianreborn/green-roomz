@@ -17,7 +17,6 @@ import { ValidationError } from './errors.mjs';
 import { digestObject, expandEnvironment, resolveManifestPath } from './util.mjs';
 import { readFileSync, existsSync } from 'node:fs';
 import { assertNexusKernelText, kernelBindingIssues } from './kernel-text.mjs';
-import { compileStockPrompt } from './compile-prompt.mjs';
 
 export { assertNexusKernelText, kernelBindingIssues };
 

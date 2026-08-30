@@ -59,11 +59,11 @@ Done:
 
 Open:
 
-- [ ] **Wire runtime** (commit 3b) — `injectSystemPolicy` / `withNexusPolicy`
-      prefer `build/prompts/<alias>.md` when the SHA matches `index.json`, else
-      fall back to `loadDeclaredKernel` (unchanged). A custom `system_policy`
-      always wins over a committed default compile. The `kernel-text.mjs`
-      extraction (3a) is staged, not yet committed.
+- [x] **Wire runtime** (commit 3b) — `injectSystemPolicy` / `withNexusPolicy`
+      compile the prompt fresh in-process (`compileStockPrompt` + `loadDeclaredKernel`);
+      fall back to the raw kernel if frames are missing. `build/prompts/` is the
+      committed snapshot, not read at runtime. `stockSystemPrompt()` exported
+      from gateway.mjs. Verified live against the real manifest.
 - [ ] **Wire `prime`** (commit 4) — `green-roomz prime`: start each cognitive
       agent with its compiled prompt, `n_predict:1` + `cache_prompt:true`,
       `snapshotModel(alias,'default')`; descriptor records prompt SHA + llama

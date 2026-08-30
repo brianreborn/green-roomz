@@ -317,21 +317,39 @@ test('nexus thinking is always off even if the client asked', () => {
   assert.equal(forced.chat_template_kwargs.enable_thinking, false);
 });
 
-test('system policy is prepended even when the client already sent a system message', () => {
+test('the compiled stock prompt is prepended, wrapping the kernel, even when the client already sent a system message', () => {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'grz-policy-'));
   const policyPath = path.join(dir, 'general-text.md');
   writeFileSync(policyPath, 'Be concise.\n');
   const agent = { alias: 'general-text-speculator', system_policy: policyPath };
   const added = prepareInferenceBody({ messages: [{ role: 'user', content: 'hi' }] }, agent);
   assert.equal(added.messages[0].role, 'system');
-  assert.equal(added.messages[0].content, 'Be concise.\n');
+  // general-text is a cognitive agent: agency + memory + confidence frames wrap the kernel
+  assert.match(added.messages[0].content, /^# Green-Roomz agent/);
+  assert.match(added.messages[0].content, /# Memory/);
+  assert.ok(added.messages[0].content.trimEnd().endsWith('Be concise.'));
   assert.equal(added.messages[1].content, 'hi');
   const kept = prepareInferenceBody({
     messages: [{ role: 'system', content: 'already' }, { role: 'user', content: 'hi' }],
   }, agent);
-  assert.equal(kept.messages[0].content, 'Be concise.\n');
+  assert.match(kept.messages[0].content, /^# Green-Roomz agent/);
   assert.equal(kept.messages[1].content, 'already');
   assert.equal(kept.messages.length, 3);
+});
+
+test('a transducer gets agency+confidence but no memory frame; the nexus gets its kernel alone', () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'grz-policy2-'));
+  const vp = path.join(dir, 'vision-layout.md');
+  writeFileSync(vp, '# vision-layout-agent\n\nOCR only.\n');
+  const vision = prepareInferenceBody({ messages: [] }, { alias: 'vision-layout-agent', system_policy: vp });
+  assert.match(vision.messages[0].content, /^# Green-Roomz agent/);
+  assert.match(vision.messages[0].content, /# Confidence/);
+  assert.equal(/# Memory/.test(vision.messages[0].content), false);
+
+  const np = path.join(dir, 'tool-router.md');
+  writeFileSync(np, '# tool-router-agent\n\nRoute only. Pick one AVAILABLE alias.\n');
+  const nexus = prepareInferenceBody({ messages: [] }, { alias: 'tool-router-agent', system_policy: np });
+  assert.equal(nexus.messages[0].content, '# tool-router-agent\n\nRoute only. Pick one AVAILABLE alias.\n');
 });
 
 test('health includes mailbox stats and GET /v1/monitor/recent is cheap', async (t) => {

@@ -9,6 +9,7 @@ import {
   NEXUS_MAX_TOKENS,
 } from './constants.mjs';
 import { loadDeclaredKernel } from './config.mjs';
+import { compileStockPrompt } from './compile-prompt.mjs';
 import { planRoute } from './logical-router.mjs';
 import { aliasCanAdmit, availableAliases, detectModalities, isRoutableAlias, latestUserMessageText, stripSlashCommand } from './routing.mjs';
 import { stripControls } from './util.mjs';
@@ -35,8 +36,10 @@ export function faithRejects(kernelConfidence, { faithLevel = DEFAULT_FAITH, fea
 }
 
 function withNexusPolicy(payload, agent) {
-  const policy = loadDeclaredKernel(agent);
-  if (!policy) return payload;
+  const kernelText = loadDeclaredKernel(agent);
+  if (!kernelText) return payload;
+  let policy;
+  try { policy = compileStockPrompt(agent, { kernelText }); } catch { policy = kernelText; }
   const messages = Array.isArray(payload.messages) ? payload.messages : [];
   if (messages.some((message) => message?.role === 'system')) return payload;
   return { ...payload, messages: [{ role: 'system', content: policy }, ...messages] };

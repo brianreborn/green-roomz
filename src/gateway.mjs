@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fieldVote, similarityVote, resolveJudgeChoice, judgePrompt } from './council.mjs';
 import { AGENCY_ROLE, DEFAULT_FAITH, DEFAULT_FEAR, FALLBACK_ALIAS, MAX_SPECIALIST_HOPS, MONITOR_ALIAS, NEXUS_ALIAS, REBUKE_OP, UPSTREAM_MAX_BUFFER_BYTES, UPSTREAM_TIMEOUT_MS, YOLO_TOKEN } from './constants.mjs';
 import { loadDeclaredKernel } from './config.mjs';
+import { compileStockPrompt } from './compile-prompt.mjs';
 import { Mailbox } from './mailbox.mjs';
 import { CAP, MonitorIpc } from './monitor/ipc.mjs';
 import { createLogger } from './monitor/logger.mjs';
@@ -135,9 +136,20 @@ function corsHeaders(manifest, origin) {
   };
 }
 
+/** The compiled stock prompt (frames + kernel); the raw kernel if frames are unavailable. */
+export function stockSystemPrompt(agent) {
+  const kernelText = loadDeclaredKernel(agent);
+  if (!kernelText) return null;
+  try {
+    return compileStockPrompt(agent, { kernelText });
+  } catch {
+    return kernelText; // frames dir missing, or nexus kernel over-bound: fail safe to the kernel
+  }
+}
+
 export function injectSystemPolicy(body, agent) {
   const payload = { ...body };
-  const policy = loadDeclaredKernel(agent);
+  const policy = stockSystemPrompt(agent);
   if (!policy) return payload;
   const messages = Array.isArray(payload.messages) ? [...payload.messages] : [];
   const marker = policy.trim().slice(0, 24);

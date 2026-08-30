@@ -93,12 +93,21 @@ stable.
 
 ## Runtime
 
-`injectSystemPolicy` (gateway) and `withNexusPolicy` (nexus) inject
-`build/prompts/<alias>.md` when it exists and its SHA matches `index.json`;
-otherwise they fall back to `loadDeclaredKernel(agent)` — the kernel file alone,
-today's behaviour. A stale, missing, or tampered build never blocks serve. An
-agent with a **custom** `system_policy` (not the canonical `KERNEL_BASENAME`
-path) always uses that policy directly, never a committed compile of the default.
+`injectSystemPolicy` (gateway) and `withNexusPolicy` (nexus) call
+`compileStockPrompt(agent, { kernelText: loadDeclaredKernel(agent) })` — the
+prompt is **compiled fresh in-process** from the agent's actual kernel plus the
+`policies/frames/` files. `build/prompts/` is not read at runtime; it is the
+committed, reviewable snapshot that `compile --check` guards in CI.
+
+Compiling fresh means a deploy that overrides an agent's `system_policy` gets its
+custom kernel wrapped in the same frames, automatically. If the frames directory
+is missing, or a nexus kernel would exceed the microkernel bound after framing,
+the injector falls back to the raw kernel — a broken build never blocks serve.
+An agent with no `system_policy` (embedding, rerank, speech) gets no system
+message injected, unchanged.
+
+The reads are cheap (three ~500-byte frame files + the kernel, all page-cache
+hot) and match the codebase's existing no-cache `loadDeclaredKernel` pattern.
 
 ## Prime — the "default installation" checkpoint
 

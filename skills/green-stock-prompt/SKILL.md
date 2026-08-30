@@ -77,10 +77,14 @@ Single-shot transducers (`vision-layout-agent`, `audio-transcription-agent`,
    Exits non-zero and names the stale artifacts if `build/prompts/` is behind the
    frames or kernels. Commit the regenerated `build/prompts/` with the change.
 
-6. **Run it.** `serve` injects `build/prompts/<alias>.md` when its SHA matches
-   `index.json`, else falls back to the raw kernel — a stale or missing build
-   never blocks serve. An agent with a custom `system_policy` (not the canonical
-   `KERNEL_BASENAME` path) always uses that policy directly.
+6. **Run it.** `serve` compiles each agent's prompt fresh in-process (kernel +
+   `policies/frames/`), so an edited frame takes effect on the next serve with no
+   rebuild. `build/prompts/` is the committed snapshot, not read at runtime. If
+   the frames dir is missing the injector falls back to the raw kernel.
+   Inspect the live injection:
+   ```
+   node --input-type=module -e "import {loadManifest} from './src/config.mjs'; import {prepareInferenceBody} from './src/gateway.mjs'; const m=await loadManifest(); for (const a of m.agents.filter(x=>!x.variant_of)) { const b=prepareInferenceBody({messages:[{role:'user',content:'hi'}]},a); const s=b.messages[0]?.content||'(none)'; console.log(a.alias.padEnd(28), (s.match(/^# .+\$/gm)||[]).join(' | ')); }"
+   ```
 
 7. **Prime the "default installation" (optional — not yet wired, `green-roomz
    prime` lands in a later commit).**
