@@ -984,6 +984,50 @@ test('council: fan out to variants, field-vote the JSON, flag the outlier, write
   assert.ok(scores[0].results.some((r) => r.verdict === 'outlier'));
 });
 
+test('council: /council on sets a session default that fans out later turns', async (t) => {
+  const manifest = sampleManifest();
+  const vl = manifest.agents.find((a) => a.alias === 'vision-layout-agent');
+  manifest.agents.push({ ...vl, alias: 'vision-layout-agent@b', variant_of: 'vision-layout-agent', port: 18281, model: '/tmp/b.gguf' });
+  const registry = await new AgentRegistry(manifest).inspect();
+  for (const a of ['vision-layout-agent', 'vision-layout-agent@b', 'tool-router-agent']) registry.setStatus(a, 'ready');
+  const processes = new ProcessManager({ manifest, registry, spawnImpl() { throw new Error('no'); } });
+  processes.ensure = async (agent) => ({ alias: agent.alias, state: 'ready' });
+  const gateway = new Gateway({
+    manifest, registry, processes, sessions: new SessionLedger(), policy: new PolicyGate('maximize'),
+    fetchImpl: async () => jsonFetch({ choices: [{ message: { role: 'assistant', content: '{"brand":"Acme"}' } }] }),
+  });
+  const server = await gateway.listen('127.0.0.1', 0);
+  t.after(() => server.close());
+
+  const on = await request(server, {
+    path: '/v1/chat/completions', method: 'POST', headers: { 'content-type': 'application/json' },
+    body: { messages: [{ role: 'user', content: '/council on vision-layout-agent field-vote' }] },
+  });
+  const sid = on.headers['x-session-id'];
+  assert.ok(sid);
+
+  const later = await request(server, {
+    path: '/v1/chat/completions', method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-session-id': sid },
+    body: { messages: [{ role: 'user', content: 'extract the brand' }] },
+  });
+  assert.equal(later.status, 200);
+  assert.equal(later.body.council.variants.length, 2);
+
+  const off = await request(server, {
+    path: '/v1/chat/completions', method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-session-id': sid },
+    body: { messages: [{ role: 'user', content: '/council off' }] },
+  });
+  assert.equal(off.status, 200);
+  const afterOff = await request(server, {
+    path: '/v1/chat/completions', method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-session-id': sid },
+    body: { messages: [{ role: 'user', content: 'hello again' }] },
+  });
+  assert.equal(afterOff.body.council, undefined, 'council default cleared');
+});
+
 test('council: a /council slash message triggers the fan-out (same as the JSON form)', async (t) => {
   const manifest = sampleManifest();
   const vl = manifest.agents.find((a) => a.alias === 'vision-layout-agent');

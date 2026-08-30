@@ -758,7 +758,14 @@ export class Gateway {
       return this.handleMonitorSnapshot(request, response, body, identity, session, cors);
     }
 
-    const councilSpec = parseCouncilRequest(body, this.registry);
+    let councilSpec = parseCouncilRequest(body, this.registry);
+    if (!councilSpec && session?.councilDefault) {
+      let slashToken = null;
+      try { slashToken = parseSlashCommand(body)?.token; } catch { slashToken = null; }
+      if (slashToken !== 'council') {
+        councilSpec = parseCouncilRequest({ ...body, council: session.councilDefault }, this.registry);
+      }
+    }
     if (councilSpec) {
       return this.handleCouncil(request, response, body, identity, session, cors, pathname, councilSpec);
     }
@@ -780,6 +787,7 @@ export class Gateway {
       else if (slash.setting === 'fear') patch.fear = slash.fear;
       else if (slash.setting === 'confidence') patch.confidenceMood = slash.confidenceMood;
       else if (slash.setting === YOLO_TOKEN) patch.yolo = slash.yolo;
+      else if (slash.setting === 'council') patch.councilDefault = slash.councilDefault;
       if (Object.keys(patch).length) this.sessions.patch(issuedSession, patch);
     }
     if (slash?.op === REBUKE_OP) {

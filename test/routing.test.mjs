@@ -231,6 +231,24 @@ test('parseSlashCommand: /council carries a council spec and strips to the promp
   assert.equal(stripped.messages[0].content, 'refactor this');
 });
 
+test('/council on|off toggles a session default; on + prompt also runs this turn', () => {
+  const on = parseSlashCommand({ messages: [{ role: 'user', content: '/council on vision-layout-agent similarity' }] });
+  assert.equal(on.setting, 'council');
+  assert.deepEqual(on.councilDefault, { targets: ['vision-layout-agent'], judge: 'similarity', parallel: undefined });
+  assert.equal(on.settingOnly, true);
+  assert.equal(on.council, undefined);
+
+  const onRun = parseSlashCommand({ messages: [{ role: 'user', content: '/council on code refactor it' }] });
+  assert.equal(onRun.councilDefault.targets[0], 'qwenstral-code-speculator');
+  assert.deepEqual(onRun.council.targets, ['qwenstral-code-speculator']);
+  assert.equal(onRun.rest, 'refactor it');
+
+  const off = parseSlashCommand({ messages: [{ role: 'user', content: '/council off' }] });
+  assert.equal(off.setting, 'council');
+  assert.equal(off.councilDefault, null);
+  assert.equal(off.council, undefined);
+});
+
 test('model "auto" / OpenAI ids route via the nexus instead of pinning', () => {
   for (const model of ['auto', 'green-roomz', 'gpt-4o', 'default']) {
     const r = routeRequest({ model, messages: [{ role: 'user', content: 'hi' }] }, registry());

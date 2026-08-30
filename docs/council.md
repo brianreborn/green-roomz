@@ -53,6 +53,11 @@ Examples: drop an image and send `/council extract the label fields as JSON`
 (councils the vision variants, field-vote). `/council code similarity write a
 retry helper`. Resolves to < 2 aliases → falls through to a normal single answer.
 
+**Session default:** `/council on [targets] [judge]` makes every following turn
+in the session a council; `/council off` clears it. `/council on <targets>
+<prompt>` also runs the council on that turn. Persisted on the session like
+`/faith`.
+
 | judge | how | for |
 |---|---|---|
 | **field-vote** (default) | parse each answer as JSON, per-key majority; outlier = most-dissenting variant | structured extraction — label compliance |
@@ -90,8 +95,6 @@ is surfaced for the operator.
 
 ## Ideas not yet built
 
-- **`/council` session default** (`/council on qwen,internvl` that sticks for the
-  session) — the one-shot `/council` slash is built (above).
 - **Cross-host council** — fan out to note9 + qodesh + shalom variants over the
   peer allowlist. Needs the host bring-ups (issues #2–#5).
 - **Weighted vote** — weight each variant by its running scorecard agreement

@@ -286,8 +286,18 @@ export function parseSlashCommand(body) {
     return { token, alias: null, rest: rawRest, op: REBUKE_OP, settingOnly: false };
   }
   if (token === 'council') {
-    const c = parseCouncilArgs(rawRest);
-    return { token, alias: null, rest: c.rest, council: { targets: c.targets, judge: c.judge, parallel: c.parallel } };
+    const { head, rest: afterHead } = takeToken(rawRest);
+    const toggle = head === 'on' || head === 'off' ? head : null;
+    const c = parseCouncilArgs(toggle ? afterHead : rawRest);
+    const spec = { targets: c.targets, judge: c.judge, parallel: c.parallel };
+    const out = { token, alias: null, rest: c.rest, council: spec };
+    if (toggle) {
+      out.setting = 'council';
+      out.councilDefault = toggle === 'on' ? spec : null;
+      out.settingOnly = !c.rest;
+      if (toggle === 'off' || !c.rest) delete out.council; // nothing to run this turn
+    }
+    return out;
   }
   if (!Object.prototype.hasOwnProperty.call(SLASH_ALIASES, token)) return null;
   return { token, alias: SLASH_ALIASES[token], rest: rawRest };
