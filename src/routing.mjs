@@ -175,8 +175,15 @@ export function parseCouncilArgs(rawRest) {
   let judge = null;
   let parallel;
   let cascade = false;
-  for (let guard = 0; guard < 5 && rest; guard += 1) {
+  let quorum;
+  for (let guard = 0; guard < 6 && rest; guard += 1) {
     const { head, rest: next } = takeToken(rest);
+    const qm = /^quorum[:=](\d+)$/.exec(head);
+    if (!quorum && qm) { quorum = Number(qm[1]); rest = next; continue; }
+    if (!quorum && head === 'quorum') {
+      const t = takeToken(next);
+      if (/^\d+$/.test(t.head)) { quorum = Number(t.head); rest = t.rest; continue; }
+    }
     if (!targets && !judge && parallel === undefined && !cascade && looksLikeCouncilTarget(head)) {
       targets = head.includes(',')
         ? head.split(',').map((t) => SLASH_ALIASES[t] ?? t)
@@ -189,7 +196,7 @@ export function parseCouncilArgs(rawRest) {
     if (!cascade && (head === 'cascade' || head === 'escalate')) { cascade = true; rest = next; continue; }
     break;
   }
-  return { targets, judge, parallel, cascade, rest };
+  return { targets, judge, parallel, cascade, quorum, rest };
 }
 
 function takeToken(rest) {
@@ -291,7 +298,7 @@ export function parseSlashCommand(body) {
     const { head, rest: afterHead } = takeToken(rawRest);
     const toggle = head === 'on' || head === 'off' ? head : null;
     const c = parseCouncilArgs(toggle ? afterHead : rawRest);
-    const spec = { targets: c.targets, judge: c.judge, parallel: c.parallel, cascade: c.cascade };
+    const spec = { targets: c.targets, judge: c.judge, parallel: c.parallel, cascade: c.cascade, quorum: c.quorum };
     const out = { token, alias: null, rest: c.rest, council: spec };
     if (toggle) {
       out.setting = 'council';

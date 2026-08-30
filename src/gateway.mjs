@@ -53,6 +53,22 @@ const COUNCIL_JUDGES = new Set(['field-vote', 'judge-model', 'similarity']);
  * `of` / `body.model` / the modality target, or null when there is nothing to
  * fan out to (< 2 aliases).
  */
+/** Recursively sort object keys so two equal JSON values stringify identically. */
+function canonicalize(v) {
+  if (Array.isArray(v)) return v.map(canonicalize);
+  if (v && typeof v === 'object') return Object.fromEntries(Object.keys(v).sort().map((k) => [k, canonicalize(v[k])]));
+  return v;
+}
+
+/** A comparable key for a council candidate's answer: canonical JSON, else normalized text. */
+export function councilAnswerKey(c) {
+  if (!c?.ok) return null;
+  const j = parseJsonLoose(c.content);
+  if (j && typeof j === 'object' && !Array.isArray(j)) return `json:${JSON.stringify(canonicalize(j))}`;
+  const text = String(c.content ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+  return text ? `text:${text}` : null;
+}
+
 export function parseCouncilRequest(body, registry) {
   let slashCouncil = null;
   try { slashCouncil = parseSlashCommand(body)?.council ?? null; } catch { slashCouncil = null; }
@@ -77,7 +93,9 @@ export function parseCouncilRequest(body, registry) {
     }
   }
   if (!aliases || aliases.length < 2) return null;
-  return { aliases: [...new Set(aliases)], judge, parallel: spec.parallel, cascade: spec.cascade === true };
+  const q = Number(spec.quorum);
+  const quorum = Number.isInteger(q) && q >= 2 ? q : null;
+  return { aliases: [...new Set(aliases)], judge, parallel: spec.parallel, cascade: spec.cascade === true, quorum };
 }
 
 /** Normalize a Node remoteAddress (drops the v4-in-v6 prefix). */
@@ -619,16 +637,19 @@ export class Gateway {
     const stripped = stripSlashCommand(body);
     const path = String((pathname ?? request.url.split('?')[0])).replace(/\/route$/, '') || '/v1/chat/completions';
 
-    const runOne = async (alias) => {
+    const runOne = async (alias, extraSignal) => {
       const t0 = Date.now();
+      const signal = extraSignal
+        ? AbortSignal.any([request.abortSignal, extraSignal].filter(Boolean))
+        : request.abortSignal;
       try {
         const agent = this.registry.get(alias);
         if (!agent || this.registry.status(alias).state === 'unavailable') return { alias, ok: false, content: '', status: 503, ms: Date.now() - t0 };
-        await this.processes.ensure(agent, { signal: request.abortSignal });
+        await this.processes.ensure(agent, { signal });
         const payload = { ...prepareInferenceBody(stripped, agent), stream: false };
         const res = await this.fetchImpl(`http://127.0.0.1:${agent.port}${path}`, {
           method: 'POST', headers: { 'content-type': 'application/json', connection: 'close' },
-          body: JSON.stringify(payload), signal: deadlineSignal(request.abortSignal, this.manifest.gateway.upstream_timeout_ms ?? UPSTREAM_TIMEOUT_MS),
+          body: JSON.stringify(payload), signal: deadlineSignal(signal, this.manifest.gateway.upstream_timeout_ms ?? UPSTREAM_TIMEOUT_MS),
         });
         const raw = await readCappedText(res, this.manifest.gateway.upstream_max_buffer_bytes ?? UPSTREAM_MAX_BUFFER_BYTES);
         let content = '';
@@ -641,24 +662,59 @@ export class Gateway {
 
     // Parallel only if every variant can admit without eviction; else serial
     // (each run evicts the previous - slow, but the memory-tight path).
+    const par = spec.parallel ?? spec.aliases.every((a) => aliasCanAdmit(this.registry, a, this.processes) && this.registry.status(a).state === 'ready');
+
+    // N-of-M quorum: fan out in parallel, resolve + abort the rest as soon as N
+    // candidates produce the same answer (deep-equal JSON, else normalized text).
+    const runQuorum = (list, n) => new Promise((resolve) => {
+      const ctrl = new AbortController();
+      const results = [];
+      const counts = new Map();
+      let pending = list.length;
+      let done = false;
+      const finish = () => { if (!done) { done = true; resolve({ results, quorumReached: results.length < list.length }); } };
+      for (const alias of list) {
+        runOne(alias, ctrl.signal).then((c) => {
+          results.push(c);
+          const key = councilAnswerKey(c);
+          if (key != null) {
+            const seen = (counts.get(key) ?? 0) + 1;
+            counts.set(key, seen);
+            if (seen >= n && !done) { ctrl.abort(); finish(); }
+          }
+          if (--pending === 0) finish();
+        });
+      }
+    });
+
     const runMany = async (list) => {
-      if (!list.length) return [];
-      const par = spec.parallel ?? list.every((a) => aliasCanAdmit(this.registry, a, this.processes) && this.registry.status(a).state === 'ready');
-      return par
-        ? Promise.all(list.map(runOne))
-        : list.reduce(async (acc, a) => [...(await acc), await runOne(a)], Promise.resolve([]));
+      if (!list.length) return { results: [], quorumReached: null };
+      if (spec.quorum >= 2 && list.length > 1 && par) return runQuorum(list, Math.min(spec.quorum, list.length));
+      const results = par
+        ? await Promise.all(list.map((a) => runOne(a)))
+        : await list.reduce(async (acc, a) => [...(await acc), await runOne(a)], Promise.resolve([]));
+      return { results, quorumReached: null };
     };
 
     // Cascade: run the base variant alone; convene the rest only if it looks doubtful.
     const schemaExpected = body?.response_format?.type === 'json_schema' || body?.json_schema != null;
     let candidates;
     let escalated = null;
+    let quorumReached = null;
     if (spec.cascade && spec.aliases.length > 1) {
       const first = await runOne(spec.aliases[0]);
       escalated = this.shouldEscalate(first, spec, schemaExpected);
-      candidates = escalated ? [first, ...(await runMany(spec.aliases.slice(1)))] : [first];
+      if (escalated) {
+        const rest = await runMany(spec.aliases.slice(1));
+        candidates = [first, ...rest.results];
+        quorumReached = rest.quorumReached;
+      } else {
+        candidates = [first];
+      }
     } else {
-      candidates = await runMany(spec.aliases);
+      const all = await runMany(spec.aliases);
+      candidates = all.results;
+      quorumReached = all.quorumReached;
     }
 
     const usable = candidates.filter((c) => c.ok);
@@ -672,7 +728,11 @@ export class Gateway {
     this.sessions.setAgentAlias(issuedSession, winnerAlias);
 
     const headers = this.routeHeaders(issuedSession, { requestedAlias: body.model ?? null, effectiveAlias: winnerAlias, reason: `council_${spec.judge}${escalated === false ? '_solo' : ''}` }, cors, { hops: candidates.map((c) => c.alias).join(',') });
-    headers['x-green-roomz-council'] = headerSafe(JSON.stringify({ judge: spec.judge, winner: winnerAlias, outlier: verdict.outlier, agreement: verdict.agreement, ...(spec.cascade ? { cascade: true, escalated: escalated === true } : {}) }));
+    headers['x-green-roomz-council'] = headerSafe(JSON.stringify({
+      judge: spec.judge, winner: winnerAlias, outlier: verdict.outlier, agreement: verdict.agreement,
+      ...(spec.cascade ? { cascade: true, escalated: escalated === true } : {}),
+      ...(spec.quorum ? { quorum: spec.quorum, quorumReached: quorumReached === true } : {}),
+    }));
     return jsonResponse(response, usable.length ? 200 : 502, {
       id: `grz-council-${issuedSession}`,
       object: 'chat.completion',
@@ -686,6 +746,7 @@ export class Gateway {
         outlier: verdict.outlier,
         agreement: verdict.agreement,
         ...(spec.cascade ? { cascade: true, escalated: escalated === true } : {}),
+        ...(spec.quorum ? { quorum: spec.quorum, quorumReached: quorumReached === true } : {}),
         ...(spec.judge === 'field-vote' ? { votes: verdict.votes, abstained: verdict.abstained } : {}),
       },
     }, headers);

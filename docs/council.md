@@ -35,7 +35,7 @@ POST /v1/chat/completions
 ```
 
 `council` = `true` (all variants of `model`) or
-`{ of, variants[], judge, parallel, cascade }`.
+`{ of, variants[], judge, parallel, cascade, quorum }`.
 
 **Cascade** (`cascade: true` or `/council cascade …`): run the base variant
 alone first; convene the rest only if that answer is doubtful — an upstream
@@ -43,10 +43,15 @@ error/empty, or (field-vote judge / `json_schema` requested) it doesn't parse to
 a JSON object. The cheap path records a `solo` scorecard row; the response
 carries `council.cascade` + `council.escalated`.
 
+**Quorum** (`quorum: N` or `/council quorum:N …`, N ≥ 2): fan out in parallel
+and resolve — aborting the rest — as soon as N candidates return the same answer
+(canonical JSON, else normalized text). Never reached → a normal full council.
+Response carries `council.quorum` + `council.quorumReached`.
+
 ### `/council` slash — the same thing from any OpenAI client
 
 ```
-/council [targets] [judge] [serial|parallel] <prompt>
+/council [targets] [judge] [serial|parallel] [cascade] [quorum:N] <prompt>
 ```
 
 - **targets** — a base alias (`vision-layout-agent`), a short name (`code`,
@@ -114,4 +119,3 @@ human-review or fine-tune set.
   warm-starts from the model that won last time.
 - **Council over profiles, not just variants** — same model, `vulkan-all` vs
   `cpu-4`, to catch a quant/offload bug that changes the answer.
-- **N-of-M quorum** — return early once M variants agree, cancel the rest.

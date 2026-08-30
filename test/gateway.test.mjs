@@ -1095,6 +1095,48 @@ test('council: cascade runs the base variant alone when its JSON is clean, escal
   assert.equal(dirty.res.body.council.variants.length, 3);
 });
 
+test('council: quorum resolves and aborts the rest once N agree; not-reached runs all', async (t) => {
+  const mk = async (quorum, answers, delays = {}) => {
+    const manifest = sampleManifest();
+    const vl = manifest.agents.find((a) => a.alias === 'vision-layout-agent');
+    manifest.agents.push({ ...vl, alias: 'vision-layout-agent@b', variant_of: 'vision-layout-agent', port: 18281, model: '/tmp/b.gguf' });
+    manifest.agents.push({ ...vl, alias: 'vision-layout-agent@c', variant_of: 'vision-layout-agent', port: 18282, model: '/tmp/c.gguf' });
+    const registry = await new AgentRegistry(manifest).inspect();
+    for (const a of ['vision-layout-agent', 'vision-layout-agent@b', 'vision-layout-agent@c', 'tool-router-agent']) registry.setStatus(a, 'ready');
+    const processes = new ProcessManager({ manifest, registry, spawnImpl() { throw new Error('no'); } });
+    processes.ensure = async (agent) => ({ alias: agent.alias, state: 'ready' });
+    const started = [];
+    const gateway = new Gateway({
+      manifest, registry, processes, sessions: new SessionLedger(), policy: new PolicyGate('maximize'),
+      fetchImpl: (url, init) => new Promise((resolve, reject) => {
+        const port = Number(String(url).match(/:(\d+)\//)[1]);
+        started.push(port);
+        const ms = delays[port] ?? 0;
+        const timer = setTimeout(() => resolve(jsonFetch({ choices: [{ message: { role: 'assistant', content: answers[port] } }] })), ms);
+        init?.signal?.addEventListener('abort', () => { clearTimeout(timer); reject(new Error('aborted')); });
+      }),
+    });
+    const server = await gateway.listen('127.0.0.1', 0);
+    t.after(() => server.close());
+    const res = await request(server, {
+      path: '/v1/chat/completions', method: 'POST', headers: { 'content-type': 'application/json' },
+      body: { council: { of: 'vision-layout-agent', quorum }, messages: [{ role: 'user', content: 'extract brand' }] },
+    });
+    return { res, started };
+  };
+
+  const hit = await mk(2,
+    { 18181: '{"brand":"Acme"}', 18281: '{"brand":"Acme"}', 18282: '{"brand":"Beta"}' },
+    { 18282: 200 }); // the disagreeing one is slow -> quorum reached first, it gets aborted
+  assert.equal(hit.res.body.council.quorumReached, true);
+  assert.ok(hit.res.body.council.variants.length <= 3);
+
+  const miss = await mk(3,
+    { 18181: '{"brand":"Acme"}', 18281: '{"brand":"Beta"}', 18282: '{"brand":"Gamma"}' });
+  assert.equal(miss.res.body.council.quorumReached, false);
+  assert.equal(miss.res.body.council.variants.length, 3);
+});
+
 test('council: a split turn (agreement < 0.6) is logged to disagreements.jsonl', async (t) => {
   const { mkdtempSync, readFileSync, existsSync } = await import('node:fs');
   const os = await import('node:os');

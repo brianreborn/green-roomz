@@ -150,7 +150,7 @@ Built: variants expansion, `pinned`, council fan-out, 3 judges, scorecard,
 - [ ] **Judge = security-monitor** for policy-sensitive turns.
 - [ ] **Checkpoint the winner's KV** (`snapshotModel`) so the next similar request warm-starts from it.
 - [ ] **Council over profiles** (same model, `vulkan-all` vs `cpu-4`) to catch a quant/offload bug.
-- [ ] **N-of-M quorum** — return once M agree, cancel the rest.
+- [x] **N-of-M quorum** — `quorum: N` early-cancel, wip/council-quorum (#8).
 
 ## Issue #1 (treasury label scanner) remaining asks
 
