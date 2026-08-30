@@ -306,8 +306,14 @@ export function hardRuleRoute(body, registry) {
     if (slash?.token === 'audio') return finish(body, registry, 'audio-transcription-agent', 'slash_audio', modality);
     return finish(body, registry, null, 'nexus', modality);
   }
-  if (modality.audio) return finish(body, registry, 'audio-transcription-agent', 'audio_input', modality);
-  if (modality.image) return finish(body, registry, 'vision-layout-agent', 'image_input', modality);
+  // A modality picks the specialist; a `model: "<that alias>@<variant>"` picks
+  // which variant of it. Otherwise the default variant (the base alias).
+  const variantOf = (base) => {
+    const m = body?.model;
+    return (typeof m === 'string' && m.startsWith(`${base}@`) && registry.agents.has(m)) ? m : base;
+  };
+  if (modality.audio) return finish(body, registry, variantOf('audio-transcription-agent'), 'audio_input', modality);
+  if (modality.image) return finish(body, registry, variantOf('vision-layout-agent'), 'image_input', modality);
   if (slash && slash.alias) {
     return finish(body, registry, slash.alias, `slash_${slash.token}`, modality);
   }

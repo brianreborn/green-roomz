@@ -79,6 +79,7 @@ export const ORCHESTRATOR_BOUNDED_KEYS = Object.freeze([
   'min_free_bytes',
   'suspend_evicted',
   'max_warm_specialists',
+  'council_dir',
   'headers_timeout_ms',
   'request_timeout_ms',
   'session_ttl_ms',

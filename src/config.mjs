@@ -127,10 +127,59 @@ export async function loadManifest(input = new URL('../config/agents.windows.jso
       if (agent[field]) agent[field] = resolveManifestPath(manifestPath, agent[field]);
     }
   }
+  expandVariants(manifest, manifestPath);
   const nexus = manifest.agents.find((agent) => agent.alias === NEXUS_ALIAS);
   if (nexus?.system_policy) loadDeclaredKernel(nexus);
   Object.defineProperty(manifest, '_meta', { value: Object.freeze({ path: manifestPath, digest: digestObject(JSON.parse(raw)) }), enumerable: false });
   return deepFreeze(manifest);
+}
+
+/**
+ * Expand `agent.variants` into concrete agents. The base alias serves the
+ * `default_variant` (or the first variant, or its own `model`); each other
+ * variant becomes `<alias>@<id>` - same routing/policy/capabilities/profiles,
+ * different model/projector/port. Council mode runs several at once, so they
+ * need distinct ports.
+ */
+export function expandVariants(manifest, manifestPath) {
+  const extra = [];
+  for (const agent of manifest.agents) {
+    const variants = agent.variants;
+    if (!Array.isArray(variants) || !variants.length) continue;
+    const resolve = (v) => ({
+      ...v,
+      model: v.model ? resolveManifestPath(manifestPath, v.model) : agent.model,
+      projector: v.projector ? resolveManifestPath(manifestPath, v.projector) : (v.model ? undefined : agent.projector),
+      draft_model: v.draft_model ? resolveManifestPath(manifestPath, v.draft_model) : undefined,
+    });
+    const defId = agent.default_variant ?? variants[0].id;
+    const portBase = agent.variant_port_base ?? (Number(agent.port) + 100);
+    let n = 0;
+    agent.variant_ids = variants.map((v) => v.id);
+    agent.default_variant = defId;
+    for (const raw of variants) {
+      const v = resolve(raw);
+      if (v.id === defId) {
+        agent.model = v.model;
+        if (v.projector !== undefined) agent.projector = v.projector;
+        if (v.draft_model) agent.draft_model = v.draft_model;
+        agent.active_variant = v.id;
+        continue;
+      }
+      extra.push({
+        ...structuredClone({ ...agent, variants: undefined }),
+        alias: `${agent.alias}@${v.id}`,
+        variant_of: agent.alias,
+        active_variant: v.id,
+        model: v.model,
+        projector: v.projector ?? null,
+        draft_model: v.draft_model ?? undefined,
+        port: v.port ?? (portBase + n++),
+        pinned: agent.pinned,
+      });
+    }
+  }
+  manifest.agents.push(...extra);
 }
 
 function deepFreeze(value) {

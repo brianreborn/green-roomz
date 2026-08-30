@@ -279,6 +279,12 @@ export class ProcessManager {
         args.push(...patched);
       }
       if (agent.projector) args.push('--mmproj', agent.projector);
+      // Vision cost controls: cap image tokens (biggest lever for a slow box),
+      // and let the projector run on a different device than the LLM.
+      if (agent.image_max_tokens && !args.includes('--image-max-tokens')) args.push('--image-max-tokens', String(agent.image_max_tokens));
+      if (agent.image_min_tokens && !args.includes('--image-min-tokens')) args.push('--image-min-tokens', String(agent.image_min_tokens));
+      if (agent.projector && agent.mmproj_device && !args.includes('--mmproj-device')) args.push('--mmproj-device', agent.mmproj_device);
+      if (agent.flash_attn && !args.includes('--flash-attn') && !args.includes('-fa')) args.push('--flash-attn', 'on');
       if (shouldAttachDraft(agent)) {
         args.push(
           '--model-draft', agent.draft_model,
@@ -504,13 +510,17 @@ export class ProcessManager {
    * can't be sampled, it falls back to the ceiling alone. Evicted ports are
    * waited on - a big model must be fully released before the next allocates.
    */
+  isPinned(alias) {
+    return Boolean(this.manifest.agents.find((a) => a.alias === alias)?.pinned);
+  }
+
   async evictForNewSpecialist(incoming) {
     const incomingAlias = typeof incoming === 'string' ? incoming : incoming?.alias;
     const incomingAgent = typeof incoming === 'string'
       ? this.manifest.agents.find((a) => a.alias === incoming)
       : incoming;
     const live = [...this.processes.values()].filter((r) =>
-      r.owned && !r.resident && r.alias !== incomingAlias
+      r.owned && !r.resident && r.alias !== incomingAlias && !this.isPinned(r.alias)
       && ['ready', 'starting', 'suspended'].includes(r.state) && r.child.exitCode === null);
     if (!live.length) return { suspended: [], terminated: [] };
     live.sort((a, b) => (a.lastUsedAt ?? a.createdAt ?? 0) - (b.lastUsedAt ?? b.createdAt ?? 0)); // LRU first
@@ -575,7 +585,7 @@ export class ProcessManager {
 
   async sweepIdle(now = Date.now()) {
     const specialists = [...this.processes.values()].filter((r) =>
-      r.owned && !r.resident && r.child.exitCode === null && !this.starting.has(r.alias));
+      r.owned && !r.resident && !this.isPinned(r.alias) && r.child.exitCode === null && !this.starting.has(r.alias));
     const ready = specialists.filter((r) => r.state === 'ready');
     ready.sort((a, b) => (b.lastUsedAt ?? b.createdAt ?? 0) - (a.lastUsedAt ?? a.createdAt ?? 0));
     const overCap = new Set(ready.slice(Math.max(0, this.maxWarmSpecialists)).map((r) => r.alias));
