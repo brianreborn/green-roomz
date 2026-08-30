@@ -23,44 +23,60 @@ model interprets. Guarantees today are **procedural, not transactional**.
       today only by `resident` + non-evictable — no actual `mlock`/`mlockall`
       syscall. This is the one real "memory barrier" still owed.
 
-## Stock system-prompt compilation (THE critical integration — was filed wrong)
+## Stock system-prompt compilation
 
 **Design intent (corrected 2026-08-30):** the memory-feedback-loop requirements
 are not a subsystem to build. They are **prose to compile into the stock system
-prompts** — same principle as the Claude Code memory rules: requirements become
-text the model interprets, not code. The compiled stock prompts must require
-nothing more complicated than *being system prompts*.
+prompts** — requirements become text the model interprets, not code. And the
+prose *is* the implementation: compiling the MFL fragment into a cognitive
+agent's prompt and serving it is installing the memory feedback loop, not a
+placeholder for one. Full write-up: `docs/stock-prompts.md`.
 
 The compile step assembles the final prompt text from its parts:
 
 ```
-policies/<agent>.md            (system_policy — exists)
-  + green-brainz kernel text    (KERNEL_BASENAME → loadDeclaredKernel — exists, thin)
-  + memory-feedback-loop prose  (the six MFL phases / membranes — MISSING)
-  + faith/fear/confidence frame  (FAITH_LEVELS — exists)
+policies/frames/agency.md               (code-switching + cognitive-not-security)
+  + policies/frames/memory-feedback-loop.md   (the six MFL states — cognitive agents only)
+  + policies/frames/confidence.md         (confidence = a probability weight)
+  + policies/<KERNEL_BASENAME[alias]>     (the kernel, verbatim, innermost)
   ───────────────────────────────
-  = stock system prompt  →  git commit  (text is the artifact)
+  = build/prompts/<alias>.md  →  git commit  (the diff is the audit record)
   →  optional `prime`: feed it once, POST /slots/0?action=save → "default
-     installation" KV checkpoint (assembled at deploy/prime time, not shipped —
-     needs n_predict:1 + cache_prompt:true to stick; build-version-specific)
+     installation" KV checkpoint (deploy-time, not shipped — needs
+     n_predict:1 + cache_prompt:true to stick; build-version-specific)
 ```
 
-- [ ] **Write the MFL prose** — turn `memory-feedback-loop-requirements.md`
-      (MFL-1..25: derivation ⇄ attention ⇄ integration ⇄ partition ⇄ containment ⇄
-      disintegration; coordinate-not-clock; containment≠deletion; origin survives
-      movement; bounded/deterministic recall) into a prompt fragment that drops
-      into the kernel text. This is the missing integration.
-- [ ] **Build the compile step** — a `green-roomz` command / config.mjs function
-      that concatenates policy + kernel + MFL fragment + faith frame into the
-      committed stock prompt per agent. Today `loadDeclaredKernel` only loads one
-      `system_policy` file and explicitly "never concatenates other kernels".
-- [ ] **Wire `prime`** — `ProcessManager` already has `checkpointModel` /
-      `snapshotModel`; add a `green-roomz prime` that starts each agent with its
-      compiled stock prompt, runs one token, saves the KV as `default.bin`, writes
-      the `.snapshot.json` descriptor. This is the "default installation" not
-      "empty installation".
-- [ ] **Commit the artifacts** — compiled prompt text in the repo; prime
-      checkpoints are deploy-time (version-bound), descriptors committed.
+Done:
+
+- [x] **MFL prose** — `policies/frames/memory-feedback-loop.md` (commit 9ad6d6b).
+- [x] **Compile step** — `src/compile-prompt.mjs` + `green-roomz compile [--check]`
+      → committed `build/prompts/` + `index.json` (commit 4de9056). Kernel-text
+      guards extracted to `src/kernel-text.mjs` to break the import cycle.
+- [x] **Frame selection** — cognitive agents (working-set reasoners) get the MFL
+      frame: `general-text-speculator`, `qwenstral-code-speculator`. Transducers
+      (vision/audio/image) get agency+confidence only. Nexus + critical kernels
+      get kernel only.
+
+Open:
+
+- [ ] **Wire runtime** (commit 3b) — `injectSystemPolicy` / `withNexusPolicy`
+      prefer `build/prompts/<alias>.md` when the SHA matches `index.json`, else
+      fall back to `loadDeclaredKernel` (unchanged). A custom `system_policy`
+      always wins over a committed default compile. The `kernel-text.mjs`
+      extraction (3a) is staged, not yet committed.
+- [ ] **Wire `prime`** (commit 4) — `green-roomz prime`: start each cognitive
+      agent with its compiled prompt, `n_predict:1` + `cache_prompt:true`,
+      `snapshotModel(alias,'default')`; descriptor records prompt SHA + llama
+      build id. `serve` restores `default.bin` on cold start when both match.
+- [ ] **Kernel wart** — `code-structured.md` / `vision-layout.md` / `audio-*` /
+      `image-generation.md` open with a headingless `First line if this is NOT
+      your job: HANDOFF …` preamble, which floats between `# Confidence` and the
+      `# <alias>` heading in the compiled output. Clean fix: a `handoff` frame,
+      preamble stripped from those four kernels (kernel edits + `KERNEL_BASENAME`
+      review — its own commit).
+- [ ] **Move fragment sources to green-agentz** — per Plate 2 / Plate 9 the
+      frames + compile belong in the canonical tree, emitting `build/prompts/`
+      into the green-roomz subtree. Lives in green-roomz for now.
 
 ### Scope-creep to walk back
 

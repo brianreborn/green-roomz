@@ -14,10 +14,19 @@ import {
   MONITOR_ALIAS,
   MICROKERNEL_MAX_CHARS,
 } from './constants.mjs';
-import { assertNexusKernelText } from './config.mjs';
+import { assertNexusKernelText } from './kernel-text.mjs';
 
 const SAFETY_ALIAS = 'safety-policy-agent';
-const MFL_ALIASES = new Set(['general-text-speculator']);
+
+/**
+ * The cognitive agents: those that reason over a working set across turns, so
+ * the memory-feedback-loop frame is behaviour they can actually run. Single-shot
+ * transducers (vision OCR, transcription, image-gen), the sub-perceptual router,
+ * and the critical kernels are not cognitive agents and do not carry it. This is
+ * a fact about the roster, not a rollout knob — a future working-set agent is a
+ * cognitive agent by definition. See docs/stock-prompts.md.
+ */
+const MFL_ALIASES = new Set(['general-text-speculator', 'qwenstral-code-speculator']);
 
 export const FRAMES_DIR = fileURLToPath(new URL('../policies/frames/', import.meta.url));
 export const FRAME_NAMES = Object.freeze(['agency', 'memory-feedback-loop', 'confidence']);

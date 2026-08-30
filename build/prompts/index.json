@@ -23,12 +23,13 @@
       "bytes": 1716
     },
     "qwenstral-code-speculator": {
-      "sha256": "ee0b4a6c8dd603e41d4f3ce811a0e1ed5ef91aa597fa427b1edf42f046cb03b6",
+      "sha256": "b2a48b24ce06a146955de7fb1870e43db719fadeaf8b3b9f1ec8a3310953f233",
       "layers": [
         "agency",
+        "memory-feedback-loop",
         "confidence"
       ],
-      "bytes": 1510
+      "bytes": 2980
     },
     "general-text-speculator": {
       "sha256": "757f62b9226983b105da6b78c19673efb85630bce3de71582877df2618d9d494",

@@ -15,9 +15,11 @@ test('stockPromptLayers: kernel-only for nexus and the critical agents', () => {
   assert.deepEqual(stockPromptLayers('security-monitor-agent'), []);
 });
 
-test('stockPromptLayers: MFL only on general-text, agency+confidence elsewhere', () => {
+test('stockPromptLayers: MFL on the cognitive agents, agency+confidence on the transducers', () => {
   assert.deepEqual(stockPromptLayers('general-text-speculator'), ['agency', 'memory-feedback-loop', 'confidence']);
+  assert.deepEqual(stockPromptLayers('qwenstral-code-speculator'), ['agency', 'memory-feedback-loop', 'confidence']);
   assert.deepEqual(stockPromptLayers('vision-layout-agent'), ['agency', 'confidence']);
+  assert.deepEqual(stockPromptLayers('audio-transcription-agent'), ['agency', 'confidence']);
   assert.deepEqual(stockPromptLayers('image-generation-agent'), ['agency', 'confidence']);
 });
 
