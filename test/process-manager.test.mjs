@@ -323,8 +323,35 @@ test('evictForNewSpecialist drops the LRU warm specialist to make room (maxWarm 
   const now = Date.now();
   manager.processes.set('vision-layout-agent', { alias: 'vision-layout-agent', owned: true, resident: false, state: 'ready', child: new FakeChild(), lastUsedAt: now - 5000 });
   manager.processes.set('general-text-speculator', { alias: 'general-text-speculator', owned: true, resident: false, state: 'ready', child: new FakeChild(), lastUsedAt: now - 1000 });
-  const dropped = await manager.evictForNewSpecialist('qwenstral-code-speculator');
-  assert.deepEqual(dropped, ['vision-layout-agent']);         // older one goes; 1 slot kept for the incoming
+  manager.canSuspend = false;   // force terminate path for a deterministic assertion
+  const { terminated } = await manager.evictForNewSpecialist('qwenstral-code-speculator');
+  assert.deepEqual(terminated, ['vision-layout-agent']);      // older one goes; 1 slot kept for the incoming
   assert.ok(!manager.processes.has('vision-layout-agent'));
   assert.ok(manager.processes.has('general-text-speculator')); // most-recent stays
+});
+
+test('suspend/resume: an over-ceiling CPU model is frozen (SIGSTOP), revived by SIGCONT', async () => {
+  const manifest = sampleManifest();
+  const registry = new AgentRegistry(manifest);
+  const signals = [];
+  const manager = new ProcessManager({ manifest, registry, spawnImpl() { throw new Error('no'); } });
+  manager.canSuspend = true;
+  manager.suspendImpl = (pid) => signals.push(['STOP', pid]);
+  manager.resumeImpl = (pid) => signals.push(['CONT', pid]);
+  manager.maxWarmSpecialists = 1;
+  const now = Date.now();
+  // qwenstral-code-speculator has a cpu-4 profile in the sample manifest
+  manager.processes.set('qwenstral-code-speculator', { alias: 'qwenstral-code-speculator', owned: true, resident: false, state: 'ready', profileId: 'cpu-4', createdAt: now, lastUsedAt: now - 9000, child: Object.assign(new FakeChild(), { pid: 42 }) });
+
+  const out = await manager.evictForNewSpecialist('general-text-speculator');
+  assert.deepEqual(out.suspended, ['qwenstral-code-speculator']);
+  assert.deepEqual(out.terminated, []);
+  assert.equal(signals[0][0], 'STOP');
+  assert.equal(manager.processes.get('qwenstral-code-speculator').state, 'suspended');
+
+  // ensure() revives it via SIGCONT instead of cold-starting
+  const agent = manifest.agents.find((a) => a.alias === 'qwenstral-code-speculator');
+  const revived = await manager.ensure(agent);
+  assert.equal(revived.state, 'ready');
+  assert.ok(signals.some((s) => s[0] === 'CONT'));
 });

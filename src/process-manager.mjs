@@ -123,6 +123,30 @@ export class ProcessManager {
     // is the real gate (see evictForNewSpecialist). A tight box sets this low.
     this.maxWarmSpecialists = g.max_warm_specialists
       ?? Math.max(1, (manifest?.agents ?? []).filter((a) => a.runtime === 'llama_server' && !isResidentAgent(a)).length);
+    // Suspend/resume makes evict->revive cheap: SIGSTOP freezes the model, the
+    // OS pages its (now idle) memory out under pressure and back in on SIGCONT -
+    // no re-mmap, no KV realloc, no warm-up. POSIX only; on Windows we terminate
+    // (a native suspend helper could be wired via suspendImpl later). GPU-pinned
+    // VRAM is never freed by suspend, so a Vulkan model still gets terminated
+    // when we actually need memory back.
+    this.canSuspend = g.suspend_evicted !== false && process.platform !== 'win32';
+    this.suspendImpl = (pid) => process.kill(pid, 'SIGSTOP');
+    this.resumeImpl = (pid) => process.kill(pid, 'SIGCONT');
+  }
+
+  suspendRecord(record) {
+    try { this.suspendImpl(record.child.pid); record.state = 'suspended'; return true; }
+    catch { return false; }
+  }
+
+  async resume(alias) {
+    const record = this.processes.get(alias);
+    if (!record || record.state !== 'suspended' || record.child.exitCode !== null) return null;
+    try { this.resumeImpl(record.child.pid); } catch { return null; }
+    record.state = 'ready';
+    record.lastUsedAt = Date.now();
+    this.registry.setStatus(alias, 'ready', { pid: record.child.pid, profileId: record.profileId, resumed: true });
+    return record;
   }
 
   get(alias) {
@@ -140,6 +164,11 @@ export class ProcessManager {
     if (current?.state === 'ready' && current.child.exitCode === null) {
       current.lastUsedAt = Date.now();
       return current;
+    }
+    // Cheap revive: a suspended model is already loaded - just SIGCONT it.
+    if (current?.state === 'suspended' && current.child.exitCode === null) {
+      const resumed = await this.resume(agent.alias);
+      if (resumed) return resumed;
     }
     // Resident CPU nexus (tool-router-agent) stays loaded for the life of serve.
     // Starting a specialist must never stop or unload it — two llama-server
@@ -330,6 +359,8 @@ export class ProcessManager {
 
   async stopRecord(record) {
     if (!record.owned || record.child.exitCode !== null) return;
+    // A SIGSTOP'd process won't act on SIGTERM until it runs again.
+    if (record.state === 'suspended') { try { this.resumeImpl(record.child.pid); } catch {} }
     record.state = 'stopping';
     const exited = new Promise((resolve) => record.child.once('exit', resolve));
     if (record.child.exitCode === null) record.child.kill('SIGTERM');
@@ -369,33 +400,54 @@ export class ProcessManager {
     const incomingAgent = typeof incoming === 'string'
       ? this.manifest.agents.find((a) => a.alias === incoming)
       : incoming;
-    const warm = [...this.processes.values()].filter((r) =>
+    const live = [...this.processes.values()].filter((r) =>
       r.owned && !r.resident && r.alias !== incomingAlias
-      && (r.state === 'ready' || r.state === 'starting') && r.child.exitCode === null);
-    if (!warm.length) return [];
-    warm.sort((a, b) => (a.lastUsedAt ?? a.createdAt ?? 0) - (b.lastUsedAt ?? b.createdAt ?? 0)); // LRU first
+      && ['ready', 'starting', 'suspended'].includes(r.state) && r.child.exitCode === null);
+    if (!live.length) return { suspended: [], terminated: [] };
+    live.sort((a, b) => (a.lastUsedAt ?? a.createdAt ?? 0) - (b.lastUsedAt ?? b.createdAt ?? 0)); // LRU first
 
     let free;
     try { free = this.hostAdapter?.sampleResources?.()?.freeMemoryBytes; } catch { free = undefined; }
     const need = agentFootprintBytes(incomingAgent) ?? 0;
     const headroom = headroomBytes();
+    const footprint = (alias) => agentFootprintBytes(this.manifest.agents.find((a) => a.alias === alias)) ?? 0;
+    const cpuBacked = (rec) => {
+      const agent = this.manifest.agents.find((a) => a.alias === rec.alias);
+      const prof = (agent?.profiles ?? []).find((p) => p.id === rec.profileId);
+      return profileKeepsWeightsOnCpu(prof);
+    };
 
-    const drop = [];
-    let remaining = [...warm];
-    const overCeiling = () => remaining.length + 1 > Math.max(1, this.maxWarmSpecialists);
+    const handled = new Set();   // aliases dealt with this pass
+    const activeLeft = () => live.filter((r) => r.state !== 'suspended' && !handled.has(r.alias)).length + 1; // +1 = incoming
+    const overCeiling = () => activeLeft() > Math.max(1, this.maxWarmSpecialists);
     const overMemory = () => Number.isFinite(free) && need > 0 && (free - need) < headroom;
-    while (remaining.length && (overCeiling() || overMemory())) {
-      const victim = remaining.shift();
-      drop.push(victim);
-      const est = agentFootprintBytes(this.manifest.agents.find((a) => a.alias === victim.alias)) ?? 0;
-      if (Number.isFinite(free)) free += est; // assume the OS reclaims it
-    }
-    if (!drop.length) return [];
 
-    const ports = drop.map((r) => this.manifest.agents.find((a) => a.alias === r.alias)?.port).filter(Boolean);
-    await Promise.all(drop.map((r) => this.stop(r.alias)));
-    await this.waitForPortsFree(ports);
-    return drop.map((r) => r.alias);
+    const suspended = [];
+    const terminated = [];
+    for (const victim of live) {
+      if (!overCeiling() && !overMemory()) break;
+      handled.add(victim.alias);
+      if (overMemory() || !this.canSuspend || !cpuBacked(victim) || victim.state === 'suspended') {
+        // Need memory back now (or can't cheaply suspend): terminate.
+        terminated.push(victim);
+        if (Number.isFinite(free)) free += footprint(victim.alias);
+      } else {
+        // Just over the warm ceiling: freeze it - revive is a SIGCONT.
+        if (this.suspendRecord(victim)) {
+          suspended.push(victim);
+          this.registry.setStatus(victim.alias, 'suspended');
+        } else {
+          terminated.push(victim);
+        }
+      }
+    }
+
+    if (terminated.length) {
+      const ports = terminated.map((r) => this.manifest.agents.find((a) => a.alias === r.alias)?.port).filter(Boolean);
+      await Promise.all(terminated.map((r) => this.stop(r.alias)));
+      await this.waitForPortsFree(ports);
+    }
+    return { suspended: suspended.map((r) => r.alias), terminated: terminated.map((r) => r.alias) };
   }
 
   /** Poll until nothing answers on these loopback ports (evicted model fully released). */
@@ -413,14 +465,26 @@ export class ProcessManager {
   }
 
   async sweepIdle(now = Date.now()) {
-    const evictable = [...this.processes.values()].filter((r) =>
-      r.owned && !r.resident && r.state === 'ready' && r.child.exitCode === null && !this.starting.has(r.alias));
-    evictable.sort((a, b) => (b.lastUsedAt ?? b.createdAt ?? 0) - (a.lastUsedAt ?? a.createdAt ?? 0));
-    const overCap = new Set(evictable.slice(Math.max(0, this.maxWarmSpecialists)).map((r) => r.alias));
-    const doomed = evictable.filter((r) => {
+    const specialists = [...this.processes.values()].filter((r) =>
+      r.owned && !r.resident && r.child.exitCode === null && !this.starting.has(r.alias));
+    const ready = specialists.filter((r) => r.state === 'ready');
+    ready.sort((a, b) => (b.lastUsedAt ?? b.createdAt ?? 0) - (a.lastUsedAt ?? a.createdAt ?? 0));
+    const overCap = new Set(ready.slice(Math.max(0, this.maxWarmSpecialists)).map((r) => r.alias));
+
+    const doomed = [];
+    for (const r of ready) {
       const idleFor = now - (r.lastUsedAt ?? r.createdAt ?? now);
-      return overCap.has(r.alias) || (this.idleEvictMs > 0 && idleFor > this.idleEvictMs);
-    });
+      if (!overCap.has(r.alias) && !(this.idleEvictMs > 0 && idleFor > this.idleEvictMs)) continue;
+      // Freeze the merely-idle ones (cheap revive); over-cap or long-idle -> terminate.
+      if (this.canSuspend && overCap.has(r.alias) === false && idleFor < this.idleEvictMs * 3) {
+        if (this.suspendRecord(r)) { this.registry.setStatus(r.alias, 'suspended'); continue; }
+      }
+      doomed.push(r);
+    }
+    // A model suspended and untouched for a long time: fully reclaim it.
+    for (const r of specialists) {
+      if (r.state === 'suspended' && now - (r.lastUsedAt ?? r.createdAt ?? now) > this.idleEvictMs * 3) doomed.push(r);
+    }
     await Promise.all(doomed.map((r) => this.stop(r.alias)));
     return doomed.map((r) => r.alias);
   }
