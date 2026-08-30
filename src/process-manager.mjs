@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
-import { existsSync, mkdirSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { UnavailableError } from './errors.mjs';
 import { sleep } from './util.mjs';
 import { agentFootprintBytes, headroomBytes, profileAdmitted } from './memory.mjs';
@@ -158,6 +158,34 @@ export class ProcessManager {
       rec.checkpoints = [...(rec.checkpoints ?? []), { tag, filename, at: Date.now() }].slice(-this.checkpointKeep);
       return rec.checkpoints[rec.checkpoints.length - 1];
     } catch { return null; }
+  }
+
+  /**
+   * A complete, portable "model as it is" = code + data + state:
+   *   code    -> the runtime binary (path, so a restore uses the same one)
+   *   data    -> the immutable GGUF weights (path, size - not copied; mmap'd)
+   *   config  -> the exact argv it was launched with
+   *   state   -> the KV-cache checkpoint file (the only non-reconstructible bytes)
+   * The descriptor is tiny; the only real payload is the .bin. Restore anywhere
+   * the same binary + GGUF exist.
+   */
+  async snapshotModel(alias, tag = String(Date.now())) {
+    const rec = this.processes.get(alias);
+    if (!this.checkpointDir || !rec || rec.child.exitCode !== null) return null;
+    const agent = this.manifest.agents.find((a) => a.alias === alias);
+    const kv = await this.checkpointModel(alias, tag);
+    const descriptor = {
+      alias,
+      tag,
+      at: Date.now(),
+      code: { command: rec.command, args: [...(rec.args ?? [])] },
+      data: { model: agent.model, bytes: artifactSizeBytes(agent.model), projector: agent.projector ?? null },
+      profileId: rec.profileId,
+      state: kv ? kv.filename : null,
+    };
+    const file = path.join(this.checkpointPathFor(alias), `${tag}.snapshot.json`);
+    try { writeFileSync(file, JSON.stringify(descriptor, null, 2)); } catch { return null; }
+    return { ...descriptor, descriptor: file };
   }
 
   /** Restore a saved slot KV into a running model (default: its newest checkpoint). */

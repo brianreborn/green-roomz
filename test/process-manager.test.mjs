@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, rmSync, truncateSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync as rfs, rmSync, truncateSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { ProcessManager, orderProfiles, vulkanAllThreadCount, withVulkanAllThreads } from '../src/process-manager.mjs';
@@ -419,4 +419,30 @@ test('anti-thrash: cold-starts are serialized and a critically-low box gets a 50
   const b = manager.ensure(manifest.agents.find((x) => x.alias === 'general-text-speculator'));
   await Promise.all([a, b]);
   assert.equal(maxInFlight, 1, 'never two specialists cold-starting at once');
+});
+
+test('snapshotModel writes a code+data+config+state descriptor; the .bin is the only real payload', async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'grz-snap-'));
+  const manifest = sampleManifest();
+  manifest.gateway.checkpoint_dir = dir;
+  const manager = new ProcessManager({
+    manifest, registry: new AgentRegistry(manifest), spawnImpl() { throw new Error('no'); },
+    fetchImpl: async () => ({ ok: true, status: 200 }),
+  });
+  const alias = 'qwenstral-code-speculator';
+  manager.processes.set(alias, {
+    alias, owned: true, resident: false, state: 'ready', child: new FakeChild(),
+    command: '/opt/llama-server', args: ['--port', '18183', '--model', '/m/code.gguf', '--no-warmup'],
+    profileId: 'cpu-4', createdAt: Date.now(),
+  });
+  const snap = await manager.snapshotModel(alias, 'snapA');
+  assert.equal(snap.code.command, '/opt/llama-server');
+  assert.ok(snap.code.args.includes('--no-warmup'));
+  assert.equal(snap.state, 'snapA.bin');            // the KV file
+  assert.equal(snap.profileId, 'cpu-4');
+  assert.ok(existsSync(snap.descriptor));
+  const d = JSON.parse(rfs(snap.descriptor, 'utf8'));
+  assert.equal(d.alias, alias);
+  assert.ok('model' in d.data);
+  rmSync(dir, { recursive: true, force: true });
 });
