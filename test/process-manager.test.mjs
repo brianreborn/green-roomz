@@ -369,10 +369,12 @@ test('checkpoint/restore: save the slot KV to a named file, restore it, checkpoi
   const child = new FakeChild();
   manager.processes.set(agent.alias, { alias: agent.alias, owned: true, resident: false, state: 'ready', child, createdAt: Date.now() });
 
-  // launch args carry --slot-save-path
+  // launch args carry --slot-save-path AND the dir is pre-created
+  // (llama-server exits 1 with "not a directory" otherwise)
   const launch = manager.buildLaunch(agent, { id: 'x', args: ['--device', 'none'] });
   assert.ok(launch.args.includes('--slot-save-path'));
   assert.ok(launch.args.includes('--cache-idle-slots'));
+  assert.ok(existsSync(launch.args[launch.args.indexOf('--slot-save-path') + 1]), 'slot-save-path dir must exist before spawn');
 
   const cp = await manager.checkpointModel(agent.alias, 'snap1');
   assert.equal(cp.filename, 'snap1.bin');

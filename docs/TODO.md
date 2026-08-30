@@ -68,8 +68,14 @@ Open:
       `max_tokens:1` `cache_prompt:true` turn + `snapshotModel(alias,'default',
       {prime:{promptSha}})`, then stop. `serve` sets `ProcessManager.stockPromptSha`;
       `maybeRestoreDefault` restores `default.bin` on cold start when promptSha +
-      model + binary all match. Unit-tested; **live-verify on a host with a
-      runnable llama-server** (needs a model — not doable on the box that built this).
+      model + binary all match.
+- [x] **live-verified 2026-08-30** against llama-server b10665 + the 0.5B nexus:
+      cold start 1.3 s → prime turn 200 → `default.bin` 780 KB + descriptor with
+      the right `prime.promptSha` → restart auto-restored (`record.primed`, log
+      line) → stale-sha correctly did not restore. Found + fixed a real bug:
+      `--slot-save-path` needs its dir to pre-exist (llama-server exits 1
+      otherwise) — `buildLaunch` now `mkdirSync`s it. Slot checkpointing never
+      worked on a fresh `checkpoint_dir` before this.
 - [x] **Kernel wart** — the shared `First line if this is NOT your job: HANDOFF …`
       preamble is now `policies/frames/handoff.md`, stripped from the four
       narrow-job kernels (code + 3 transducers). `safety.md` keeps its inline

@@ -344,7 +344,9 @@ export class ProcessManager {
       // no MMU games) + auto-spill idle slots to the prompt cache. Terminate then
       // becomes "checkpoint and exit", not "lose the conversation".
       if (this.checkpointDir && !args.includes('--slot-save-path')) {
-        args.push('--slot-save-path', this.checkpointPathFor(agent.alias));
+        const slotDir = this.checkpointPathFor(agent.alias);
+        mkdirSync(slotDir, { recursive: true }); // llama-server refuses --slot-save-path if it does not exist
+        args.push('--slot-save-path', slotDir);
         if (!args.includes('--cache-idle-slots') && !args.includes('--no-cache-idle-slots')) args.push('--cache-idle-slots');
       }
     } else if (runtime.kind === 'whisper-server') {
