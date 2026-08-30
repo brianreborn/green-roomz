@@ -36,6 +36,23 @@ POST /v1/chat/completions
 
 `council` = `true` (all variants of `model`) or `{ of, variants[], judge, parallel }`.
 
+### `/council` slash — the same thing from any OpenAI client
+
+```
+/council [targets] [judge] [serial|parallel] <prompt>
+```
+
+- **targets** — a base alias (`vision-layout-agent`), a short name (`code`,
+  `vision`, `text`, …), or a comma-list of ≥2 aliases. Omitted → the modality
+  target (image → vision, audio → audio) or `model`.
+- **judge** — `field-vote` (default) · `judge-model` · `similarity` (short:
+  `vote` / `judge` / `similar`).
+- `serial` / `parallel` — force the run mode (default: parallel iff all fit).
+
+Examples: drop an image and send `/council extract the label fields as JSON`
+(councils the vision variants, field-vote). `/council code similarity write a
+retry helper`. Resolves to < 2 aliases → falls through to a normal single answer.
+
 | judge | how | for |
 |---|---|---|
 | **field-vote** (default) | parse each answer as JSON, per-key majority; outlier = most-dissenting variant | structured extraction — label compliance |
@@ -73,7 +90,8 @@ is surfaced for the operator.
 
 ## Ideas not yet built
 
-- **`/council` slash** and a session default (`/council on qwen,internvl`).
+- **`/council` session default** (`/council on qwen,internvl` that sticks for the
+  session) — the one-shot `/council` slash is built (above).
 - **Cross-host council** — fan out to note9 + qodesh + shalom variants over the
   peer allowlist. Needs the host bring-ups (issues #2–#5).
 - **Weighted vote** — weight each variant by its running scorecard agreement

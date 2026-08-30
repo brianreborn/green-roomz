@@ -149,6 +149,47 @@ const CONFIDENCE_ALIASES = Object.freeze({
   low: 'may', medium: 'will', high: 'shall', xhigh: 'must',
 });
 
+const COUNCIL_JUDGE_TOKENS = Object.freeze({
+  'field-vote': 'field-vote', fieldvote: 'field-vote', field: 'field-vote', vote: 'field-vote',
+  'judge-model': 'judge-model', judge: 'judge-model', model: 'judge-model',
+  similarity: 'similarity', similar: 'similarity', embed: 'similarity',
+});
+
+/** Does a bare token look like it names a specific agent (vs. an ordinary word)? */
+function looksLikeCouncilTarget(token) {
+  if (Object.prototype.hasOwnProperty.call(SLASH_ALIASES, token) && SLASH_ALIASES[token] !== 'auto') return true;
+  return /^[a-z][\w.-]*(@[\w.-]+)?(,[a-z][\w.-]*(@[\w.-]+)?)+$/.test(token)
+    || /-(agent|speculator)(@[\w.-]+)?$/.test(token)
+    || token.includes('@');
+}
+
+/**
+ * `/council [targets] [judge] [serial|parallel] <prompt...>`
+ *   targets  a base alias, a short name (code/vision/...), or a comma-list of aliases
+ *   judge    field-vote | judge-model | similarity (and short forms)
+ * Returns { targets, judge, parallel, rest } — `rest` is the remaining prompt.
+ */
+export function parseCouncilArgs(rawRest) {
+  let rest = String(rawRest ?? '').trim();
+  let targets = null;
+  let judge = null;
+  let parallel;
+  for (let guard = 0; guard < 4 && rest; guard += 1) {
+    const { head, rest: next } = takeToken(rest);
+    if (!targets && !judge && parallel === undefined && looksLikeCouncilTarget(head)) {
+      targets = head.includes(',')
+        ? head.split(',').map((t) => SLASH_ALIASES[t] ?? t)
+        : [SLASH_ALIASES[head] ?? head];
+      rest = next;
+      continue;
+    }
+    if (!judge && COUNCIL_JUDGE_TOKENS[head]) { judge = COUNCIL_JUDGE_TOKENS[head]; rest = next; continue; }
+    if (parallel === undefined && (head === 'serial' || head === 'parallel')) { parallel = head === 'parallel'; rest = next; continue; }
+    break;
+  }
+  return { targets, judge, parallel, rest };
+}
+
 function takeToken(rest) {
   const trimmed = String(rest ?? '').trim();
   const match = /^(\S+)(?:\s+([\s\S]*))?$/.exec(trimmed);
@@ -243,6 +284,10 @@ export function parseSlashCommand(body) {
   }
   if (token === REBUKE_OP) {
     return { token, alias: null, rest: rawRest, op: REBUKE_OP, settingOnly: false };
+  }
+  if (token === 'council') {
+    const c = parseCouncilArgs(rawRest);
+    return { token, alias: null, rest: c.rest, council: { targets: c.targets, judge: c.judge, parallel: c.parallel } };
   }
   if (!Object.prototype.hasOwnProperty.call(SLASH_ALIASES, token)) return null;
   return { token, alias: SLASH_ALIASES[token], rest: rawRest };

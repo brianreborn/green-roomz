@@ -46,20 +46,32 @@ const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1', 'localhost']);
 const COUNCIL_JUDGES = new Set(['field-vote', 'judge-model', 'similarity']);
 
 /**
- * A council request: `{ "council": true | { of, variants, judge, parallel } }`.
+ * A council request, from either:
+ *   - JSON: `{ "council": true | { of, variants, judge, parallel } }`
+ *   - slash: `/council [targets] [judge] [serial|parallel] <prompt>`
  * Resolves the alias set to run: an explicit `variants` list, all variants of
- * `of` / `body.model`, or null when there is nothing to fan out to.
+ * `of` / `body.model` / the modality target, or null when there is nothing to
+ * fan out to (< 2 aliases).
  */
 export function parseCouncilRequest(body, registry) {
-  const raw = body?.council;
+  let slashCouncil = null;
+  try { slashCouncil = parseSlashCommand(body)?.council ?? null; } catch { slashCouncil = null; }
+
+  const raw = slashCouncil ?? body?.council;
   if (!raw) return null;
   const spec = raw === true ? {} : (typeof raw === 'object' ? raw : null);
   if (!spec) return null;
   const judge = COUNCIL_JUDGES.has(spec.judge) ? spec.judge : 'field-vote';
 
-  let aliases = Array.isArray(spec.variants) ? spec.variants.filter((a) => registry.agents.has(a)) : null;
+  const explicit = Array.isArray(spec.variants) ? spec.variants
+    : (Array.isArray(spec.targets) && spec.targets.length > 1 ? spec.targets : null);
+  let aliases = explicit ? explicit.filter((a) => registry.agents.has(a)) : null;
   if (!aliases || aliases.length < 2) {
-    const base = (spec.of || body.model || '').replace(/@.*$/, '');
+    const mod = detectModalities(body);
+    const modalityBase = mod.image ? 'vision-layout-agent' : mod.audio ? 'audio-transcription-agent' : null;
+    const base = String(
+      spec.of || (Array.isArray(spec.targets) ? spec.targets[0] : spec.targets) || body.model || modalityBase || '',
+    ).replace(/@.*$/, '');
     if (base && registry.agents.has(base)) {
       aliases = [base, ...[...registry.agents.keys()].filter((a) => a.startsWith(`${base}@`))];
     }

@@ -983,3 +983,35 @@ test('council: fan out to variants, field-vote the JSON, flag the outlier, write
   assert.equal(scores[0].outlier, 'vision-layout-agent@c');
   assert.ok(scores[0].results.some((r) => r.verdict === 'outlier'));
 });
+
+test('council: a /council slash message triggers the fan-out (same as the JSON form)', async (t) => {
+  const manifest = sampleManifest();
+  const vl = manifest.agents.find((a) => a.alias === 'vision-layout-agent');
+  manifest.agents.push({ ...vl, alias: 'vision-layout-agent@b', variant_of: 'vision-layout-agent', port: 18281, model: '/tmp/b.gguf' });
+
+  const registry = await new AgentRegistry(manifest).inspect();
+  for (const a of ['vision-layout-agent', 'vision-layout-agent@b', 'tool-router-agent']) registry.setStatus(a, 'ready');
+  const processes = new ProcessManager({ manifest, registry, spawnImpl() { throw new Error('no'); } });
+  processes.ensure = async (agent) => ({ alias: agent.alias, state: 'ready' });
+
+  const seen = [];
+  const gateway = new Gateway({
+    manifest, registry, processes, sessions: new SessionLedger(), policy: new PolicyGate('maximize'),
+    fetchImpl: async (url, init) => {
+      seen.push(JSON.parse(init.body).messages.at(-1).content);
+      return jsonFetch({ choices: [{ message: { role: 'assistant', content: '{"brand":"Acme"}' } }] });
+    },
+  });
+  const server = await gateway.listen('127.0.0.1', 0);
+  t.after(() => server.close());
+
+  const res = await request(server, {
+    path: '/v1/chat/completions', method: 'POST', headers: { 'content-type': 'application/json' },
+    body: { messages: [{ role: 'user', content: '/council vision-layout-agent field-vote extract the brand' }] },
+  });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.council.variants.length, 2);
+  assert.match(res.headers['x-green-roomz-council'], /"judge":"field-vote"/);
+  // the slash prefix is stripped before the variants see the prompt
+  assert.ok(seen.every((c) => c === 'extract the brand'), JSON.stringify(seen));
+});
