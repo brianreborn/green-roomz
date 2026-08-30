@@ -27,6 +27,24 @@ export function estimateResidentBytes(agent, profile, { includeDraft } = {}) {
 }
 
 /**
+ * A rough footprint for an agent regardless of profile - used to decide whether
+ * a new specialist needs room made for it. GPU/Vulkan profiles still consume
+ * host memory (shared VRAM on an APU, mmap'd weights everywhere), so we fall
+ * back to model (+ projector + draft) file size when the CPU estimate is null.
+ */
+export function agentFootprintBytes(agent, { includeDraft = true } = {}) {
+  const cpu = estimateResidentBytes(agent, { args: ['--device', 'none'] }, { includeDraft });
+  if (cpu != null) return cpu;
+  let bytes = artifactSizeBytes(agent?.model) ?? 0;
+  const proj = artifactSizeBytes(agent?.projector);
+  if (proj) bytes += proj;
+  if (includeDraft && agent?.draft_enabled && agent?.draft_model) {
+    bytes += artifactSizeBytes(agent.draft_model) ?? 0;
+  }
+  return bytes ? Math.round(bytes * 1.15 + CPU_RESIDENT_PAD_BYTES) : null;
+}
+
+/**
  * Admission is advisory, not a veto. mmap'd weights and KV are reclaimable —
  * the OS pages. We never refuse to load a model just because `free` RAM is low;
  * we only flag memory pressure so /health and logs can show a degraded run.

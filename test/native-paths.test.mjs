@@ -73,9 +73,11 @@ test('the whisper path rejects a non-decodable audio part cleanly (no crash)', a
 const WHISPER = process.env.GRZ_E2E_WHISPER || 'C:/LocalAI/whisper/whisper-server.exe';
 const WMODEL = process.env.GRZ_E2E_WHISPER_MODEL || 'C:/LocalAI/whisper/models/ggml-small.bin';
 const asset = path.join(REPO, 'e2e', 'assets', 'hello-world.wav');
-const realOk = process.env.GRZ_E2E === '1' && existsSync(WHISPER) && existsSync(WMODEL) && existsSync(asset);
+// Runs whenever whisper-server + model + fixture are present (they are on any
+// green-roomz host). Only an environment without whisper skips it - never opt-in.
+const realOk = existsSync(WHISPER) && existsSync(WMODEL) && existsSync(asset);
 
-test('real audio round-trip through whisper-server', { skip: realOk ? false : 'GRZ_E2E=1 + whisper-server + fixture required', timeout: 180_000 }, async (t) => {
+test('real audio round-trip through whisper-server', { skip: realOk ? false : `whisper-server / model / fixture missing (${WHISPER})`, timeout: 180_000 }, async (t) => {
   const { spawn } = await import('node:child_process');
   const port = 18700 + Math.floor(Math.random() * 200);
   const whisper = spawn(WHISPER, ['--host', '127.0.0.1', '--port', String(port), '--model', WMODEL], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });

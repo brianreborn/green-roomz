@@ -3,7 +3,7 @@ import os from 'node:os';
 import { existsSync, statSync } from 'node:fs';
 import { UnavailableError } from './errors.mjs';
 import { sleep } from './util.mjs';
-import { profileAdmitted } from './memory.mjs';
+import { agentFootprintBytes, headroomBytes, profileAdmitted } from './memory.mjs';
 
 const MAX_LOG_CHARS = 64 * 1024;
 
@@ -119,7 +119,10 @@ export class ProcessManager {
     this.idleSweeper = null;
     const g = manifest?.gateway ?? {};
     this.idleEvictMs = g.idle_evict_ms ?? 300_000;
-    this.maxWarmSpecialists = g.max_warm_specialists ?? 3;
+    // Hard ceiling on warm specialists. Default: no artificial cap - free memory
+    // is the real gate (see evictForNewSpecialist). A tight box sets this low.
+    this.maxWarmSpecialists = g.max_warm_specialists
+      ?? Math.max(1, (manifest?.agents ?? []).filter((a) => a.runtime === 'llama_server' && !isResidentAgent(a)).length);
   }
 
   get(alias) {
@@ -145,7 +148,7 @@ export class ProcessManager {
     const promise = Promise.resolve()
       // Make room before starting another specialist on a memory-tight box:
       // evict the LRU warm one now rather than waiting for the idle sweep.
-      .then(() => (isResidentAgent(agent) ? null : this.evictForNewSpecialist(agent.alias)))
+      .then(() => (isResidentAgent(agent) ? null : this.evictForNewSpecialist(agent)))
       .then(() => this.start(agent, { signal }));
     this.starting.set(agent.alias, promise.finally(() => this.starting.delete(agent.alias)));
     return this.starting.get(agent.alias);
@@ -353,18 +356,42 @@ export class ProcessManager {
    * drowning in mmap'd model files.
    */
   /**
-   * Before a new specialist starts, drop LRU warm ones so at most maxWarm-1
-   * remain, then WAIT for their sockets to actually close - a big model that
-   * mmaps GPU/host memory must be fully gone before the next one allocates, or
-   * the box OOMs on cold start. Eviction cannot be lazy here.
+   * Make room for `incoming` before it cold-starts. Criteria, in order:
+   *   1. hard ceiling  - never keep more than maxWarmSpecialists warm.
+   *   2. memory        - evict LRU warm models until the incoming model's
+   *                      estimated footprint + headroom fits in free RAM.
+   * On a high-memory box under the ceiling, this evicts nothing. When free RAM
+   * can't be sampled, it falls back to the ceiling alone. Evicted ports are
+   * waited on - a big model must be fully released before the next allocates.
    */
-  async evictForNewSpecialist(incomingAlias) {
+  async evictForNewSpecialist(incoming) {
+    const incomingAlias = typeof incoming === 'string' ? incoming : incoming?.alias;
+    const incomingAgent = typeof incoming === 'string'
+      ? this.manifest.agents.find((a) => a.alias === incoming)
+      : incoming;
     const warm = [...this.processes.values()].filter((r) =>
       r.owned && !r.resident && r.alias !== incomingAlias
       && (r.state === 'ready' || r.state === 'starting') && r.child.exitCode === null);
-    if (warm.length < Math.max(1, this.maxWarmSpecialists)) return [];
-    warm.sort((a, b) => (a.lastUsedAt ?? a.createdAt ?? 0) - (b.lastUsedAt ?? b.createdAt ?? 0));
-    const drop = warm.slice(0, warm.length - Math.max(0, this.maxWarmSpecialists - 1));
+    if (!warm.length) return [];
+    warm.sort((a, b) => (a.lastUsedAt ?? a.createdAt ?? 0) - (b.lastUsedAt ?? b.createdAt ?? 0)); // LRU first
+
+    let free;
+    try { free = this.hostAdapter?.sampleResources?.()?.freeMemoryBytes; } catch { free = undefined; }
+    const need = agentFootprintBytes(incomingAgent) ?? 0;
+    const headroom = headroomBytes();
+
+    const drop = [];
+    let remaining = [...warm];
+    const overCeiling = () => remaining.length + 1 > Math.max(1, this.maxWarmSpecialists);
+    const overMemory = () => Number.isFinite(free) && need > 0 && (free - need) < headroom;
+    while (remaining.length && (overCeiling() || overMemory())) {
+      const victim = remaining.shift();
+      drop.push(victim);
+      const est = agentFootprintBytes(this.manifest.agents.find((a) => a.alias === victim.alias)) ?? 0;
+      if (Number.isFinite(free)) free += est; // assume the OS reclaims it
+    }
+    if (!drop.length) return [];
+
     const ports = drop.map((r) => this.manifest.agents.find((a) => a.alias === r.alias)?.port).filter(Boolean);
     await Promise.all(drop.map((r) => this.stop(r.alias)));
     await this.waitForPortsFree(ports);
