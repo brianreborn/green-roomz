@@ -158,6 +158,42 @@ async function cmdServe(ctx, args) {
   });
 }
 
+async function cmdCouncilStats(ctx, args) {
+  const { readFileSync, existsSync } = await import('node:fs');
+  const path = await import('node:path');
+  const dir = ctx.manifest.gateway?.council_dir ?? process.env.GREEN_ROOMZ_COUNCIL_DIR;
+  const file = dir && path.join(dir, 'scores.jsonl');
+  if (!file || !existsSync(file)) { console.error(`no council scorecard (set gateway.council_dir; expected ${file ?? '<unset>'})`); return; }
+  const rows = readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
+  const taskFilter = args.find((a) => !a.startsWith('--') && a !== 'council-stats');
+  const scoped = taskFilter ? rows.filter((r) => r.task === taskFilter) : rows;
+
+  const per = {};
+  for (const r of scoped) {
+    for (const v of r.results) {
+      const s = (per[v.alias] ??= { runs: 0, winner: 0, outlier: 0, agreed: 0, failed: 0, ms: 0 });
+      s.runs += 1; s[v.verdict] += 1; s.ms += v.ms || 0;
+    }
+  }
+  const table = Object.entries(per).map(([alias, s]) => ({
+    alias,
+    runs: s.runs,
+    win_rate: +(s.winner / s.runs).toFixed(2),
+    agree_rate: +((s.winner + s.agreed) / s.runs).toFixed(2),
+    outlier_rate: +(s.outlier / s.runs).toFixed(2),
+    fail_rate: +(s.failed / s.runs).toFixed(2),
+    avg_ms: Math.round(s.ms / s.runs),
+  })).sort((a, b) => b.agree_rate - a.agree_rate);
+
+  if (args.includes('--json')) { console.log(JSON.stringify({ rows: scoped.length, per: table }, null, 2)); return; }
+  console.log(`council scorecard${taskFilter ? ` [${taskFilter}]` : ''} - ${scoped.length} runs\n`);
+  for (const t of table) {
+    console.log(`  ${t.alias.padEnd(32)} win ${String(t.win_rate).padStart(4)}  agree ${String(t.agree_rate).padStart(4)}  outlier ${String(t.outlier_rate).padStart(4)}  fail ${String(t.fail_rate).padStart(4)}  ${String(t.avg_ms).padStart(6)}ms`);
+  }
+  const top = table[0];
+  if (top && scoped.length >= 20) console.log(`\nsuggested default_variant: ${top.alias} (agree ${top.agree_rate}, outlier ${top.outlier_rate} over ${top.runs} runs)`);
+}
+
 async function cmdDeploy(ctx, args) {
   const objective = POLICIES[ctx.manifest.gateway.policy]?.objective ?? 'throughput';
   try {
@@ -190,6 +226,7 @@ async function main(argv) {
   if (command === 'agents') return cmdAgents(ctx);
   if (command === 'fingerprint') return cmdFingerprint(ctx);
   if (command === 'benchmark') return cmdBenchmark(ctx, args);
+  if (command === 'council-stats') return cmdCouncilStats(ctx, args);
   if (command === 'serve') return cmdServe(ctx, args);
   if (command === 'deploy') return cmdDeploy(ctx, args);
   if (command === 'stop') {
