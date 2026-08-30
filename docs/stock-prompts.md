@@ -37,7 +37,11 @@ into one system message:
 | agency | `policies/frames/agency.md` | all except the nexus and the critical agents |
 | memory feedback loop | `policies/frames/memory-feedback-loop.md` | the **cognitive agents** (see below) |
 | confidence | `policies/frames/confidence.md` | all except the nexus and the critical agents |
+| handoff | `policies/frames/handoff.md` | the **narrow-job agents** — code + the three transducers |
 | kernel | `policies/<KERNEL_BASENAME[alias]>` | every agent — verbatim, innermost |
+
+`FRAME_NAMES` in `src/compile-prompt.mjs` is the ordered list; `stockPromptLayers()`
+picks the subset per alias.
 
 ## Which agents get which frames
 
@@ -47,19 +51,25 @@ memory-feedback-loop frame is behaviour they can actually run, so they carry it.
 This is a fact about the roster, not a rollout toggle: a future agent that
 reasons over a working set is a cognitive agent by definition and gets the frame.
 
+**Narrow-job agents** have a job specific enough that a wrong turn should be a
+hard `HANDOFF`, not a best effort. The four here each previously carried an
+identical inline preamble; it is now the `handoff` frame. `general-text` is the
+catch-all and keeps its own softer "you may defer" language in its kernel; the
+nexus emits a route, not a handoff.
+
 | Alias | Frames | Why |
 |---|---|---|
 | `general-text-speculator` | agency + **memory** + confidence | the conversational catch-all; carries a working set across turns |
-| `qwenstral-code-speculator` | agency + **memory** + confidence | holds a working set of the task, files, and schema |
-| `vision-layout-agent` | agency + confidence | single-shot transducer: image → OCR, nothing recalled |
-| `audio-transcription-agent` | agency + confidence | single-shot transducer: audio → text |
-| `image-generation-agent` | agency + confidence | single-shot transducer: text → image |
+| `qwenstral-code-speculator` | agency + **memory** + confidence + **handoff** | working set of task/files/schema; narrow job |
+| `vision-layout-agent` | agency + confidence + **handoff** | single-shot transducer: image → OCR, nothing recalled |
+| `audio-transcription-agent` | agency + confidence + **handoff** | single-shot transducer: audio → text |
+| `image-generation-agent` | agency + confidence + **handoff** | single-shot transducer: text → image |
 | `tool-router-agent` (nexus) | **kernel only** | sub-perceptual router; also bound by `MICROKERNEL_MAX_CHARS` (512) and `assertNexusKernelText` |
-| `safety-policy-agent` | **kernel only** | critical kernel — MFL-3: cognitive framing never rides on a security kernel |
+| `safety-policy-agent` | **kernel only** | critical kernel — MFL-3: cognitive framing never rides on a security kernel (keeps its own inline handoff line) |
 | `security-monitor-agent` | **kernel only** | critical kernel — MFL-21: cognitive state grants no monitor authority |
 
-The selection lives in one place, `MFL_ALIASES` / `stockPromptLayers()` in
-`src/compile-prompt.mjs`.
+The selection lives in one place — `MFL_ALIASES`, `HANDOFF_ALIASES`, and
+`stockPromptLayers()` in `src/compile-prompt.mjs`.
 
 The memory-feedback-loop fragment is the compiled prose form of
 `green-agentz/docs/memory-feedback-loop-requirements.md` (MFL-1..25). It maps:

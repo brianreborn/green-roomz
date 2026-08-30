@@ -15,12 +15,12 @@ test('stockPromptLayers: kernel-only for nexus and the critical agents', () => {
   assert.deepEqual(stockPromptLayers('security-monitor-agent'), []);
 });
 
-test('stockPromptLayers: MFL on the cognitive agents, agency+confidence on the transducers', () => {
+test('stockPromptLayers: MFL on the cognitive agents, handoff on the narrow-job agents', () => {
   assert.deepEqual(stockPromptLayers('general-text-speculator'), ['agency', 'memory-feedback-loop', 'confidence']);
-  assert.deepEqual(stockPromptLayers('qwenstral-code-speculator'), ['agency', 'memory-feedback-loop', 'confidence']);
-  assert.deepEqual(stockPromptLayers('vision-layout-agent'), ['agency', 'confidence']);
-  assert.deepEqual(stockPromptLayers('audio-transcription-agent'), ['agency', 'confidence']);
-  assert.deepEqual(stockPromptLayers('image-generation-agent'), ['agency', 'confidence']);
+  assert.deepEqual(stockPromptLayers('qwenstral-code-speculator'), ['agency', 'memory-feedback-loop', 'confidence', 'handoff']);
+  assert.deepEqual(stockPromptLayers('vision-layout-agent'), ['agency', 'confidence', 'handoff']);
+  assert.deepEqual(stockPromptLayers('audio-transcription-agent'), ['agency', 'confidence', 'handoff']);
+  assert.deepEqual(stockPromptLayers('image-generation-agent'), ['agency', 'confidence', 'handoff']);
 });
 
 test('compileStockPrompt requires kernel text', () => {
@@ -68,7 +68,7 @@ test('compileManifestPrompts: every non-variant agent, index carries frame + age
   for (const alias of prompts.keys()) assert.ok(!alias.includes('@'), `variant leaked: ${alias}`);
 
   assert.equal(index.version, 1);
-  assert.deepEqual(Object.keys(index.frames).sort(), ['agency', 'confidence', 'memory-feedback-loop']);
+  assert.deepEqual(Object.keys(index.frames).sort(), ['agency', 'confidence', 'handoff', 'memory-feedback-loop']);
   for (const [alias, meta] of Object.entries(index.agents)) {
     assert.equal(meta.sha256, sha256(prompts.get(alias)));
     assert.deepEqual(meta.layers, stockPromptLayers(alias));

@@ -28,8 +28,21 @@ const SAFETY_ALIAS = 'safety-policy-agent';
  */
 const MFL_ALIASES = new Set(['general-text-speculator', 'qwenstral-code-speculator']);
 
+/**
+ * Agents whose job is narrow enough that a wrong turn should be a hard HANDOFF,
+ * not a best effort. general-text is the catch-all and keeps its own softer
+ * defer language; the nexus emits a route, not a handoff; the critical kernels
+ * are frozen. The four here previously each carried an identical inline preamble.
+ */
+const HANDOFF_ALIASES = new Set([
+  'qwenstral-code-speculator',
+  'vision-layout-agent',
+  'audio-transcription-agent',
+  'image-generation-agent',
+]);
+
 export const FRAMES_DIR = fileURLToPath(new URL('../policies/frames/', import.meta.url));
-export const FRAME_NAMES = Object.freeze(['agency', 'memory-feedback-loop', 'confidence']);
+export const FRAME_NAMES = Object.freeze(['agency', 'memory-feedback-loop', 'confidence', 'handoff']);
 
 /**
  * Ordered frame names for an alias, outermost first. Empty = kernel only.
@@ -41,6 +54,7 @@ export function stockPromptLayers(alias) {
   const layers = ['agency'];
   if (MFL_ALIASES.has(alias)) layers.push('memory-feedback-loop');
   layers.push('confidence');
+  if (HANDOFF_ALIASES.has(alias)) layers.push('handoff');
   return layers;
 }
 

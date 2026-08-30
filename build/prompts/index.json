@@ -3,33 +3,37 @@
   "frames": {
     "agency": "630aa044934545c120e6d1c7ca30f35a233abdc98518ccbc6ffb35a5d7fc4bb7",
     "memory-feedback-loop": "39f7a566d10d591c15b9b03f493e3545eb4002e10d6477cb3ca0dce34d279887",
-    "confidence": "0f41346e429830b75d3316257087bf082b79ac16e6a03c55c75773aad433e2b7"
+    "confidence": "0f41346e429830b75d3316257087bf082b79ac16e6a03c55c75773aad433e2b7",
+    "handoff": "f3d3e225fa6b1935ef8e7b36f2afd2694cbf8996343ffff02afcbfde8f3d76fc"
   },
   "agents": {
     "vision-layout-agent": {
-      "sha256": "b90b80c15c237932712bf065bf065bb5aa2ba36add8ea708d121366c1683b7b4",
+      "sha256": "390035b0d3be4766b8588a927fb1383bde4096b9ed2060327000deac88a95a69",
       "layers": [
         "agency",
-        "confidence"
+        "confidence",
+        "handoff"
       ],
-      "bytes": 1583
+      "bytes": 1677
     },
     "audio-transcription-agent": {
-      "sha256": "8bad3f606332dbab8b61734e6bbb546387b2bc7675973a7da5f339bb9537744c",
+      "sha256": "7bf844df7d3eb1506531d028dc11eb6ec685d83719a5aad45ba4d68fe689826a",
       "layers": [
         "agency",
-        "confidence"
+        "confidence",
+        "handoff"
       ],
-      "bytes": 1716
+      "bytes": 1810
     },
     "qwenstral-code-speculator": {
-      "sha256": "b2a48b24ce06a146955de7fb1870e43db719fadeaf8b3b9f1ec8a3310953f233",
+      "sha256": "abf61efc751a0223499a90f3d0db12bd93cd0b3e7b219c5e2addf7226bf73084",
       "layers": [
         "agency",
         "memory-feedback-loop",
-        "confidence"
+        "confidence",
+        "handoff"
       ],
-      "bytes": 2980
+      "bytes": 3074
     },
     "general-text-speculator": {
       "sha256": "757f62b9226983b105da6b78c19673efb85630bce3de71582877df2618d9d494",
@@ -51,12 +55,13 @@
       "bytes": 601
     },
     "image-generation-agent": {
-      "sha256": "56f89bab91d751afa514c8ccb8cb1b4f548419b380c3983c3e3e587434eaad29",
+      "sha256": "0be43fa5b5bcc47ab35bc02d4cb484747000c5a54fcef723c3b995318e402412",
       "layers": [
         "agency",
-        "confidence"
+        "confidence",
+        "handoff"
       ],
-      "bytes": 1448
+      "bytes": 1542
     },
     "security-monitor-agent": {
       "sha256": "71658c43931e5349b7e503bf534842300335285ab87ed2df4112fa8ca2908dd9",

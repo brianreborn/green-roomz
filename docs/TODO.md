@@ -68,12 +68,10 @@ Open:
       agent with its compiled prompt, `n_predict:1` + `cache_prompt:true`,
       `snapshotModel(alias,'default')`; descriptor records prompt SHA + llama
       build id. `serve` restores `default.bin` on cold start when both match.
-- [ ] **Kernel wart** — `code-structured.md` / `vision-layout.md` / `audio-*` /
-      `image-generation.md` open with a headingless `First line if this is NOT
-      your job: HANDOFF …` preamble, which floats between `# Confidence` and the
-      `# <alias>` heading in the compiled output. Clean fix: a `handoff` frame,
-      preamble stripped from those four kernels (kernel edits + `KERNEL_BASENAME`
-      review — its own commit).
+- [x] **Kernel wart** — the shared `First line if this is NOT your job: HANDOFF …`
+      preamble is now `policies/frames/handoff.md`, stripped from the four
+      narrow-job kernels (code + 3 transducers). `safety.md` keeps its inline
+      copy (critical, kernel-only). `HANDOFF_ALIASES` in compile-prompt.mjs.
 - [ ] **Move fragment sources to green-agentz** — per Plate 2 / Plate 9 the
       frames + compile belong in the canonical tree, emitting `build/prompts/`
       into the green-roomz subtree. Lives in green-roomz for now.

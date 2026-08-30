@@ -28,14 +28,17 @@ Joined outermost → innermost into one system message:
 | agency | `policies/frames/agency.md` | all but the nexus and the critical agents |
 | memory feedback loop | `policies/frames/memory-feedback-loop.md` | the **cognitive agents** only |
 | confidence | `policies/frames/confidence.md` | all but the nexus and the critical agents |
+| handoff | `policies/frames/handoff.md` | code + the three transducers (narrow-job) |
 | kernel | `policies/<KERNEL_BASENAME[alias]>` | every agent, verbatim, innermost |
 
 **Cognitive agents** reason over a working set across turns, so the memory frame
 is behaviour they can run: `general-text-speculator`, `qwenstral-code-speculator`.
 Single-shot transducers (`vision-layout-agent`, `audio-transcription-agent`,
-`image-generation-agent`) carry agency + confidence only. The nexus
+`image-generation-agent`) carry agency + confidence + handoff. The nexus
 (`tool-router-agent`, 512-char bound) and the critical kernels
 (`safety-policy-agent`, `security-monitor-agent`) get their kernel alone.
+Selection: `MFL_ALIASES` / `HANDOFF_ALIASES` / `stockPromptLayers()` in
+`src/compile-prompt.mjs`.
 
 ## Procedure
 
