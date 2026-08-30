@@ -1,0 +1,4 @@
+# The compiler emits LF; keep the committed + checked-out prompt bytes identical
+# so `green-roomz compile --check` is stable across platforms.
+build/prompts/** text eol=lf
+policies/**       text eol=lf

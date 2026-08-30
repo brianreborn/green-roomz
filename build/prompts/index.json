@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "frames": {
+    "agency": "630aa044934545c120e6d1c7ca30f35a233abdc98518ccbc6ffb35a5d7fc4bb7",
+    "memory-feedback-loop": "39f7a566d10d591c15b9b03f493e3545eb4002e10d6477cb3ca0dce34d279887",
+    "confidence": "0f41346e429830b75d3316257087bf082b79ac16e6a03c55c75773aad433e2b7"
+  },
+  "agents": {
+    "vision-layout-agent": {
+      "sha256": "b90b80c15c237932712bf065bf065bb5aa2ba36add8ea708d121366c1683b7b4",
+      "layers": [
+        "agency",
+        "confidence"
+      ],
+      "bytes": 1583
+    },
+    "audio-transcription-agent": {
+      "sha256": "8bad3f606332dbab8b61734e6bbb546387b2bc7675973a7da5f339bb9537744c",
+      "layers": [
+        "agency",
+        "confidence"
+      ],
+      "bytes": 1716
+    },
+    "qwenstral-code-speculator": {
+      "sha256": "ee0b4a6c8dd603e41d4f3ce811a0e1ed5ef91aa597fa427b1edf42f046cb03b6",
+      "layers": [
+        "agency",
+        "confidence"
+      ],
+      "bytes": 1510
+    },
+    "general-text-speculator": {
+      "sha256": "757f62b9226983b105da6b78c19673efb85630bce3de71582877df2618d9d494",
+      "layers": [
+        "agency",
+        "memory-feedback-loop",
+        "confidence"
+      ],
+      "bytes": 3013
+    },
+    "tool-router-agent": {
+      "sha256": "ac2b468fa9ac5d2fd5de9dd1b692ddd52b54330afd37fbe15f934cbcf437615a",
+      "layers": [],
+      "bytes": 472
+    },
+    "safety-policy-agent": {
+      "sha256": "ef9438a6b6a61b3fc663b7c2826b563de5dcb9b4abaa51048dc7bfb9edca4393",
+      "layers": [],
+      "bytes": 601
+    },
+    "image-generation-agent": {
+      "sha256": "56f89bab91d751afa514c8ccb8cb1b4f548419b380c3983c3e3e587434eaad29",
+      "layers": [
+        "agency",
+        "confidence"
+      ],
+      "bytes": 1448
+    },
+    "security-monitor-agent": {
+      "sha256": "71658c43931e5349b7e503bf534842300335285ab87ed2df4112fa8ca2908dd9",
+      "layers": [],
+      "bytes": 398
+    }
+  }
+}

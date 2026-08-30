@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { loadManifest } from '../src/config.mjs';
+import { loadManifest, loadDeclaredKernel } from '../src/config.mjs';
+import { compileManifestPrompts, stockPromptLayers } from '../src/compile-prompt.mjs';
 import { AgentRegistry } from '../src/registry.mjs';
 import { ProcessManager } from '../src/process-manager.mjs';
 import { PolicyGate } from '../src/scheduler.mjs';
@@ -26,6 +27,7 @@ function usage() {
 
 Commands:
   validate [--manifest path]
+  compile [--manifest path] [--check]   (write build/prompts/ stock system prompts)
   serve [--manifest path] [--host address] [--port number]
   deploy [--manifest path] [--host address] [--port number] [--quick]
   benchmark [alias|all] [--manifest path] [--quick] [--force]
@@ -194,6 +196,45 @@ async function cmdCouncilStats(ctx, args) {
   if (top && scoped.length >= 20) console.log(`\nsuggested default_variant: ${top.alias} (agree ${top.agree_rate}, outlier ${top.outlier_rate} over ${top.runs} runs)`);
 }
 
+async function cmdCompile(ctx, args) {
+  const { writeFileSync, mkdirSync, existsSync, readFileSync } = await import('node:fs');
+  const pathMod = await import('node:path');
+  const check = hasFlag(args, '--check');
+  const outDir = pathMod.join(process.cwd(), 'build', 'prompts');
+  const { prompts, index } = compileManifestPrompts(ctx.manifest, loadDeclaredKernel);
+
+  const stale = [];
+  const readLf = (file) => (existsSync(file) ? readFileSync(file, 'utf8').replace(/\r\n/g, '\n') : null);
+  if (!check) mkdirSync(outDir, { recursive: true });
+  for (const [alias, text] of prompts) {
+    const file = pathMod.join(outDir, `${alias}.md`);
+    if (readLf(file) === text) continue;
+    if (check) { stale.push(alias); continue; }
+    writeFileSync(file, text);
+  }
+  const indexFile = pathMod.join(outDir, 'index.json');
+  const indexText = `${JSON.stringify(index, null, 2)}\n`;
+  if (readLf(indexFile) !== indexText) {
+    if (check) stale.push('index.json');
+    else writeFileSync(indexFile, indexText);
+  }
+
+  if (check) {
+    if (stale.length) {
+      console.error(`stale compiled prompts: ${stale.join(', ')} — run \`green-roomz compile\``);
+      process.exitCode = 1;
+      return;
+    }
+    console.error(`build/prompts up to date (${prompts.size} agents)`);
+    return;
+  }
+  for (const [alias, meta] of Object.entries(index.agents)) {
+    const layers = stockPromptLayers(alias);
+    console.error(`  ${alias.padEnd(28)} ${String(meta.bytes).padStart(5)}b  [${layers.join(' + ') || 'kernel only'}]`);
+  }
+  console.error(`wrote build/prompts/ (${prompts.size} agents + index.json)`);
+}
+
 async function cmdDeploy(ctx, args) {
   const objective = POLICIES[ctx.manifest.gateway.policy]?.objective ?? 'throughput';
   try {
@@ -227,6 +268,7 @@ async function main(argv) {
   if (command === 'fingerprint') return cmdFingerprint(ctx);
   if (command === 'benchmark') return cmdBenchmark(ctx, args);
   if (command === 'council-stats') return cmdCouncilStats(ctx, args);
+  if (command === 'compile') return cmdCompile(ctx, args);
   if (command === 'serve') return cmdServe(ctx, args);
   if (command === 'deploy') return cmdDeploy(ctx, args);
   if (command === 'stop') {
