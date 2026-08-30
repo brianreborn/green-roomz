@@ -316,3 +316,15 @@ test('waitForReady tolerates whisper/sd-server which have no /health (404 on it)
   assert.equal(rec.state, 'ready');
   await manager.stop(agent.alias);
 });
+
+test('evictForNewSpecialist drops the LRU warm specialist to make room (maxWarm 1)', async () => {
+  const manager = new ProcessManager({ manifest: sampleManifest(), registry: new AgentRegistry(sampleManifest()), spawnImpl() { throw new Error('no'); } });
+  manager.maxWarmSpecialists = 2;
+  const now = Date.now();
+  manager.processes.set('vision-layout-agent', { alias: 'vision-layout-agent', owned: true, resident: false, state: 'ready', child: new FakeChild(), lastUsedAt: now - 5000 });
+  manager.processes.set('general-text-speculator', { alias: 'general-text-speculator', owned: true, resident: false, state: 'ready', child: new FakeChild(), lastUsedAt: now - 1000 });
+  const dropped = await manager.evictForNewSpecialist('qwenstral-code-speculator');
+  assert.deepEqual(dropped, ['vision-layout-agent']);         // older one goes; 1 slot kept for the incoming
+  assert.ok(!manager.processes.has('vision-layout-agent'));
+  assert.ok(manager.processes.has('general-text-speculator')); // most-recent stays
+});

@@ -826,7 +826,15 @@ export class Gateway {
         visited.add(alias);
         hops.push(alias);
         const agent = this.registry.get(alias);
-        const record = await this.processes.ensure(agent, { signal: request.abortSignal });
+        let record;
+        try {
+          record = await this.processes.ensure(agent, { signal: request.abortSignal });
+        } catch (startError) {
+          if (request.abortSignal?.aborted) throw startError;
+          notes.push(stripControls(`${alias} failed to start: ${startError?.message ?? startError}`));
+          this.observeHop('agent_unavailable', alias, { ticket: issuedSession, payload: { reason: 'start_failed', hops: hops.slice() } });
+          continue;   // let the loop end -> media guard / text fallback below
+        }
         if (record?.logical) {
           this.observeHop('success', alias, { ticket: issuedSession, payload: { reason, hops: hops.slice() } });
           this.sessions.setAgentAlias(issuedSession, alias);
@@ -872,6 +880,15 @@ export class Gateway {
         const headers = hopHeaders(alias, reason);
         for (const [key, value] of Object.entries(headers)) response.setHeader(key, value);
         return deliverPeek({ peek, request, response, body: payload, headers });
+      }
+
+      // A request carrying an image or audio part must NOT fall back to the
+      // text model (it will 500 on the media). If its specialist could not be
+      // reached, that is a clean 503.
+      if (hard.modality?.image || hard.modality?.audio) {
+        const want = hard.modality.image ? 'vision-layout-agent' : 'audio-transcription-agent';
+        throw new UnavailableError(`${want} could not be started for this ${hard.modality.image ? 'image' : 'audio'} request`,
+          (this.registry.status(want).missing ?? []).concat(notes));
       }
 
       // The loop ended without a real answer (nothing picked, everything cold,

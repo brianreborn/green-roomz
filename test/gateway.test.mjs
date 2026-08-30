@@ -897,3 +897,20 @@ test('auto-route to a cold non-fallback specialist yields a real general-text an
   assert.equal(res.headers['x-green-roomz-effective-alias'], 'general-text-speculator');
   assert.equal(urls.some((u) => u.includes(':18183')), false, 'did not spontaneously cold-start the 7B code model');
 });
+
+test('an image request whose vision backend will not start is a 503, never a text-model 500', async (t) => {
+  const { server } = await withServer(t, {}, {
+    ready: ['tool-router-agent', 'general-text-speculator'],   // vision is NOT ready and cannot spawn
+    stubEnsure: false,
+    fetchImpl: async () => jsonFetch({ choices: [{ message: { content: 'x' } }] }),
+  });
+  const res = await request(server, {
+    path: '/v1/chat/completions', method: 'POST', headers: { 'content-type': 'application/json' },
+    body: { model: 'vision-layout-agent', messages: [{ role: 'user', content: [
+      { type: 'text', text: 'what is this' },
+      { type: 'image_url', image_url: { url: 'data:image/png;base64,iVBORw0KGgo=' } },
+    ] }] },
+  });
+  assert.equal(res.status, 503);
+  assert.notEqual(res.headers['x-green-roomz-effective-alias'], 'general-text-speculator');
+});

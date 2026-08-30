@@ -142,7 +142,11 @@ export class ProcessManager {
     // Starting a specialist must never stop or unload it — two llama-server
     // processes at once is required (nexus :8187 CPU + specialist vulkan).
     if (this.starting.has(agent.alias)) return this.starting.get(agent.alias);
-    const promise = Promise.resolve().then(() => this.start(agent, { signal }));
+    const promise = Promise.resolve()
+      // Make room before starting another specialist on a memory-tight box:
+      // evict the LRU warm one now rather than waiting for the idle sweep.
+      .then(() => (isResidentAgent(agent) ? null : this.evictForNewSpecialist(agent.alias)))
+      .then(() => this.start(agent, { signal }));
     this.starting.set(agent.alias, promise.finally(() => this.starting.delete(agent.alias)));
     return this.starting.get(agent.alias);
   }
@@ -348,6 +352,18 @@ export class ProcessManager {
    * and anything currently starting are never touched. Keeps a 16 GB box from
    * drowning in mmap'd model files.
    */
+  /** Before a new specialist starts, drop LRU warm ones so at most maxWarm-1 remain. */
+  async evictForNewSpecialist(incomingAlias) {
+    const warm = [...this.processes.values()].filter((r) =>
+      r.owned && !r.resident && r.alias !== incomingAlias
+      && (r.state === 'ready' || r.state === 'starting') && r.child.exitCode === null);
+    if (warm.length < Math.max(1, this.maxWarmSpecialists)) return [];
+    warm.sort((a, b) => (a.lastUsedAt ?? a.createdAt ?? 0) - (b.lastUsedAt ?? b.createdAt ?? 0));
+    const drop = warm.slice(0, warm.length - Math.max(0, this.maxWarmSpecialists - 1));
+    await Promise.all(drop.map((r) => this.stop(r.alias)));
+    return drop.map((r) => r.alias);
+  }
+
   async sweepIdle(now = Date.now()) {
     const evictable = [...this.processes.values()].filter((r) =>
       r.owned && !r.resident && r.state === 'ready' && r.child.exitCode === null && !this.starting.has(r.alias));

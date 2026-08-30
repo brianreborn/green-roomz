@@ -88,7 +88,60 @@
       ],
       "system_policy": "policies/vision-layout.md",
       "context_size": 8192,
-      "profiles": []
+      "profiles": [
+        {
+          "id": "vulkan-all",
+          "args": [
+            "--load-mode",
+            "mmap",
+            "--fit",
+            "off",
+            "--device",
+            "Vulkan0",
+            "--n-gpu-layers",
+            "all",
+            "--threads",
+            "4",
+            "--threads-batch",
+            "4",
+            "--batch-size",
+            "256",
+            "--ubatch-size",
+            "64",
+            "--cache-type-k",
+            "q8_0",
+            "--cache-type-v",
+            "q8_0"
+          ]
+        },
+        {
+          "id": "cpu-4",
+          "args": [
+            "--load-mode",
+            "mmap",
+            "--fit",
+            "off",
+            "--device",
+            "none",
+            "--no-op-offload",
+            "--n-gpu-layers",
+            "0",
+            "--threads",
+            "4",
+            "--threads-batch",
+            "4",
+            "--batch-size",
+            "256",
+            "--ubatch-size",
+            "64",
+            "--cache-type-k",
+            "q8_0",
+            "--cache-type-v",
+            "q8_0",
+            "--no-mmproj-offload"
+          ]
+        }
+      ]
     },
     {
       "alias": "audio-transcription-agent",
