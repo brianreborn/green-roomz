@@ -105,6 +105,39 @@ persist across process exit without an explicit dump:
 SIGSTOP for CPU) are in. A tmpfs KV arena is a real but small further win behind
 a ggml patch; the GPU-yield protocol is the bigger prize for dGPU hosts.
 
+## Disk-backed KV — named checkpoints, warm-start, rollback
+
+Swap is opaque and ephemeral: you can't name a snapshot, roll back, or warm-start
+a fresh process from a prior state. **Disk-backed model memory** gives all of
+that, and llama.cpp already implements it at the application level — no MMU games,
+works on Windows too.
+
+`--slot-save-path <dir>` enables:
+
+| endpoint | effect |
+|---|---|
+| `POST /slots/0?action=save`  `{"filename":"tag.bin"}` | dump the slot's KV cache to a named file |
+| `POST /slots/0?action=restore` `{"filename":"tag.bin"}` | load it back into a running slot |
+| `--cache-idle-slots` | auto-spill an idle slot to the prompt cache when a new task arrives |
+| `--slot-prompt-similarity` | reuse a slot whose prompt prefix matches the request |
+
+**Live-measured (0.5B, small ctx):** save 200 in **24 ms** → 2.46 MB file;
+restore in **5 ms**. A 4B/7B at full 8k context is a few hundred MB → save/restore
+is disk-bound (~0.5–2 s) but still far cheaper than recomputing the KV.
+
+green-roomz wires this into the state model it already has (`gateway.checkpoint_dir`
+or `GREEN_ROOMZ_CHECKPOINT_DIR`):
+
+- every `llama_server` launches with `--slot-save-path <dir>/<alias>/` + `--cache-idle-slots`
+- `ProcessManager.checkpointModel(alias, tag)` / `restoreModel(alias, file)`
+- **terminate-eviction checkpoints first** — `stop()` saves `on-stop.bin` before
+  SIGTERM, so a terminated model is not a lost conversation
+- `checkpoint_keep` (default 3) bounds retained snapshots per model
+- warm-start a fresh process from any snapshot; roll back to an older one
+
+This is strictly better than swap for durability: a checkpoint survives a
+terminate, a gateway crash, or a move to another host - swap does not.
+
 ## "Every model loaded, disk-backed" + a shared GPU pool
 
 ### CPU side — this is just overcommit + swap, and it works today

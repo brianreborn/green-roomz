@@ -355,3 +355,36 @@ test('suspend/resume: an over-ceiling CPU model is frozen (SIGSTOP), revived by 
   assert.equal(revived.state, 'ready');
   assert.ok(signals.some((s) => s[0] === 'CONT'));
 });
+
+test('checkpoint/restore: save the slot KV to a named file, restore it, checkpoint on stop', async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'grz-ckpt-'));
+  const manifest = sampleManifest();
+  manifest.gateway.checkpoint_dir = dir;
+  const calls = [];
+  const manager = new ProcessManager({
+    manifest, registry: new AgentRegistry(manifest), spawnImpl() { throw new Error('no'); },
+    fetchImpl: async (url, init) => { calls.push({ url: String(url), body: init?.body && JSON.parse(init.body) }); return { ok: true, status: 200 }; },
+  });
+  const agent = manifest.agents.find((a) => a.alias === 'general-text-speculator');
+  const child = new FakeChild();
+  manager.processes.set(agent.alias, { alias: agent.alias, owned: true, resident: false, state: 'ready', child, createdAt: Date.now() });
+
+  // launch args carry --slot-save-path
+  const launch = manager.buildLaunch(agent, { id: 'x', args: ['--device', 'none'] });
+  assert.ok(launch.args.includes('--slot-save-path'));
+  assert.ok(launch.args.includes('--cache-idle-slots'));
+
+  const cp = await manager.checkpointModel(agent.alias, 'snap1');
+  assert.equal(cp.filename, 'snap1.bin');
+  assert.match(calls.at(-1).url, /\/slots\/0\?action=save/);
+  assert.equal(calls.at(-1).body.filename, 'snap1.bin');
+
+  assert.equal(await manager.restoreModel(agent.alias), true);       // newest
+  assert.match(calls.at(-1).url, /\/slots\/0\?action=restore/);
+  assert.equal(calls.at(-1).body.filename, 'snap1.bin');
+
+  await manager.stop(agent.alias);
+  assert.ok(calls.some((c) => /action=save/.test(c.url) && c.body.filename === 'on-stop.bin'));
+
+  rmSync(dir, { recursive: true, force: true });
+});

@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import os from 'node:os';
-import { existsSync, statSync } from 'node:fs';
+import path from 'node:path';
+import { existsSync, mkdirSync, statSync } from 'node:fs';
 import { UnavailableError } from './errors.mjs';
 import { sleep } from './util.mjs';
 import { agentFootprintBytes, headroomBytes, profileAdmitted } from './memory.mjs';
@@ -132,6 +133,47 @@ export class ProcessManager {
     this.canSuspend = g.suspend_evicted !== false && process.platform !== 'win32';
     this.suspendImpl = (pid) => process.kill(pid, 'SIGSTOP');
     this.resumeImpl = (pid) => process.kill(pid, 'SIGCONT');
+    // Disk-backed KV checkpoints. Off unless a dir is configured.
+    this.checkpointDir = g.checkpoint_dir ?? process.env.GREEN_ROOMZ_CHECKPOINT_DIR ?? null;
+    this.checkpointKeep = g.checkpoint_keep ?? 3;
+  }
+
+  checkpointPathFor(alias) {
+    return path.join(this.checkpointDir, alias.replace(/[^a-z0-9-]/gi, '_'));
+  }
+
+  /** Save the live slot KV to a named file. `tag` defaults to a timestamp. */
+  async checkpointModel(alias, tag = String(Date.now())) {
+    const rec = this.processes.get(alias);
+    if (!this.checkpointDir || !rec || rec.child.exitCode !== null) return null;
+    const agent = this.manifest.agents.find((a) => a.alias === alias);
+    const filename = `${tag}.bin`;
+    try {
+      mkdirSync(this.checkpointPathFor(alias), { recursive: true });
+      const res = await this.fetch(`http://127.0.0.1:${agent.port}/slots/0?action=save`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ filename }), signal: AbortSignal.timeout(15_000),
+      });
+      if (!res.ok) return null;
+      rec.checkpoints = [...(rec.checkpoints ?? []), { tag, filename, at: Date.now() }].slice(-this.checkpointKeep);
+      return rec.checkpoints[rec.checkpoints.length - 1];
+    } catch { return null; }
+  }
+
+  /** Restore a saved slot KV into a running model (default: its newest checkpoint). */
+  async restoreModel(alias, filename) {
+    const rec = this.processes.get(alias);
+    if (!this.checkpointDir || !rec || rec.child.exitCode !== null) return false;
+    const agent = this.manifest.agents.find((a) => a.alias === alias);
+    const target = filename ?? rec.checkpoints?.[rec.checkpoints.length - 1]?.filename;
+    if (!target) return false;
+    try {
+      const res = await this.fetch(`http://127.0.0.1:${agent.port}/slots/0?action=restore`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ filename: target }), signal: AbortSignal.timeout(15_000),
+      });
+      return res.ok;
+    } catch { return false; }
   }
 
   suspendRecord(record) {
@@ -218,6 +260,13 @@ export class ProcessManager {
       // either way. The resident nexus keeps warm-up (it is always hot).
       if (!isResidentAgent(agent) && agent.warmup !== true && !args.includes('--warmup') && !args.includes('--no-warmup')) {
         args.push('--no-warmup');
+      }
+      // Disk-backed KV: named slot checkpoints (save/restore/rollback, portable,
+      // no MMU games) + auto-spill idle slots to the prompt cache. Terminate then
+      // becomes "checkpoint and exit", not "lose the conversation".
+      if (this.checkpointDir && !args.includes('--slot-save-path')) {
+        args.push('--slot-save-path', this.checkpointPathFor(agent.alias));
+        if (!args.includes('--cache-idle-slots') && !args.includes('--no-cache-idle-slots')) args.push('--cache-idle-slots');
       }
     } else if (runtime.kind === 'whisper-server') {
       args.push('--port', String(agent.port), '--model', agent.model, ...(profile?.args ?? []));
@@ -354,9 +403,13 @@ export class ProcessManager {
     throw new Error(`health deadline exceeded after ${timeoutMs} ms`);
   }
 
-  async stop(alias) {
+  async stop(alias, { checkpoint = true } = {}) {
     const record = this.processes.get(alias);
     if (!record) return false;
+    // Terminate is "checkpoint the KV, then exit" - not "lose the conversation".
+    if (checkpoint && this.checkpointDir && !record.resident && record.state === 'ready' && record.child.exitCode === null) {
+      await this.checkpointModel(alias, 'on-stop');
+    }
     await this.stopRecord(record);
     this.processes.delete(alias);
     this.registry.setStatus(alias, 'cold');
