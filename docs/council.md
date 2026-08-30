@@ -60,7 +60,7 @@ in the session a council; `/council off` clears it. `/council on <targets>
 
 | judge | how | for |
 |---|---|---|
-| **field-vote** (default) | parse each answer as JSON, per-key majority; outlier = most-dissenting variant | structured extraction — label compliance |
+| **field-vote** (default) | parse each answer as JSON, per-key **weighted** majority (weight = `0.5 + scorecard agree_rate` once a variant has ≥ 5 runs, else 1.0); outlier = most-dissenting variant | structured extraction — label compliance |
 | **judge-model** | a judge alias (`gateway.council_judge_alias`, default nexus) picks the best | free text |
 | **similarity** | medoid by embedding cosine via `semantic-embedding-agent`; far outlier flagged | free text, no judge prompt |
 
@@ -97,8 +97,6 @@ is surfaced for the operator.
 
 - **Cross-host council** — fan out to note9 + qodesh + shalom variants over the
   peer allowlist. Needs the host bring-ups (issues #2–#5).
-- **Weighted vote** — weight each variant by its running scorecard agreement
-  rate, so a proven model breaks ties.
 - **Cascade / escalate** — try the cheap variant alone; only convene the council
   when its `/confidence` is low or its JSON fails the schema.
 - **Judge = the security-monitor** for policy-sensitive turns (it already

@@ -23,11 +23,17 @@ function sameValue(a, b) {
 }
 
 /**
- * field-vote: parse each candidate as JSON; per key, majority value wins.
- * Non-JSON candidates abstain. Returns the consensus object, per-key tallies,
- * and the alias that disagreed with the majority most often.
+ * field-vote: parse each candidate as JSON; per key, the value with the most
+ * voter weight wins (weight 1 each by default; pass `weights` — e.g. scorecard
+ * agreement rates — so a proven variant breaks ties). Non-JSON candidates
+ * abstain. Returns the consensus object, per-key tallies, and the alias that
+ * disagreed with the majority most often.
  */
-export function fieldVote(candidates) {
+export function fieldVote(candidates, { weights = {} } = {}) {
+  const w = (alias) => {
+    const n = Number(weights[alias]);
+    return Number.isFinite(n) && n > 0 ? n : 1;
+  };
   const parsed = candidates.map((c) => ({ ...c, json: parseJsonLoose(c.content) }));
   const voters = parsed.filter((p) => p.json && typeof p.json === 'object' && !Array.isArray(p.json));
   const keys = [...new Set(voters.flatMap((v) => Object.keys(v.json)))];
@@ -41,10 +47,10 @@ export function fieldVote(candidates) {
     for (const v of voters) {
       const val = v.json[key];
       const hit = buckets.find((b) => sameValue(b.value, val));
-      if (hit) hit.by.push(v.alias);
-      else buckets.push({ value: val, by: [v.alias] });
+      if (hit) { hit.by.push(v.alias); hit.weight += w(v.alias); }
+      else buckets.push({ value: val, by: [v.alias], weight: w(v.alias) });
     }
-    buckets.sort((a, b) => b.by.length - a.by.length);
+    buckets.sort((a, b) => b.weight - a.weight || b.by.length - a.by.length);
     const [win, ...rest] = buckets;
     consensus[key] = win.value;
     votes[key] = { value: win.value, count: win.by.length, of: voters.length, dissent: rest.map((r) => ({ value: r.value, by: r.by })) };

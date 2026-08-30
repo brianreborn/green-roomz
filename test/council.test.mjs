@@ -36,6 +36,15 @@ test('fieldVote: case/whitespace-insensitive string match', () => {
   assert.equal(r.votes.t.count, 2);
 });
 
+test('fieldVote: weights break a tie toward the proven variant', () => {
+  const cands = [c('a', '{"x":"1"}'), c('b', '{"x":"2"}')];
+  assert.equal(fieldVote(cands).consensus.x, '1');                       // tie -> first bucket
+  assert.equal(fieldVote(cands, { weights: { b: 1.4 } }).consensus.x, '2'); // b outweighs a
+  // a 2-vote majority still beats one heavily-weighted dissenter
+  const maj = [c('a', '{"x":"1"}'), c('b', '{"x":"1"}'), c('d', '{"x":"2"}')];
+  assert.equal(fieldVote(maj, { weights: { d: 1.5 } }).consensus.x, '1');
+});
+
 test('similarityVote: medoid wins, far outlier flagged', () => {
   const vecs = [
     { alias: 'a', embedding: [1, 0, 0] },

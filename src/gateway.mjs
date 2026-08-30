@@ -1,5 +1,5 @@
 import { createServer } from 'node:http';
-import { appendFileSync, mkdirSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fieldVote, similarityVote, resolveJudgeChoice, judgePrompt } from './council.mjs';
 import { AGENCY_ROLE, DEFAULT_FAITH, DEFAULT_FEAR, FALLBACK_ALIAS, MAX_SPECIALIST_HOPS, MONITOR_ALIAS, NEXUS_ALIAS, REBUKE_OP, UPSTREAM_MAX_BUFFER_BYTES, UPSTREAM_TIMEOUT_MS, YOLO_TOKEN } from './constants.mjs';
@@ -675,9 +675,35 @@ export class Gateway {
     }, headers);
   }
 
+  /**
+   * Per-alias tie-break weights from the council scorecard: 0.5 + agree_rate
+   * (neutral 1.0 at agree_rate 0.5), only for aliases with >= 5 recorded runs.
+   * {} when there is no scorecard yet.
+   */
+  councilWeights() {
+    if (!this.councilDir) return {};
+    try {
+      const file = path.join(this.councilDir, 'scores.jsonl');
+      const rows = readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
+      const per = {};
+      for (const r of rows) {
+        for (const v of r.results ?? []) {
+          const s = (per[v.alias] ??= { runs: 0, good: 0 });
+          s.runs += 1;
+          if (v.verdict === 'winner' || v.verdict === 'agreed') s.good += 1;
+        }
+      }
+      const weights = {};
+      for (const [alias, s] of Object.entries(per)) {
+        if (s.runs >= 5) weights[alias] = 0.5 + s.good / s.runs;
+      }
+      return weights;
+    } catch { return {}; }
+  }
+
   async judgeCouncil(judge, userText, usable, request) {
     if (!usable.length) return { judge, winner: null, outlier: null, agreement: 0 };
-    if (judge === 'field-vote') return fieldVote(usable);
+    if (judge === 'field-vote') return fieldVote(usable, { weights: this.councilWeights() });
     if (judge === 'similarity') {
       const embedAgent = this.registry.get('semantic-embedding-agent');
       const vectors = [];

@@ -984,6 +984,35 @@ test('council: fan out to variants, field-vote the JSON, flag the outlier, write
   assert.ok(scores[0].results.some((r) => r.verdict === 'outlier'));
 });
 
+test('council: councilWeights derives 0.5 + agree_rate from the scorecard (>= 5 runs)', async (t) => {
+  const { mkdtempSync, writeFileSync } = await import('node:fs');
+  const os = await import('node:os');
+  const nodePath = await import('node:path');
+  const dir = mkdtempSync(nodePath.join(os.tmpdir(), 'grz-weights-'));
+  const row = (results) => JSON.stringify({ task: 'vision', results });
+  const lines = [];
+  for (let i = 0; i < 6; i += 1) {
+    lines.push(row([
+      { alias: 'v', verdict: i < 5 ? 'winner' : 'outlier' },  // 5/6 good
+      { alias: 'w', verdict: 'outlier' },                       // 0/6
+      { alias: 'rare', verdict: 'winner' },
+    ].slice(0, i === 0 ? 3 : 2))); // 'rare' only appears once -> excluded (< 5 runs)
+  }
+  writeFileSync(nodePath.join(dir, 'scores.jsonl'), lines.join('\n'));
+
+  const manifest = sampleManifest();
+  manifest.gateway.council_dir = dir;
+  const gateway = new Gateway({
+    manifest, registry: await new AgentRegistry(manifest).inspect(),
+    processes: new ProcessManager({ manifest, registry: new AgentRegistry(manifest), spawnImpl() { throw new Error('no'); } }),
+    sessions: new SessionLedger(), policy: new PolicyGate('maximize'),
+  });
+  const wts = gateway.councilWeights();
+  assert.ok(Math.abs(wts.v - (0.5 + 5 / 6)) < 1e-9);
+  assert.ok(Math.abs(wts.w - 0.5) < 1e-9);
+  assert.equal('rare' in wts, false);
+});
+
 test('council: /council on sets a session default that fans out later turns', async (t) => {
   const manifest = sampleManifest();
   const vl = manifest.agents.find((a) => a.alias === 'vision-layout-agent');
