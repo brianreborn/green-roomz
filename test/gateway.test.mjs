@@ -914,3 +914,54 @@ test('an image request whose vision backend will not start is a 503, never a tex
   assert.equal(res.status, 503);
   assert.notEqual(res.headers['x-green-roomz-effective-alias'], 'general-text-speculator');
 });
+
+test('council: fan out to variants, field-vote the JSON, flag the outlier, write a scorecard', async (t) => {
+  const { mkdtempSync } = await import('node:fs');
+  const { readFileSync } = await import('node:fs');
+  const os = await import('node:os');
+  const nodePath = await import('node:path');
+  const dir = mkdtempSync(nodePath.join(os.tmpdir(), 'grz-council-'));
+
+  const manifest = sampleManifest();
+  manifest.gateway.council_dir = dir;
+  // add two vision variants that exist + are ready
+  const vl = manifest.agents.find((a) => a.alias === 'vision-layout-agent');
+  manifest.agents.push({ ...vl, alias: 'vision-layout-agent@b', variant_of: 'vision-layout-agent', port: 18281, model: '/tmp/b.gguf' });
+  manifest.agents.push({ ...vl, alias: 'vision-layout-agent@c', variant_of: 'vision-layout-agent', port: 18282, model: '/tmp/c.gguf' });
+
+  const registry = await new AgentRegistry(manifest).inspect();
+  for (const a of ['vision-layout-agent', 'vision-layout-agent@b', 'vision-layout-agent@c', 'tool-router-agent']) registry.setStatus(a, 'ready');
+  const processes = new ProcessManager({ manifest, registry, spawnImpl() { throw new Error('no'); } });
+  processes.ensure = async (agent) => ({ alias: agent.alias, state: 'ready' });
+
+  const answers = {
+    18181: '{"brand":"Acme","abv":"13.5%"}',
+    18281: '{"brand":"Acme","abv":"13.5%"}',
+    18282: '{"brand":"Acme","abv":"12%"}',   // the outlier
+  };
+  const gateway = new Gateway({
+    manifest, registry, processes, sessions: new SessionLedger(), policy: new PolicyGate('maximize'),
+    fetchImpl: async (url) => {
+      const port = Number(String(url).match(/:(\d+)\//)[1]);
+      return jsonFetch({ choices: [{ message: { role: 'assistant', content: answers[port] } }] });
+    },
+  });
+  const server = await gateway.listen('127.0.0.1', 0);
+  t.after(() => server.close());
+
+  const res = await request(server, {
+    path: '/v1/chat/completions', method: 'POST', headers: { 'content-type': 'application/json' },
+    body: { council: { of: 'vision-layout-agent', judge: 'field-vote' }, messages: [{ role: 'user', content: 'extract fields' }] },
+  });
+  assert.equal(res.status, 200);
+  assert.equal(JSON.parse(res.body.choices[0].message.content).abv, '13.5%');
+  assert.equal(res.body.council.outlier, 'vision-layout-agent@c');
+  assert.equal(res.body.council.votes.abv.count, 2);
+  assert.equal(res.body.council.variants.length, 3);
+  assert.match(res.headers['x-green-roomz-council'], /"winner"/);
+
+  const scores = readFileSync(nodePath.join(dir, 'scores.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+  assert.equal(scores.length, 1);
+  assert.equal(scores[0].outlier, 'vision-layout-agent@c');
+  assert.ok(scores[0].results.some((r) => r.verdict === 'outlier'));
+});

@@ -1,4 +1,7 @@
 import { createServer } from 'node:http';
+import { appendFileSync, mkdirSync } from 'node:fs';
+import path from 'node:path';
+import { fieldVote, similarityVote, resolveJudgeChoice, judgePrompt } from './council.mjs';
 import { AGENCY_ROLE, DEFAULT_FAITH, DEFAULT_FEAR, FALLBACK_ALIAS, MAX_SPECIALIST_HOPS, MONITOR_ALIAS, NEXUS_ALIAS, REBUKE_OP, UPSTREAM_MAX_BUFFER_BYTES, UPSTREAM_TIMEOUT_MS, YOLO_TOKEN } from './constants.mjs';
 import { loadDeclaredKernel } from './config.mjs';
 import { Mailbox } from './mailbox.mjs';
@@ -39,6 +42,30 @@ function identityFrom(request, apiKey) {
 }
 
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1', 'localhost']);
+const COUNCIL_JUDGES = new Set(['field-vote', 'judge-model', 'similarity']);
+
+/**
+ * A council request: `{ "council": true | { of, variants, judge, parallel } }`.
+ * Resolves the alias set to run: an explicit `variants` list, all variants of
+ * `of` / `body.model`, or null when there is nothing to fan out to.
+ */
+export function parseCouncilRequest(body, registry) {
+  const raw = body?.council;
+  if (!raw) return null;
+  const spec = raw === true ? {} : (typeof raw === 'object' ? raw : null);
+  if (!spec) return null;
+  const judge = COUNCIL_JUDGES.has(spec.judge) ? spec.judge : 'field-vote';
+
+  let aliases = Array.isArray(spec.variants) ? spec.variants.filter((a) => registry.agents.has(a)) : null;
+  if (!aliases || aliases.length < 2) {
+    const base = (spec.of || body.model || '').replace(/@.*$/, '');
+    if (base && registry.agents.has(base)) {
+      aliases = [base, ...[...registry.agents.keys()].filter((a) => a.startsWith(`${base}@`))];
+    }
+  }
+  if (!aliases || aliases.length < 2) return null;
+  return { aliases: [...new Set(aliases)], judge, parallel: spec.parallel };
+}
 
 /** Normalize a Node remoteAddress (drops the v4-in-v6 prefix). */
 export function normalizeAddr(addr) {
@@ -245,6 +272,7 @@ export class Gateway {
     });
     this.logger = logger ?? createLogger();
     this.extraPeers = [];
+    this.councilDir = this.manifest.gateway?.council_dir ?? process.env.GREEN_ROOMZ_COUNCIL_DIR ?? null;
   }
 
   /** Static manifest allow_peers plus any injected at launch (e.g. by the adb harness). */
@@ -558,6 +586,125 @@ export class Gateway {
     }
   }
 
+  /**
+   * Run the same turn through several model variants, judge the results, return
+   * the consensus + which variant was the outlier, and append a scorecard row.
+   */
+  async handleCouncil(request, response, body, identity, session, cors, pathname, spec) {
+    const issuedSession = session?.id ?? this.sessions.create({ identity, agentAlias: spec.aliases[0], modality: detectModalities(body) });
+    const stripped = stripSlashCommand(body);
+    const path = String((pathname ?? request.url.split('?')[0])).replace(/\/route$/, '') || '/v1/chat/completions';
+
+    const runOne = async (alias) => {
+      const t0 = Date.now();
+      try {
+        const agent = this.registry.get(alias);
+        if (!agent || this.registry.status(alias).state === 'unavailable') return { alias, ok: false, content: '', status: 503, ms: Date.now() - t0 };
+        await this.processes.ensure(agent, { signal: request.abortSignal });
+        const payload = { ...prepareInferenceBody(stripped, agent), stream: false };
+        const res = await this.fetchImpl(`http://127.0.0.1:${agent.port}${path}`, {
+          method: 'POST', headers: { 'content-type': 'application/json', connection: 'close' },
+          body: JSON.stringify(payload), signal: deadlineSignal(request.abortSignal, this.manifest.gateway.upstream_timeout_ms ?? UPSTREAM_TIMEOUT_MS),
+        });
+        const raw = await readCappedText(res, this.manifest.gateway.upstream_max_buffer_bytes ?? UPSTREAM_MAX_BUFFER_BYTES);
+        let content = '';
+        try { content = JSON.parse(raw)?.choices?.[0]?.message?.content ?? ''; } catch { content = raw; }
+        return { alias, ok: res.status < 400 && content.length > 0, content: String(content), status: res.status, ms: Date.now() - t0 };
+      } catch (error) {
+        return { alias, ok: false, content: '', status: 0, error: String(error?.message ?? error), ms: Date.now() - t0 };
+      }
+    };
+
+    // Parallel only if every variant can admit without eviction; else serial
+    // (each run evicts the previous - slow, but the memory-tight path).
+    const canParallel = spec.parallel ?? spec.aliases.every((a) => aliasCanAdmit(this.registry, a, this.processes) && this.registry.status(a).state === 'ready');
+    const candidates = canParallel
+      ? await Promise.all(spec.aliases.map(runOne))
+      : await spec.aliases.reduce(async (acc, a) => [...(await acc), await runOne(a)], Promise.resolve([]));
+
+    const usable = candidates.filter((c) => c.ok);
+    const verdict = await this.judgeCouncil(spec.judge, latestUserMessageText(stripped), usable, request);
+    const winnerAlias = verdict.winner ?? usable[0]?.alias ?? candidates[0]?.alias;
+    const winnerText = spec.judge === 'field-vote'
+      ? JSON.stringify(verdict.consensus)
+      : (usable.find((c) => c.alias === winnerAlias)?.content ?? '');
+
+    this.recordCouncil({ task: detectModalities(body).image ? 'vision' : 'text', spec, candidates, verdict });
+    this.sessions.setAgentAlias(issuedSession, winnerAlias);
+
+    const headers = this.routeHeaders(issuedSession, { requestedAlias: body.model ?? null, effectiveAlias: winnerAlias, reason: `council_${spec.judge}` }, cors, { hops: spec.aliases.join(',') });
+    headers['x-green-roomz-council'] = headerSafe(JSON.stringify({ judge: spec.judge, winner: winnerAlias, outlier: verdict.outlier, agreement: verdict.agreement }));
+    return jsonResponse(response, usable.length ? 200 : 502, {
+      id: `grz-council-${issuedSession}`,
+      object: 'chat.completion',
+      model: winnerAlias,
+      choices: [{ index: 0, message: { role: 'assistant', content: winnerText }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+      council: {
+        judge: spec.judge,
+        variants: candidates.map((c) => ({ alias: c.alias, ok: c.ok, ms: c.ms, status: c.status })),
+        winner: winnerAlias,
+        outlier: verdict.outlier,
+        agreement: verdict.agreement,
+        ...(spec.judge === 'field-vote' ? { votes: verdict.votes, abstained: verdict.abstained } : {}),
+      },
+    }, headers);
+  }
+
+  async judgeCouncil(judge, userText, usable, request) {
+    if (!usable.length) return { judge, winner: null, outlier: null, agreement: 0 };
+    if (judge === 'field-vote') return fieldVote(usable);
+    if (judge === 'similarity') {
+      const embedAgent = this.registry.get('semantic-embedding-agent');
+      const vectors = [];
+      if (embedAgent && this.registry.status('semantic-embedding-agent').state !== 'unavailable') {
+        try {
+          await this.processes.ensure(embedAgent, { signal: request.abortSignal });
+          for (const c of usable) {
+            const r = await this.fetchImpl(`http://127.0.0.1:${embedAgent.port}/v1/embeddings`, {
+              method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: 'semantic-embedding-agent', input: c.content.slice(0, 4000) }),
+              signal: deadlineSignal(request.abortSignal, 20_000),
+            });
+            const emb = JSON.parse(await readCappedText(r, 4 * 1024 * 1024))?.data?.[0]?.embedding;
+            if (Array.isArray(emb)) vectors.push({ alias: c.alias, embedding: emb });
+          }
+        } catch { /* fall through */ }
+      }
+      return similarityVote(usable, vectors);
+    }
+    // judge-model: ask the nexus (or a configured judge alias) to pick
+    const judgeAlias = this.manifest.gateway.council_judge_alias ?? NEXUS_ALIAS;
+    const jAgent = this.registry.get(judgeAlias);
+    try {
+      await this.processes.ensure(jAgent, { signal: request.abortSignal });
+      const res = await this.fetchImpl(`http://127.0.0.1:${jAgent.port}/v1/chat/completions`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ messages: [{ role: 'user', content: judgePrompt(userText, usable) }], max_tokens: 8, stream: false }),
+        signal: deadlineSignal(request.abortSignal, 25_000),
+      });
+      const reply = JSON.parse(await readCappedText(res, 1024 * 1024))?.choices?.[0]?.message?.content ?? '';
+      return resolveJudgeChoice(reply, usable);
+    } catch {
+      return { judge: 'judge-model', winner: usable[0].alias, outlier: null, agreement: null };
+    }
+  }
+
+  recordCouncil({ task, spec, candidates, verdict }) {
+    if (!this.councilDir) return;
+    try {
+      mkdirSync(this.councilDir, { recursive: true });
+      const row = {
+        ts: Date.now(), task, judge: spec.judge, aliases: spec.aliases,
+        winner: verdict.winner, outlier: verdict.outlier, agreement: verdict.agreement,
+        results: candidates.map((c) => ({
+          alias: c.alias, ok: c.ok, ms: c.ms,
+          verdict: c.alias === verdict.winner ? 'winner' : c.alias === verdict.outlier ? 'outlier' : (c.ok ? 'agreed' : 'failed'),
+        })),
+      };
+      appendFileSync(path.join(this.councilDir, 'scores.jsonl'), JSON.stringify(row) + '\n');
+    } catch { /* best effort */ }
+  }
+
   routeHeaders(issuedSession, routed, cors, extra = {}) {
     return {
       'x-session-id': headerSafe(issuedSession),
@@ -585,6 +732,11 @@ export class Gateway {
 
     if (body.model === MONITOR_ALIAS) {
       return this.handleMonitorSnapshot(request, response, body, identity, session, cors);
+    }
+
+    const councilSpec = parseCouncilRequest(body, this.registry);
+    if (councilSpec) {
+      return this.handleCouncil(request, response, body, identity, session, cors, pathname, councilSpec);
     }
 
     return this.handleChatTurn(request, response, body, identity, session, cors, pathname);
