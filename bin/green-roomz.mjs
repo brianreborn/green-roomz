@@ -30,7 +30,7 @@ Commands:
   compile [--manifest path] [--check]   (write build/prompts/ stock system prompts)
   prime [--manifest path] [--only a,b]  (snapshot each agent's stock-prompt KV as "default")
   serve [--manifest path] [--host address] [--port number]
-  deploy [--manifest path] [--host address] [--port number] [--quick]
+  deploy [--manifest path] [--host address] [--port number] [--quick] [--prime]
   benchmark [alias|all] [--manifest path] [--quick] [--force]
   fingerprint [--manifest path]
   doctor [--manifest path]
@@ -312,6 +312,11 @@ async function cmdDeploy(ctx, args) {
   });
   const deployed = [...ctx.processes.selectedProfiles.entries()].map(([alias, id]) => `${alias}=${id}`);
   console.error(`deployed ${deployed.join(' ') || '(none)'}`);
+  await cmdCompile(ctx, []); // ship fresh build/prompts/
+  if (hasFlag(args, '--prime')) {
+    if (ctx.processes.checkpointDir) await cmdPrime(ctx, []); // default-installation checkpoints
+    else console.error('deploy --prime: no checkpoint dir configured, skipping prime');
+  }
   return cmdServe(ctx, args);
 }
 
