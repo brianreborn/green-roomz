@@ -213,6 +213,12 @@ export class ProcessManager {
       const kv = profile?.kv_cache ?? agent.kv_cache ?? 'q8_0';
       if (usesKvCache && kv !== 'f16' && !args.includes('--cache-type-k')) args.push('--cache-type-k', kv);
       if (usesKvCache && kv !== 'f16' && !args.includes('--cache-type-v')) args.push('--cache-type-v', kv);
+      // Evictable specialists skip the empty warm-up run - it makes them report
+      // ready ~1 s sooner and the first real request pays the graph-build cost
+      // either way. The resident nexus keeps warm-up (it is always hot).
+      if (!isResidentAgent(agent) && agent.warmup !== true && !args.includes('--warmup') && !args.includes('--no-warmup')) {
+        args.push('--no-warmup');
+      }
     } else if (runtime.kind === 'whisper-server') {
       args.push('--port', String(agent.port), '--model', agent.model, ...(profile?.args ?? []));
     } else if (runtime.kind === 'stable-diffusion') {
