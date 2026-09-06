@@ -542,7 +542,10 @@ export class Gateway {
     await this.processes.ensure(agent, { signal: request.abortSignal });
     const unpin = this.processes.pin(alias);
     try {
-      const payload = { ...prepareInferenceBody(body, agent), stream: false };
+      // Honor client stream preference. Forcing stream:false here collapsed
+      // OpenAI-compatible SSE on windows-mvp resident_fallback (tool-router)
+      // into a one-shot application/json chat.completion (parity battery case E).
+      const payload = prepareInferenceBody(body, agent);
       const path = '/v1/chat/completions';
       const target = `http://127.0.0.1:${agent.port}${path}`;
       this.sessions.setAgentAlias(issuedSession, alias);

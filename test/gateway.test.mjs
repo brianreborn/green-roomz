@@ -62,6 +62,25 @@ function request(server, { path, method = 'GET', headers = {}, body } = {}) {
   });
 }
 
+/** Like request(), but keeps the body as raw text (for SSE / text/event-stream). */
+function rawRequest(server, { path, method = 'GET', headers = {}, body } = {}) {
+  const { port } = server.address();
+  return new Promise((resolve, reject) => {
+    const req = http.request({ hostname: '127.0.0.1', port, path, method, headers, family: 4, timeout: 5000 }, (res) => {
+      const chunks = [];
+      res.on('data', (chunk) => chunks.push(chunk));
+      res.on('end', () => resolve({
+        status: res.statusCode,
+        headers: res.headers,
+        raw: Buffer.concat(chunks).toString(),
+      }));
+    });
+    req.on('error', reject); req.on('timeout', () => { req.destroy(new Error('request timeout')); });
+    if (body) req.write(JSON.stringify(body));
+    req.end();
+  });
+}
+
 function jsonFetch(payload, status = 200) {
   const json = JSON.stringify(payload);
   return {
@@ -536,6 +555,57 @@ test('nexus-picked cold specialist is not started; chat falls back to resident',
   assert.equal(result.body.choices[0].message.content, 'resident-ok');
   assert.equal(ensured.includes('general-text-speculator'), false);
   assert.equal(urls.some((url) => url.includes(':18184')), false);
+});
+
+test('resident_fallback honors stream:true with SSE data: chunks', async (t) => {
+  const seenStream = [];
+  const { server, processes } = await withServer(t, {}, {
+    ready: ['tool-router-agent'],
+    stubEnsure: true,
+    fetchImpl: async (url, init) => {
+      const body = JSON.parse(Buffer.from(init.body).toString());
+      if (String(body.messages?.[0]?.content ?? '').includes('AVAILABLE:')) {
+        return jsonFetch({
+          choices: [{ message: { role: 'assistant', content: JSON.stringify({ route: 'general-text-speculator', confidence: 0.9, reason: 'chat' }) } }],
+        });
+      }
+      seenStream.push(body.stream === true);
+      if (body.stream === true) {
+        const sse = 'data: {"choices":[{"delta":{"content":"hi-stream"}}]}\n\ndata: [DONE]\n\n';
+        return {
+          status: 200,
+          headers: new Headers({ 'content-type': 'text/event-stream' }),
+          async text() { return sse; },
+        };
+      }
+      return jsonFetch({ choices: [{ message: { role: 'assistant', content: 'resident-ok' } }] });
+    },
+  });
+  const ensured = [];
+  const original = processes.ensure;
+  processes.ensure = async (agent) => {
+    ensured.push(agent.alias);
+    return original(agent);
+  };
+  const result = await rawRequest(server, {
+    path: '/v1/chat/completions',
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'text/event-stream' },
+    body: {
+      model: 'general-text-speculator',
+      messages: [{ role: 'user', content: 'hello stream' }],
+      stream: true,
+      max_tokens: 32,
+    },
+  });
+  assert.equal(result.status, 200);
+  assert.match(String(result.headers['content-type'] ?? ''), /text\/event-stream/);
+  assert.match(result.raw, /data:/);
+  assert.match(result.raw, /hi-stream/);
+  assert.equal(result.headers['x-green-roomz-effective-alias'], 'tool-router-agent');
+  assert.equal(result.headers['x-green-roomz-route-reason'], 'resident_fallback');
+  assert.equal(ensured.includes('general-text-speculator'), false);
+  assert.equal(seenStream.includes(true), true, 'upstream payload must keep stream:true');
 });
 
 test('nexus-picked embed is not run as chat; falls back to resident', async (t) => {
