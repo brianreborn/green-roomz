@@ -2,7 +2,8 @@ import { detectModalities } from './routing.mjs';
 
 function collectText(body) {
   const parts = [];
-  for (const message of body?.messages ?? []) {
+  const messages = Array.isArray(body?.messages) ? body.messages : [];
+  for (const message of messages) {
     if (typeof message?.content === 'string') parts.push(message.content);
     else if (Array.isArray(message?.content)) {
       for (const part of message.content) {

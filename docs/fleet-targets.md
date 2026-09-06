@@ -41,7 +41,7 @@ Bar scale: tok/s 1#≈1; tok/W 1#≈0.25; J/tok 1#≈1 J. Width 40 (clip; shalom
 
 ```
 shalom      48    meas  ########################################   2026-08-29 CPU ngl0 tg8 (clip@40); Vulkan ngl99 tg8=8.4
-cursor      12–20 hyp   ################........................   Debian 13 x86_64 8c / 16 GB (Grok Bot computer); no 0.5B meas yet
+cursor      48    meas  ########################################   2026-09-03 0.5B Q4 HTTP t4 ~48 tok/s (clip@40); llama-bench tg8=70 but never 8 resident; host/cursor 16 GB, model on disk
 pixel8      20–40 est   ################################........
 note9       23.8  meas  #######################.................   2026-08-29 CPU 4t tg32 (pp64=36.8); no root
 EN2251       4–10 hyp   ##########..............................   Puma7 dual Atom if shelled AND ≥1GB free
@@ -62,7 +62,7 @@ J3B          0    hyp   ........................................   BT headset/do
 ```
 pixel8      5–8     est ################################
 shalom      2.7–4.0 meas ############........................    48 tok/s / 12–18 W
-cursor      0.6–1.3 hyp ###.....................................   12–20 tok/s / 15–20 W class
+cursor      2.4–3.2 meas ############........................    48 tok/s HTTP t4 / 15–20 W
 note9       3–5     est ################........................   23.8 tok/s / 5–8 W load
 EN2251      0.4–1.0 hyp ####....................................   ~10–17 W Hitron wall
 SAX2V1R     0.2–0.6 hyp ##......................................   ~8–15 W AP load
@@ -79,7 +79,7 @@ K243Y / IMW1202 / CKS5TW / J3B   0  (cannot run 0.5B)
 ```
 pixel8      0.15–0.3 est #.......................................
 shalom      0.25–0.4 meas #.......................................   12–18 W / 48 tok/s
-cursor      0.8–1.7 hyp ##......................................   15–20 W / 12–20 tok
+cursor      0.31–0.42 meas #.......................................   15–20 W / 48 tok/s HTTP t4
 note9       0.3–0.7 est #.......................................
 EN2251      1–3   hyp   ###.....................................
 SAX2V1R     2–6   hyp   ######..................................
@@ -91,7 +91,7 @@ E472VLE     40–200 hyp  ########################################
 K243Y / IMW1202 / CKS5TW / J3B   n/a (tok/s=0)
 ```
 
-**hyp / meas basis:** **cursor** = 8c/16 GB Debian 13 (Grok Bot) — 0.5B Q4 hyp until llama-bench. shalom CPU ngl0 llama-bench tg8 **48.1±1.9** (build 10665); same box Vulkan ngl99 tg8 **8.4** (Radeon 610M 2 CU, `matrix cores: none`) — keep Vulkan for 4B/7B, not 0.5B. EN2251 ≈ dual Atom vs godslove/qodesh **if RAM loads**; SAX2 ≈ 2–4×A53 if main CPU freed (cousin SAX1 IPQ8072A 4×A53@2.2 + 2 GB is stronger and **not** this SKU); TU7000/QD65NF ≈ TV ARM + panel watts; E472 ≈ decade-old smart SoC; MCU rows = **0** on purpose (no userspace GGUF).
+**hyp / meas basis:** **cursor** = 8c/16 GB Debian 13 (Grok Bot) — 0.5B Q4 **meas ~48 tok/s HTTP t4** (llama-bench tg8 was 70; we do not run 8 resident). Model on disk. shalom CPU ngl0 llama-bench tg8 **48.1±1.9** (build 10665); same box Vulkan ngl99 tg8 **8.4** (Radeon 610M 2 CU, `matrix cores: none`) — keep Vulkan for 4B/7B, not 0.5B. EN2251 ≈ dual Atom vs godslove/qodesh **if RAM loads**; SAX2 ≈ 2–4×A53 if main CPU freed (cousin SAX1 IPQ8072A 4×A53@2.2 + 2 GB is stronger and **not** this SKU); TU7000/QD65NF ≈ TV ARM + panel watts; E472 ≈ decade-old smart SoC; MCU rows = **0** on purpose (no userspace GGUF).
 
 Rejected for not apparently very feasible as **workers**: K243Y, IMW1202, CKS5TW, J3B (still charted at 0; keep as CE practice).
 
@@ -103,7 +103,7 @@ Rejected for not apparently very feasible as **workers**: K243Y, IMW1202, CKS5TW
 |---|---|---|---|---|
 | **shalom** | live | GRZ | **16 GB** (15.3 GiB visible) | yes — **48 meas** CPU |
 | **qodesh** | live | GRZ | **16 GB** DDR3 | yes — **3.0 meas** CPU |
-| **cursor** | live OS | Grok Bot Linux | **16 GB** | likely — **12–20 hyp** CPU; 0.5B GGUF not on disk yet |
+| **cursor** | live OS | Grok Bot Linux | **16 GB** | yes — **48 meas** HTTP t4; 0.5B Q4 on disk |
 | **godslove** | live OS | FreeBSD | **8 GB** | likely |
 | **pixel8** | userland | KernelSU | 8 GB class | likely; no 0.5B meas yet |
 | **note9** | userland (no root used) | ADB shell `/data/local/tmp/grz` on shalom | **5.7 GB** (MemTotal 5710492 kB; ~3.0 GB avail) | **SM-N960U / SDM845 / Adreno 630** — **23.8 meas** CPU tg32 |
@@ -140,7 +140,7 @@ Rejected for not apparently very feasible as **workers**: K243Y, IMW1202, CKS5TW
 |---|---|---|---|---|---|
 | **shalom** | Ryzen 5 **7520U** 4C/8T Mendocino 15 W; Radeon **610M 2 CU** RDNA2 (no matrix); **16 GB**; Win11 Home | Win11 | **48 meas** CPU ngl0 tg8 (Vulkan tg8 **8.4**) | N/A (PC; git) | live GRZ |
 | **qodesh** | Athlon II X2; **8600 GT 224 MB sm_1.1** (CUDA 6.5 back-compat goal); 16 GB DDR3 | Win11 | **3.0 meas** CPU interim (was 2.5) | N/A (PC; git + GGUF on disk) | live GRZ; GPU path = **build**, not Vulkan |
-| **cursor** | x86_64 8c; **16 GB**; Debian 13 (trixie); hostname `cursor` | Linux | **12–20 hyp** CPU | N/A (git) | Grok Bot computer; fleet e2e host; 0.5B Q4 not staged yet |
+| **cursor** | x86_64 8c no SMT; **16 GB**; Debian 13 (trixie); hostname `cursor`; host/cursor | Linux | **48 meas** HTTP t4 (llama-bench tg8=70; never 8 resident) | N/A (git) | Grok Bot computer; fleet e2e host; 0.5B Q4 on disk |
 | **godslove** | i7-620M; Ironlake/NVS; 8 GB | PQFreeBSD 15 | 4–8 est | FreeBSD install media / ZFS bootenv if set | CPU then GL |
 | **pixel8** | Tensor G3; EdgeTPU | Android+KernelSU | 20–40 est | **Yes** — factory images / Android Flash Tool / fastboot | Termux/sidecar |
 | **note9** | **SM-N960U** `crownqltesq`; **SDM845**; Adreno 630 (GLES 3.2); 8× Kryo; **5.7 GB**; Android 10 / API 29; serial `27841130ae1c7ece` | Android 10 | **23.8 meas** CPU 4t tg32 (pp64 **36.8**); pack in `/data/local/tmp/grz`, server `:8080` via adb forward | **Yes** — Odin/Heimdall stock + combo firmware widely mirrored | **no-root ADB shell now**; Termux Node gateway needs `allow-external-apps` or manual; OpenCL/Vulkan later |

@@ -26,7 +26,10 @@ test('lockdown(eth0) reject', () => {
   assert.equal(result.implemented, false);
   assert.match(result.reason, /machine-only/);
   assert.equal(invoked.length, 0, 'lockdown must never execute');
-  assert.throws(() => net.lockdown('machine'), /complex-last/);
+  const machine = net.lockdown('machine');
+  assert.equal(machine.ok, false);
+  assert.equal(machine.executed, false);
+  assert.equal(machine.kind, 'reject');
   assert.equal(invoked.length, 0);
 });
 

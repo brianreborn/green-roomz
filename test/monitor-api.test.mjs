@@ -139,6 +139,12 @@ test('envelope kinds, upcall allowlist, and slot counts', () => {
   assert.equal(UPCALL_SLOTS, 16);
   assert.equal(HOT_RING_SLOTS, 256);
   assert.equal(SLOT_BYTES, 16);
-  assert.throws(() => vote(), /complex-last/);
-  assert.throws(() => secureReboot(), /complex-last/);
+  const voted = vote();
+  assert.equal(voted.ok, false);
+  assert.equal(voted.executed, false);
+  assert.equal(voted.kind, 'reject');
+  const reboot = secureReboot();
+  assert.equal(reboot.ok, false);
+  assert.equal(reboot.executed, false);
+  assert.equal(reboot.kind, 'reject');
 });

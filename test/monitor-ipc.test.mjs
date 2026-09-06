@@ -156,11 +156,11 @@ test('kinds include monitor set plus gateway hop-class kinds', () => {
 
 test('vote/lockdown/reboot/secure_reboot remain uncallable stubs', () => {
   const ipc = new MonitorIpc({ autoDrain: false, rightsMask: CAP_DEFAULT | CAP.VOTE | CAP.LOCKDOWN | CAP.REBOOT | CAP.SECURE_REBOOT });
-  assert.throws(() => ipc.vote(), /complex-last/);
-  assert.throws(() => ipc.lockdown(), /complex-last/);
-  assert.throws(() => ipc.reboot(), /complex-last/);
-  assert.throws(() => ipc.secureReboot(), /complex-last/);
-  assert.throws(() => ipc.secure_reboot(), /complex-last/);
+  for (const result of [ipc.vote(), ipc.lockdown(), ipc.reboot(), ipc.secureReboot(), ipc.secure_reboot()]) {
+    assert.equal(result.ok, false);
+    assert.equal(result.executed, false);
+    assert.equal(result.kind, 'reject');
+  }
   const voted = ipc.push({ kind: 'vote', source: 'respond', ticket: u64(2, 2) });
   assert.equal(voted.ok, false);
   assert.equal(voted.reject.kind, 'reject');

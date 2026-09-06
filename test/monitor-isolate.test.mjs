@@ -139,12 +139,18 @@ test('no respond verbs executed', () => {
   assert.equal(mapped.ok, true);
   const unmapped = iso.unmap({ bits, subject: 'respond' }, { callerRole: 'place' });
   assert.equal(unmapped.ok, true);
-  assert.throws(() => iso.lockdown(), /complex-last/);
-  assert.throws(() => iso.reboot(), /complex-last/);
-  assert.throws(() => iso.secure_reboot(), /complex-last/);
-  assert.throws(() => iso.apply('lockdown', { callerRole: 'respond' }), /complex-last/);
-  assert.throws(() => iso.apply('reboot', { callerRole: 'respond' }), /complex-last/);
-  assert.throws(() => iso.apply('secure_reboot', { callerRole: 'respond' }), /complex-last/);
+  for (const result of [
+    iso.lockdown(),
+    iso.reboot(),
+    iso.secure_reboot(),
+    iso.apply('lockdown', { callerRole: 'respond' }),
+    iso.apply('reboot', { callerRole: 'respond' }),
+    iso.apply('secure_reboot', { callerRole: 'respond' }),
+  ]) {
+    assert.equal(result.ok, false);
+    assert.equal(result.executed, false);
+    assert.equal(result.kind, 'reject');
+  }
   assert.equal(invoked.length, 0, 'lockdown/reboot/secure_reboot must never execute');
   assert.equal(granted.wipedSwap, false);
   assert.equal(granted.wipedRam, false);

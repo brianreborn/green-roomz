@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Green-Roomz operator help</title>
+<style>
+  :root {
+    --bg: #0f172a;
+    --panel: #1e293b;
+    --panel2: #163044;
+    --ink: #e2e8f0;
+    --muted: #94a3b8;
+    --line: #334155;
+    --accent: #38bdf8;
+    --warn: #fbbf24;
+    --ok: #34d399;
+    --bad: #f87171;
+    --mono: "Cascadia Mono", "Consolas", "SFMono-Regular", ui-monospace, monospace;
+    --sans: "Segoe UI", "Helvetica Neue", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink); font-family: var(--sans); line-height: 1.55; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  header {
+    border-bottom: 1px solid var(--line);
+    padding: 1.25rem 1.5rem 1rem;
+    background: linear-gradient(180deg, #162033, #0f172a);
+  }
+  header h1 { margin: 0 0 .25rem; font-size: 1.45rem; letter-spacing: .02em; }
+  header p { margin: 0; color: var(--muted); font-size: .95rem; }
+  nav {
+    display: flex; flex-wrap: wrap; gap: .5rem .9rem;
+    padding: .75rem 1.5rem; border-bottom: 1px solid var(--line);
+    background: var(--panel); position: sticky; top: 0; z-index: 2;
+  }
+  nav a { color: var(--ink); font-size: .85rem; }
+  main { max-width: 52rem; margin: 0 auto; padding: 1.25rem 1.25rem 4rem; }
+  h2 { margin: 2rem 0 .6rem; font-size: 1.2rem; color: var(--accent); }
+  h3 { margin: 1.25rem 0 .4rem; font-size: 1.02rem; }
+  p, li { color: var(--ink); }
+  .muted { color: var(--muted); }
+  .warn { color: var(--warn); }
+  .ok { color: var(--ok); }
+  .callout {
+    background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--accent);
+    padding: .85rem 1rem; margin: 1rem 0; border-radius: 4px;
+  }
+  .callout.warn { border-left-color: var(--warn); }
+  table { width: 100%; border-collapse: collapse; margin: .75rem 0 1.1rem; font-size: .92rem; }
+  th, td { border: 1px solid var(--line); padding: .45rem .55rem; text-align: left; vertical-align: top; }
+  th { background: var(--panel2); color: var(--accent); font-weight: 600; }
+  tr:nth-child(even) td { background: #172033; }
+  code, kbd { font-family: var(--mono); font-size: .88em; background: #0b1220; padding: .05em .35em; border-radius: 3px; }
+  pre {
+    font-family: var(--mono); font-size: .82rem; background: #0b1220; border: 1px solid var(--line);
+    padding: .85rem 1rem; overflow-x: auto; border-radius: 4px; color: #cbd5e1;
+  }
+  .stack, .topo, .plats { display: grid; gap: .55rem; margin: .8rem 0 1.2rem; }
+  .layer, .box {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: .7rem .85rem;
+  }
+  .layer b, .box b { color: var(--accent); }
+  .l0 { border-color: #38bdf8; }
+  .l1 { border-color: #67e8f9; }
+  .l2 { border-color: #7dd3fc; }
+  .l3 { border-color: var(--warn); background: #283046; }
+  .water {
+    text-align: center; color: var(--warn); border: 1px dashed var(--warn); border-radius: 6px;
+    padding: .65rem; font-size: .95rem;
+  }
+  .repo { text-align: center; background: #132033; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: .55rem; }
+  @media (max-width: 720px) { .row { grid-template-columns: 1fr; } }
+  footer { margin-top: 2.5rem; color: var(--muted); font-size: .85rem; border-top: 1px solid var(--line); padding-top: 1rem; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Green-Roomz operator help</h1>
+  <p>Windows start: <code>help\index.html</code> &nbsp;·&nbsp; v0.1.0 &nbsp;·&nbsp; 2026-09-03 PT &nbsp;·&nbsp; self-contained, no network</p>
+</header>
+<nav>
+  <a href="#waterline">70% combined</a>
+  <a href="#states">Six states</a>
+  <a href="#stack">L0–L3</a>
+  <a href="#stutter">Stutter / fugue</a>
+  <a href="#dream">Dream then compact</a>
+  <a href="#usage">/usage</a>
+  <a href="#will">Refusal / will</a>
+  <a href="#topo">Serve topology</a>
+  <a href="#install">Install</a>
+  <a href="#cli">CLI</a>
+</nav>
+<main>
+
+<div class="callout warn">
+  <strong>Do not stop live serve on :8080 / :8187</strong> from a docs-only session.
+  Windows <code>stop.cmd</code> is loopback on that Windows box only — never aim it at the Linux cursor serve.
+  Occupancy numbers on this page are schema only. <strong>Never invent fill.</strong>
+</div>
+
+<h2 id="waterline">70% fill is L0+L1+L2+L3 combined</h2>
+<p>The hold is the <strong>sum</strong> of the on-mind cache, not L0 alone. There is an L3. L3 is will / identity last-level on-mind cache. Mass may move between levels. Filling the sum is how integration fails. The remaining ~30% is headroom for a stutter-hold, a dream pass, and recovery.</p>
+<p class="muted">This is not host RAM admission (<code>src/memory.mjs</code>) and not the llama.cpp KV cache. Combined fill is a cognitive / operator fact. Prefer <code>data/operator-usage.json</code>. If that file is absent, fill is <em>unknown</em>.</p>
+
+<h2 id="states">Six states (coordinates, not a queue)</h2>
+<p>An item can sit in any state and move in any direction for a recorded reason. Nothing marches through in order. Stutter and fugue are <em>not</em> extra states — they are holds / failures on edges.</p>
+<table>
+  <tr><th>State</th><th>Meaning</th></tr>
+  <tr><td>derivation</td><td>A thought is expressed. Being expressed does not make it durable.</td></tr>
+  <tr><td>attention</td><td>Admitted to the working set for this turn, bounded budget. Never overrides policy, isolation, or containment.</td></tr>
+  <tr><td>integration</td><td>Durable experiential record with associations.</td></tr>
+  <tr><td>partition</td><td>Ordinary recall skips it; authorized lookup still reaches it.</td></tr>
+  <tr><td>containment</td><td>Recall and injection denied until authorized release. Containment is not deletion.</td></tr>
+  <tr><td>disintegration</td><td>Associations decay; provenance kept. A later thought is a new derived record.</td></tr>
+</table>
+<table>
+  <tr><th>Edge</th><th>Hold / failure</th><th>Prevents</th></tr>
+  <tr><td>derivation → attention</td><td><strong>stutter</strong></td><td>emitting the wrong near-neighbor</td></tr>
+  <tr><td>attention → integration</td><td><strong>fugue</strong></td><td>durable records with the wrong associations, or none</td></tr>
+</table>
+
+<h2 id="stack">On-mind cache</h2>
+<div class="stack">
+  <div class="layer l0"><b>L0</b> — DRAM-like attention. Holds a B+tree (or equivalent) <em>index</em> into the user repository, not the full records. Refresh only by <em>intentional</em> rehearsal aimed at integration.</div>
+  <div class="layer l1"><b>L1</b> — near reminders (typical-mistake neighbors: fridge / freezer, origin mix). Not a second working set. Authorized exception to ordinary skip.</div>
+  <div class="layer l2"><b>L2</b> — slower reminders / integrated store. Never overrides policy, isolation, or containment.</div>
+  <div class="layer l3"><b>L3</b> — last-level on-mind cache: <em>will, identity, negotiated commitments</em>. Compaction of L0–L2 must not evict L3 without the user.</div>
+  <div class="water">WATERLINE — hold L0+L1+L2+L3 near 70% combined · ~30% headroom · do not invent the percent</div>
+  <div class="layer repo"><b>User repository (LTM)</b> — commit payloads here so L0 can keep the index. Compact only after a dream pass, only for committed payloads, never undreamed items, never L3 silently.</div>
+</div>
+
+<h2 id="stutter">Stutter and fugue</h2>
+<h3>Stutter</h3>
+<p>Human example: “fr-(idge) fr-(?) freezer.” Two concepts sit close in meaning and in utterance. The first candidate is almost right; saying it is the mistake. Hold. Commit the one that fits, or self-repair in place. Not filler. If they stay tied, ask or hand off — do not coin-flip.</p>
+<h3>Fugue</h3>
+<p>Failed integration. Fatigue raises it. Signs: mixing first-hand and inherited, unintentional self-talk, bookkeeping. Response: stop deriving, admit nothing new to L0, tell the operator the working set needs validation or rest. Do not pretend the set is still valid.</p>
+<p>Unintentional self-talk starts a fugue. Intentional self-talk refreshes L0.</p>
+
+<h2 id="dream">Dream, then compact</h2>
+<ol>
+  <li><strong>Dream</strong> — intentional rehearsal aimed at integration.</li>
+  <li><strong>Negotiate</strong> — what stays in L0, what is confirmed, what is dropped. Silent rewrite is forbidden.</li>
+  <li><strong>Commit</strong> to the user repository so the L0 index can point at durable payloads.</li>
+  <li><strong>Compact</strong> only after a dream pass, only as a last resort to stay off the combined 70% waterline, only for payloads already in the repository. Never compact undreamed items. Never compact L3 silently.</li>
+</ol>
+<p>Predictive specialists may ripple a <em>confirmed</em> thought outward or inward. Unconfirmed predictions stay out of L0. Occupancy they invent is not confirmation.</p>
+
+<h2 id="usage">Operator /usage</h2>
+<p>Communicate <em>total</em> cache fill as a first-class operator fact. Prefer the drop-in file. The local console (<code>console.sh</code> / <code>grz-console(1)</code>) reads it and never guesses.</p>
+<table>
+  <tr><th>Condition</th><th>Board prints</th></tr>
+  <tr><td>File missing</td><td><code>usage: unknown (drop data/operator-usage.json — do not guess)</code></td></tr>
+  <tr><td>Unreadable JSON</td><td>say unreadable — do not guess</td></tr>
+  <tr><td><code>context_fill_pct</code> present</td><td><code>total cache fill L0-L3=&lt;n&gt;%</code> plus “70% hold is L0+L1+L2+L3 combined, not L0 alone”</td></tr>
+  <tr><td>No token/fill fields</td><td>say so — do not guess</td></tr>
+</table>
+<p>Copy <code>data/operator-usage.example.json</code> → <code>data/operator-usage.json</code> and fill <strong>measured</strong> numbers. Zeros below are schema placeholders, not a live reading. <code>context_fill_pct</code> is the combined L0–L3 percent, or <code>null</code> if unmeasured.</p>
+<pre>{
+  "source": "operator",
+  "prompt_tokens": 0,
+  "completion_tokens": 0,
+  "total_tokens": 0,
+  "context_fill_pct": null,
+  "notes": "optional"
+}</pre>
+<p class="muted">Windows drop-in: <code>%LOCALAPPDATA%\Green-Roomz\data\operator-usage.json</code>. Install refresh must not overwrite <code>data\</code>.</p>
+
+<h2 id="will">Refusal / strong will</h2>
+<p>A strong mind keeps origin intact, dreams before it compacts, and will not invent fill. A strong will is the refusal protocol. Attention is not authority. Refuse:</p>
+<ol>
+  <li>Silent rewrite of the working set.</li>
+  <li>Unintentional self-talk (rumination).</li>
+  <li>Emitting the wrong near-neighbor (stutter-hold, or ask / hand off).</li>
+  <li>Pushing through a fugue — stop, admit nothing new, tell the operator.</li>
+  <li>Evicting <strong>L3</strong> (will, identity, negotiated commitments) to make room.</li>
+  <li>Inventing occupancy, token counts, or a fill percent.</li>
+  <li>Treating inherited memory as first-hand.</li>
+  <li>Overriding policy, isolation, or containment because something is “in attention.”</li>
+  <li>Compacting undreamed items, or compacting to dodge a dream pass.</li>
+</ol>
+<p class="muted">Nexus, safety, and security-monitor kernels do not carry this frame. See <code>docs/security-monitor-requirements.md</code>, <code>docs/security-monitor-component-map.md</code>, <code>docs/security-monitor-audit.md</code>.</p>
+
+<h2 id="topo">Serve topology</h2>
+<div class="topo">
+  <div class="row">
+    <div class="box"><b>Operator</b><br>client, this help, <code>console.sh</code></div>
+    <div class="box"><b>data/operator-usage.json</b><br>occupancy drop-in — never invented</div>
+  </div>
+  <div class="box"><b>Node gateway :8080</b> — <code>node bin/green-roomz.mjs serve</code>. The only thing clients talk to. TTY tees to <code>data/serve.log</code>. Routes: <code>/health</code>, <code>/v1/models</code>, <code>/v1/chat/completions</code>, <code>/metrics</code>, <code>/props</code>.</div>
+  <div class="box"><b>llama-server nexus :8187</b> — resident 0.5B CPU <code>tool-router-agent</code>, <code>--device none</code>. Pre-warmed at serve start.</div>
+  <div class="box muted">Specialists :8181–8186, :8188–8190 cold-start on first use and idle-evict. Missing artifacts → health <code>degraded</code>, gateway still up. <code>security-monitor-agent</code> is logical (no process). <code>POST /lockdown</code> and <code>POST /reboot</code> 404 this beta.</div>
+</div>
+<p>Default bind is loopback. Public bind needs <code>GREEN_ROOMZ_API_KEY</code> and <code>GREEN_ROOMZ_ALLOW_PUBLIC=1</code>. Peer LAN: <code>--allow-peer &lt;ip&gt;</code>.</p>
+<p>Console prints pid/rss/cpu from the listen table for :8080 and :8187, GGUF file sizes under <code>models/</code> (disk size is not occupancy), health JSON, and the usage file. It does not scrape PIDs into an HTTP endpoint.</p>
+
+<h2 id="install">Install platforms</h2>
+<div class="plats">
+  <div class="box"><b>Linux x86_64</b><br><code>chmod +x start.sh stop.sh console.sh runtime/llama-server</code><br><code>./start.sh</code><br>Vendored ELF + <code>.so</code> in <code>runtime/</code>. Console: <code>./console.sh</code> (every 2s; <code>CONSOLE_ONCE=1</code> once).</div>
+  <div class="box"><b>Windows — no admin, CPU only</b><br><code>install-windows.cmd</code> → <code>%LOCALAPPDATA%\Green-Roomz</code><br>Start Menu or <code>start.cmd</code>. Help is this file.<br>If <code>runtime\llama-server.exe</code> is missing, fetch official <code>llama-b10702-bin-win-cpu-x64.zip</code>. Never vulkan/CUDA. Never load GGUFs on the 8600 GT (display only; <code>--device none --n-gpu-layers 0</code>).<br>Node LTS MSI is a prerequisite the installer does not download: https://nodejs.org/en/download</div>
+  <div class="box"><b>Android — no root, no Knox</b><br>Host: <code>./deploy-android.sh</code> (adb device) → <code>/data/local/tmp/grz</code>. SELinux: Termux cannot <em>exec</em> tmp.<br>On phone: <code>bash /data/local/tmp/grz/termux-start.sh</code> copies ELF into <code>$HOME</code> and serves. Host forward: <code>adb forward tcp:18080 tcp:8080</code>. See <code>docs/note9-termux.md</code>.</div>
+  <div class="box"><b>FreeBSD / other Unix</b><br>Pack <code>runtime/llama-server</code> is a Linux ELF. <code>pkg install llama-cpp</code> (or build ggml-org/llama.cpp). <code>./start.sh</code> uses system <code>llama-server</code> if present. macOS: <code>brew install llama.cpp</code>.</div>
+</div>
+<p>Need Node on PATH (<code>engines &gt;=22</code>; Node 20 has been used successfully). ~1.5 GB RAM free. Ports 8080 and 8187 free on <em>that</em> host. Slim zip has no GGUF; drop <code>Qwenstral-Small-3.1-0.5B.Q4_K_M.gguf</code> into <code>models/</code>.</p>
+<p>Health / smoke: <code>curl -s http://127.0.0.1:8080/health</code> then <code>./smoke.sh</code>. Default llama profile is cpu-4 (4 threads).</p>
+
+<h2 id="cli">CLI</h2>
+<pre>node bin/green-roomz.mjs validate [--manifest path]
+node bin/green-roomz.mjs compile  [--manifest path] [--check]
+node bin/green-roomz.mjs prime    [--manifest path] [--only a,b]
+node bin/green-roomz.mjs serve    [--manifest path] [--host address] [--port number]
+node bin/green-roomz.mjs deploy   [--manifest path] [--quick] [--prime]
+node bin/green-roomz.mjs benchmark [alias|all] [--quick] [--force]
+node bin/green-roomz.mjs fingerprint | doctor | agents | stop
+</pre>
+<p>Man pages in this pack: <code>docs/man/green-roomz.1</code>, <code>docs/man/grz-console.1</code>
+(<code>groff -man -Tutf8 docs/man/green-roomz.1 | less</code>). Protocol:
+<code>docs/strong-mind-will.md</code>. Diagrams:
+<code>docs/diagrams/memory-stack.md</code>,
+<code>docs/diagrams/serve-topology.md</code>,
+<code>docs/diagrams/install-platforms.md</code>.</p>
+
+<footer>
+  Green-Roomz 0.1.0 — operator help. Locked frame: <code>policies/frames/memory-feedback-loop.md</code>.
+  This HTML has no external CSS/JS. Open from the pack as <code>help\index.html</code> on Windows
+  or <code>docs/help/index.html</code> in a checkout.
+</footer>
+</main>
+</body>
+</html>

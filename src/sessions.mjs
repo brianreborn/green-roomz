@@ -39,7 +39,10 @@ export class SessionLedger {
   patch(id, fields) {
     const entry = this.entries.get(id);
     if (!entry) return false;
-    Object.assign(entry, fields);
+    const allow = new Set(['faith', 'fear', 'confidenceMood', 'yolo', 'councilDefault', 'op', 'rebuke', 'agentAlias', 'lastAccess']);
+    for (const [key, value] of Object.entries(fields ?? {})) {
+      if (allow.has(key)) entry[key] = value;
+    }
     const now = this.clock();
     entry.lastAccess = now;
     entry.expiresAt = now + this.ttlMs;

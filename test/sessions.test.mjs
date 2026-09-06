@@ -29,3 +29,16 @@ test('setAgentAlias updates the stored session', () => {
   assert.equal(ledger.setAgentAlias(id, 'qwenstral-code-speculator'), true);
   assert.equal(ledger.get(id, 'a').agentAlias, 'qwenstral-code-speculator');
 });
+
+test('patch ignores identity id expiresAt', () => {
+  const ledger = new SessionLedger();
+  const id = ledger.create({ identity: 'a', agentAlias: 'x', modality: {} });
+  const before = ledger.get(id, 'a');
+  assert.equal(ledger.patch(id, { identity: 'authenticated', id: 'forged', expiresAt: 1, faith: 'high' }), true);
+  const after = ledger.get(id, 'a');
+  assert.equal(after.identity, 'a');
+  assert.equal(after.id, id);
+  assert.notEqual(after.expiresAt, 1);
+  assert.equal(after.faith, 'high');
+  assert.equal(before.identity, 'a');
+});

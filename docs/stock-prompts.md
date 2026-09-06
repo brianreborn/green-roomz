@@ -78,7 +78,10 @@ the six machine phases and their meanings (MFL phase table); coordinate-not-cloc
 (MFL-8/9); containment is not deletion (MFL-14); origin survives movement, a
 wraparound is a new derived record (MFL-7/13); first-hand vs inherited weighting
 (MFL-2, REQ-7.2); bounded deterministic recall, no bookkeeping tokens
-(MFL-10/11).
+(MFL-10/11). Stutter, fugue, L0-at-70%, intentional rehearsal, negotiated
+working set, L1/L2 reminders, and confirmed-thought ripple (candidate MFL-26..32)
+are in the same fragment as of 2026-09-03; mapping:
+`docs/internal-language-stutter-fugue.md`.
 
 ## Compile
 

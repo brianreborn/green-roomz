@@ -1,0 +1,194 @@
+.TH GREEN-ROOMZ 1 "2026-09-03" "Green-Roomz 0.1.0" "Operator Manual"
+.SH NAME
+green-roomz \- local multimodal agent gateway
+.SH SYNOPSIS
+.B green-roomz
+.I command
+.RI [ options ]
+.P
+.B node bin/green-roomz.mjs
+.I command
+.RI [ options ]
+.SH DESCRIPTION
+Green-Roomz is a local, OpenAI-compatible agent gateway. It maps stable
+functional aliases to host-qualified inference backends. It is llama.cpp-first
+and runtime-agnostic. The only client-facing listener is
+.B 127.0.0.1:8080
+by default. The resident CPU nexus
+.RB ( tool-router-agent )
+listens on
+.B :8187
+and is pre-warmed at serve start.
+.P
+Cognitive agents compile the memory-feedback-loop frame. Treat what they know
+as six states (derivation, attention, integration, partition, containment,
+disintegration). The on-mind cache is L0 (DRAM-like B+tree index into the user
+repository), L1 (near reminders), L2 (slower reminders / integrated store), and
+L3 (will / identity last-level on-mind cache).
+.P
+.B 70% fill is L0+L1+L2+L3 COMBINED,
+not L0 alone. Occupancy is an operator fact. Prefer
+.I data/operator-usage.json
+.RB ( /usage ).
+If that file is absent, fill is unknown. Never invent occupancy numbers.
+.P
+Do not stop a live serve on :8080/:8187 from a docs-only session. Do not use
+Windows
+.B stop.cmd
+against a Linux cursor serve.
+.SH COMMANDS
+.TP
+.B validate [--manifest path]
+Inspect the manifest and print JSON (digest, degraded aliases, agent list).
+Missing model files are reported unavailable; they do not invalidate the registry.
+.TP
+.B compile [--manifest path] [--check]
+Write layered stock system prompts to
+.IR build/prompts/ .
+.B --check
+exits non-zero if committed artifacts are stale.
+.TP
+.B prime [--manifest path] [--only a,b]
+Snapshot each primeable agent's stock-prompt KV as
+.BR default .
+Needs
+.I gateway.checkpoint_dir
+or
+.BR GREEN_ROOMZ_CHECKPOINT_DIR .
+.TP
+.B serve [--manifest path] [--host address] [--port number] [--allow-peer ip]
+Listen. Default host/port come from the manifest (commonly 127.0.0.1:8080).
+Attaches the operator TTY and appends to
+.IR data/serve.log .
+Pre-warms the nexus on :8187 when the artifact is present.
+.TP
+.B deploy [--manifest path] [--host address] [--port number] [--quick] [--prime]
+Qualify missing agents, compile prompts, optionally prime, then serve.
+.TP
+.B benchmark [alias|all] [--manifest path] [--quick] [--force]
+Qualify profiles. Results are cached by host fingerprint and artifact identity.
+.TP
+.B fingerprint [--manifest path]
+Print the host fingerprint JSON.
+.TP
+.B doctor [--manifest path]
+Validate plus fingerprint.
+.TP
+.B agents [--manifest path]
+List models as JSON.
+.TP
+.B council-stats [task] [--json]
+Read the council scorecard if
+.I gateway.council_dir
+is set.
+.TP
+.B stop [--manifest path]
+Drain owned backends for this local process. Does not kill unrelated listeners.
+.TP
+.B help
+Print command summary.
+.SH OPTIONS
+.TP
+.BI --manifest " path"
+Agent manifest. Defaults to the host-appropriate file under
+.I config/
+(commonly
+.I config/agents.windows.json
+or, in the portable pack,
+.IR config/agents.cursor.json ).
+.TP
+.BI --host " address"
+Bind address for
+.BR serve / deploy .
+.TP
+.BI --port " number"
+Bind port for
+.BR serve / deploy
+(default 8080).
+.TP
+.BI --allow-peer " ip"
+Repeatable. Trust one additional LAN IP. Non-loopback clients not listed get 403.
+.SH ENVIRONMENT
+.TP
+.B GREEN_ROOMZ_API_KEY
+If set, require bearer authentication.
+.TP
+.B GREEN_ROOMZ_ALLOW_PUBLIC
+Must be
+.B 1
+to bind a public address, and only together with an API key.
+.TP
+.B GREEN_ROOMZ_ANDROID_SIDECAR
+Android sidecar endpoint; selects the Android host adapter.
+.TP
+.B GREEN_ROOMZ_ANDROID_TOKEN
+Sidecar token (not logged, not copied into identity snapshots).
+.TP
+.B GREEN_ROOMZ_CHECKPOINT_DIR
+Prime / restore directory if the manifest does not set
+.IR gateway.checkpoint_dir .
+.SH FILES
+.TP
+.I config/agents.*.json
+Host-qualified manifests (windows, android, note9, cursor).
+.TP
+.I policies/frames/memory-feedback-loop.md
+Locked six-state / L0-L3 / 70% combined protocol.
+.TP
+.I data/operator-usage.json
+Operator
+.B /usage
+drop-in. Schema: source, prompt_tokens, completion_tokens, total_tokens,
+context_fill_pct (combined L0-L3 percent or null), notes. Install refresh must
+not overwrite
+.IR data/ .
+.TP
+.I data/operator-usage.example.json
+Empty schema. Copy, then fill measured numbers. Do not pack a fake filled file.
+.TP
+.I data/serve.log
+Serve console tee.
+.TP
+.I docs/strong-mind-will.md
+Operator protocol (stutter, fugue, dream-then-compact, refusal/will).
+.TP
+.I docs/help/index.html
+Self-contained dark-slate HTML help (Windows:
+.IR help\\index.html ).
+.SH OCCUPANCY
+.B context_fill_pct
+is total cache fill
+.B L0+L1+L2+L3 combined.
+The 70% hold is that combined cache. L3 is will/identity last-level on-mind
+cache. Compaction of L0-L2 must not evict L3 without the user. Dream before
+compact. Never compact undreamed items. Never invent fill.
+.SH HTTP
+Loopback routes include
+.BR /health ,
+.BR /v1/health ,
+.BR /v1/models ,
+.BR /v1/chat/completions ,
+.BR /v1/embeddings ,
+.BR /v1/rerank ,
+.BR /v1/monitor/recent ,
+.BR /metrics ,
+.BR /props .
+.P
+.B POST /lockdown
+and
+.B POST /reboot
+are not HTTP routes in this beta (404).
+.SH SEE ALSO
+.BR grz-console (1),
+.IR docs/strong-mind-will.md ,
+.IR docs/diagrams/memory-stack.md ,
+.IR docs/diagrams/serve-topology.md ,
+.IR docs/diagrams/install-platforms.md ,
+.IR docs/deployment.md ,
+.IR docs/security-monitor-requirements.md ,
+.IR docs/note9-termux.md
+.SH BUGS
+Health
+.B degraded
+is normal when specialist artifacts are missing. Default llama profile is
+cpu-4 (4 threads). Do not leave 8 threads resident on the 0.5B nexus.

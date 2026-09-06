@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { proxyJson } from '../src/proxy.mjs';
+import { proxyJson, sanitizeSseText } from '../src/proxy.mjs';
 
 class FakeResponse extends EventEmitter {
   constructor() {
@@ -12,6 +12,7 @@ class FakeResponse extends EventEmitter {
     this.ended = false;
   }
   writeHead(status, headers) { this.status = status; this.headers = headers; }
+  write(chunk) { if (chunk) this.chunks.push(chunk); }
   end(chunk) { if (chunk) this.chunks.push(chunk); this.ended = true; this.emit('finish'); }
 }
 
@@ -129,4 +130,32 @@ test('strips ESC and C0 controls from completion content', async () => {
   });
   const parsed = JSON.parse(Buffer.concat(response.chunks).toString());
   assert.equal(parsed.choices[0].message.content, 'redbell');
+});
+
+test('sanitizeSseText drops timings from client stream frames', () => {
+  const raw = 'data: {"timings":{"predicted_n":9},"choices":[{"delta":{"content":"hi"}}]}\n\ndata: [DONE]\n\n';
+  const out = sanitizeSseText(raw);
+  assert.equal(out.includes('timings'), false);
+  assert.match(out, /hi/);
+  assert.match(out, /\[DONE\]/);
+});
+
+test('streamed proxyJson chunks have no timings', async () => {
+  const response = new FakeResponse();
+  await proxyJson({
+    request: { method: 'POST', headers: {} },
+    response,
+    body: { model: 'general-text-speculator', messages: [], stream: true },
+    target: 'http://127.0.0.1:9/v1/chat/completions',
+    config: { retry_initial_ms: 5, retry_max_ms: 10, retry_deadline_ms: 50 },
+    fetchImpl: async () => ({
+      status: 200,
+      headers: new Headers({ 'content-type': 'text/event-stream' }),
+      async text() {
+        return 'data: {"timings":{"predicted_n":3},"choices":[{"delta":{"content":"x"}}]}\n\n';
+      },
+    }),
+  });
+  const joined = Buffer.concat(response.chunks.map((c) => Buffer.from(c))).toString();
+  assert.equal(joined.includes('timings'), false);
 });

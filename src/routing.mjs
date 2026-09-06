@@ -23,7 +23,8 @@ function inspectContentPart(part, found) {
 
 export function detectModalities(body) {
   const found = { image: false, audio: false };
-  for (const message of body?.messages ?? []) {
+  const messages = Array.isArray(body?.messages) ? body.messages : [];
+  for (const message of messages) {
     if (!Array.isArray(message?.content)) continue;
     for (const part of message.content) inspectContentPart(part, found);
   }
@@ -41,7 +42,7 @@ function messageText(message) {
 }
 
 export function latestUserMessageText(body) {
-  const messages = body?.messages ?? [];
+  const messages = Array.isArray(body?.messages) ? body.messages : [];
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     if (messages[index]?.role === 'user') return messageText(messages[index]);
   }
@@ -49,7 +50,8 @@ export function latestUserMessageText(body) {
 }
 
 export function audioDataFromBody(body) {
-  for (const message of body?.messages ?? []) {
+  const messages = Array.isArray(body?.messages) ? body.messages : [];
+  for (const message of messages) {
     if (!Array.isArray(message?.content)) continue;
     for (const part of message.content) {
       if (!part || typeof part !== 'object') continue;
@@ -61,7 +63,8 @@ export function audioDataFromBody(body) {
 }
 
 export function isExplicitTranslationRequest(body) {
-  const text = (body?.messages ?? []).flatMap((message) => typeof message?.content === 'string' ? [message.content] : []).join('\n');
+  const messages = Array.isArray(body?.messages) ? body.messages : [];
+  const text = messages.flatMap((message) => typeof message?.content === 'string' ? [message.content] : []).join('\n');
   return /\btranslate\b|\btranslation\b/i.test(text);
 }
 

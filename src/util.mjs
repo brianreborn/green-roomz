@@ -129,16 +129,18 @@ export function redact(value) {
 const C0_C1 = /[\u0000-\u001F\u007F-\u009F]/g;
 const CSI = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
 const OSC = /\u001b\][\s\S]*?(?:\u0007|\u001b\\)/g;
+const LS_PS = /[\u2028\u2029]/g;
 
 export function stripControls(value) {
-  return String(value ?? '').replace(C0_C1, ' ').replace(/[ \t]{2,}/g, ' ').trim();
+  return String(value ?? '').replace(C0_C1, ' ').replace(LS_PS, ' ').replace(/[ \t]{2,}/g, ' ').trim();
 }
 
 export function stripEscapes(value) {
   return String(value ?? '')
     .replace(OSC, '')
     .replace(CSI, '')
-    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, '');
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, '')
+    .replace(LS_PS, '');
 }
 
 export function headerSafe(value) {

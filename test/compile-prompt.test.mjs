@@ -51,6 +51,9 @@ test('compileStockPrompt: general-text stacks agency, memory, confidence, then t
   const iKernel = out.indexOf('# general-text-speculator');
   assert.ok(iAgency >= 0 && iMem > iAgency && iConf > iMem && iKernel > iConf, out);
   assert.match(out, /derivation.*attention.*integration.*partition.*containment.*disintegration/s);
+  assert.match(out, /\*\*Stutter\*\*/);
+  assert.match(out, /\*\*Fugue\*\*/);
+  assert.match(out, /near 70%/);
   assert.ok(out.endsWith('help the user.\n'));
 });
 

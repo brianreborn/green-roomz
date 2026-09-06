@@ -6,7 +6,7 @@
  * grant themselves lockdown.
  *
  * encrypt-volumes is out_of_v1. lockdown / reboot / secure_reboot stay uncallable
- * (throw). Do not wipe swap/RAM. Missing capability => reject, never no-op.
+ * (reject envelope). Do not wipe swap/RAM. Missing capability => reject, never no-op.
  *
  * Note 9 / no AID_ROOT: map / wipe / secure_reboot reject with capability missing.
  * No 3-replica vote. No mapped-host GPU ring.
@@ -137,6 +137,8 @@ function decorateReject(envelope, extra) {
   envelope.wiped = false;
   envelope.wipedSwap = false;
   envelope.wipedRam = false;
+  envelope.executed = false;
+  envelope.spawned = false;
   if (extra.bits !== undefined) envelope.bits = extra.bits;
   if (extra.call !== undefined) envelope.call = extra.call;
   return envelope;
@@ -273,10 +275,19 @@ export function createIsolate(options = {}) {
     return null;
   }
 
-  function throwUncallable(verb) {
+  function rejectUncallable(verb, partial = {}, opts = {}) {
     neverInvokeRespond(respond);
     const v = normalizeVerb(verb);
-    if (UNCALLABLE.has(v)) throw new Error('complex-last');
+    if (!UNCALLABLE.has(v)) return null;
+    return rejectOf({
+      from: 'isolate',
+      to: v,
+      reason: `${v} is uncallable (v1)`,
+      target: partial.target ?? 'machine',
+      ticket: partial.ticket ?? opts.ticket,
+      source: opts.callerRole ?? partial.source ?? 'isolate',
+      call: v,
+    });
   }
 
   function okResult(call, extra) {
@@ -305,7 +316,8 @@ export function createIsolate(options = {}) {
     if (denied) return denied;
     const enc = rejectEncryptOrWipe('grant', verb, bits, { ...gateResult, opts });
     if (enc) return enc;
-    throwUncallable(verb);
+    const unGrant = rejectUncallable(verb, src, opts);
+    if (unGrant) return unGrant;
     const next = orBits(granted, subject, bits);
     return okResult('grant', {
       bits: next,
@@ -328,7 +340,8 @@ export function createIsolate(options = {}) {
     if (denied) return denied;
     const enc = rejectEncryptOrWipe('map', verb, bits, { ...gateResult, opts });
     if (enc) return enc;
-    throwUncallable(verb);
+    const unMap = rejectUncallable(verb, src, opts);
+    if (unMap) return unMap;
     orBits(granted, subject, bits);
     const next = orBits(mapped, subject, bits);
     return okResult('map', {
@@ -350,7 +363,8 @@ export function createIsolate(options = {}) {
     const subject = subjectOf(src, payload, gateResult.callerRole);
     const enc = rejectEncryptOrWipe('unmap', verb, bits, { ...gateResult, opts });
     if (enc) return enc;
-    throwUncallable(verb);
+    const unUnmap = rejectUncallable(verb, src, opts);
+    if (unUnmap) return unUnmap;
     const next = bits ? clearBits(mapped, subject, bits) : (mapped.set(subject, 0), 0);
     return okResult('unmap', {
       bits: next,
@@ -407,7 +421,8 @@ export function createIsolate(options = {}) {
         call: verb,
       });
     }
-    if (UNCALLABLE.has(verb)) throw new Error('complex-last');
+    const unApply = rejectUncallable(verb, partial, opts);
+    if (unApply) return unApply;
     if (verb === 'map') return map(partial, opts);
     if (verb === 'unmap') return unmap(partial, opts);
     if (verb === 'grant') return grant(partial, opts);
@@ -430,19 +445,16 @@ export function createIsolate(options = {}) {
     return maskOf(mapped, String(subject));
   }
 
-  function lockdown() {
-    neverInvokeRespond(respond);
-    throw new Error('complex-last');
+  function lockdown(partial = {}, opts = {}) {
+    return rejectUncallable('lockdown', partial, opts);
   }
 
-  function reboot() {
-    neverInvokeRespond(respond);
-    throw new Error('complex-last');
+  function reboot(partial = {}, opts = {}) {
+    return rejectUncallable('reboot', partial, opts);
   }
 
-  function secure_reboot() {
-    neverInvokeRespond(respond);
-    throw new Error('complex-last');
+  function secure_reboot(partial = {}, opts = {}) {
+    return rejectUncallable('secure_reboot', partial, opts);
   }
 
   function encrypt(partial = {}, opts = {}) {

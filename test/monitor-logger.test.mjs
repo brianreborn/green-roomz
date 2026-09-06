@@ -4,7 +4,7 @@ import { assertCaller } from '../src/monitor/api.mjs';
 import { createLogger, verifyChain } from '../src/monitor/logger.mjs';
 
 test('emit then read order', async () => {
-  const log = createLogger();
+  const log = createLogger({ write() {} });
   const a = await log.emit({ payload: { n: 1 } });
   const b = await log.emit({ payload: { n: 2 } });
   const c = await log.emit({ payload: { n: 3 } });
@@ -20,7 +20,7 @@ test('emit then read order', async () => {
 });
 
 test('chain verifies', async () => {
-  const log = createLogger();
+  const log = createLogger({ write() {} });
   await log.emit({ payload: { n: 1 } });
   await log.emit({ payload: { n: 2 } });
   const recs = log.read();
@@ -40,6 +40,7 @@ test('disk-fail drop (inject fake writer)', async () => {
     },
   });
   const result = await log.emit({ payload: { n: 1 } });
+  assert.equal(result.ok, false);
   assert.equal(result.dropped, true);
   assert.equal(log.read().length, 0);
 
@@ -53,7 +54,9 @@ test('disk-fail drop (inject fake writer)', async () => {
     },
   });
   assert.equal((await mixed.emit({ payload: { n: 1 } })).dropped, false);
-  assert.equal((await mixed.emit({ payload: { n: 2 } })).dropped, true);
+  const failed = await mixed.emit({ payload: { n: 2 } });
+  assert.equal(failed.ok, false);
+  assert.equal(failed.dropped, true);
   assert.equal((await mixed.emit({ payload: { n: 3 } })).dropped, false);
   const recs = mixed.read();
   assert.equal(recs.length, 2);
@@ -63,7 +66,7 @@ test('disk-fail drop (inject fake writer)', async () => {
 });
 
 test('emit from SAD ok', async () => {
-  const log = createLogger();
+  const log = createLogger({ write() {} });
   const result = await log.emit(
     { kind: 'grade', source: 'sad', payload: { grade: 'watch' } },
     { callerRole: 'sad' },
@@ -80,7 +83,7 @@ test('lockdown from logger denied', () => {
   assert.throws(() => assertCaller('lockdown', 'logger'), /lockdown not allowed for logger/);
   assert.throws(() => assertCaller('reboot', 'logger'));
   assert.throws(() => assertCaller('secure_reboot', 'logger'));
-  const log = createLogger();
+  const log = createLogger({ write() {} });
   assert.equal(Object.prototype.hasOwnProperty.call(log, 'lockdown'), false);
   assert.equal(Object.prototype.hasOwnProperty.call(log, 'reboot'), false);
   assert.equal(typeof log.emit, 'function');
@@ -88,7 +91,7 @@ test('lockdown from logger denied', () => {
 });
 
 test('records omit passwords tokens keys', async () => {
-  const log = createLogger();
+  const log = createLogger({ write() {} });
   await log.emit({
     payload: {
       event: 'login',
@@ -104,4 +107,32 @@ test('records omit passwords tokens keys', async () => {
   assert.equal('password' in rec.payload, false);
   assert.equal('token' in rec.payload, false);
   assert.equal('key' in rec.payload, false);
+});
+
+test('missing path flood and write fail return ok:false dropped:true', async () => {
+  const missing = createLogger();
+  const dropped = await missing.emit({ payload: { n: 1 } });
+  assert.equal(dropped.ok, false);
+  assert.equal(dropped.dropped, true);
+  assert.equal(missing.read().length, 0);
+
+  let releaseWrites;
+  const held = new Promise((resolve) => { releaseWrites = resolve; });
+  let started = 0;
+  const slow = createLogger({
+    write() { started += 1; return held; },
+  });
+  const inflight = [1, 2, 3, 4].map((n) => slow.emit({ payload: { n } }));
+  for (let i = 0; i < 40 && started < 4; i += 1) await new Promise((r) => setImmediate(r));
+  const fifth = await slow.emit({ payload: { n: 5 } });
+  assert.equal(fifth.ok, false);
+  assert.equal(fifth.dropped, true);
+  releaseWrites();
+  await Promise.all(inflight);
+});
+
+test('chain is capped', async () => {
+  const log = createLogger({ write() {} });
+  for (let i = 0; i < 300; i += 1) await log.emit({ payload: { n: i } });
+  assert.ok(log.read().length <= 256);
 });

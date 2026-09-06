@@ -62,3 +62,29 @@ test('long string payloads become a hash string', () => {
   assert.equal(event.payload.length, 64);
   assert.match(event.payload, /^[0-9a-f]{64}$/);
 });
+
+test('lockdown reboot vote kinds are not ok:true', () => {
+  const box = new Mailbox({ autoDrain: false });
+  for (const kind of ['lockdown', 'reboot', 'vote']) {
+    const published = box.push({ kind, source: 't' });
+    assert.equal(published.ok, false, kind);
+    assert.equal(published.kind, 'reject');
+  }
+  assert.equal(box.stats().pushed, 0);
+  const hop = box.push({ kind: 'hop', source: 't' });
+  assert.equal(hop.ok, true);
+});
+
+test('drain snapshots the batch before listeners so listener push cannot livelock', () => {
+  const box = new Mailbox({ autoDrain: false, capacity: 8 });
+  let extra = 0;
+  box.onEvent(() => {
+    extra += 1;
+    if (extra < 20) box.push({ kind: 'hop', source: 'listener' });
+  });
+  box.push({ kind: 'success', source: 'a' });
+  box.push({ kind: 'hop', source: 'b' });
+  const drained = box.drain();
+  assert.equal(drained.length, 2);
+  assert.ok(extra <= 2);
+});

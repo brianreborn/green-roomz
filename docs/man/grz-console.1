@@ -1,0 +1,159 @@
+.TH GRZ-CONSOLE 1 "2026-09-03" "Green-Roomz 0.1.0" "Operator Manual"
+.SH NAME
+grz-console, console.sh \- local Green-Roomz operator board
+.SH SYNOPSIS
+.B ./console.sh
+.P
+.B CONSOLE_ONCE=1
+.B ./console.sh
+.P
+.B USAGE_FILE=
+.I path
+.B HEALTH_URL=
+.I url
+.B ./console.sh
+.SH DESCRIPTION
+.B console.sh
+is the local operator board shipped with the portable pack (invoked as
+.B grz-console
+in this manual). It prints to stdout / a file only. It never scrapes PIDs into
+an HTTP endpoint and never invents occupancy.
+.P
+Default mode prints the board every 2 seconds until Ctrl-C.
+.B CONSOLE_ONCE=1
+prints once and exits. Portable
+.B start.sh
+may also write a one-shot board to
+.IR data/console.txt .
+.P
+The board is how the operator sees running processes
+.B and
+combined L0–L3 fill. Prefer it over an internal narration from a cognitive agent.
+.SH BOARD
+Each pass prints:
+.IP \(bu 2
+Product line (Green-Roomz console) and host / time (America/Los_Angeles and UTC)
+.IP \(bu 2
+.B GRZ_ROOT
+.IP \(bu 2
+.B node :8080
+listen pid, threads, RSS, CPU percent — or
+.I pid=none (not listening)
+.IP \(bu 2
+.B llama :8187
+same
+.IP \(bu 2
+GGUF files under
+.I models/
+with on-disk size (file size is not occupancy)
+.IP \(bu 2
+.B GET
+.I $HEALTH_URL
+(default
+.BR http://127.0.0.1:8080/health )
+truncated status / policy / ready aliases
+.IP \(bu 2
+Occupancy from
+.I $USAGE_FILE
+only (default
+.IR $GRZ_ROOT/data/operator-usage.json )
+.SH OCCUPANCY
+.B 70% fill is L0+L1+L2+L3 COMBINED,
+not L0 alone. L3 is will / identity last-level on-mind cache. See
+.IR docs/strong-mind-will.md
+and
+.IR docs/diagrams/memory-stack.md .
+.P
+The console never computes a fill percent. It only echoes measured fields from
+the drop-in JSON:
+.TP
+.B source
+Who measured it (use
+.B operator
+for a manual drop).
+.TP
+.B prompt_tokens , completion_tokens , total_tokens
+Integers from the run. Omit a field rather than guess.
+.TP
+.B context_fill_pct
+Total cache fill L0+L1+L2+L3 combined (percent). Use JSON
+.B null
+if unmeasured. Printed as
+.B total cache fill L0-L3=<n>%
+plus a reminder that the 70% hold is combined.
+.P
+If the file is absent:
+.IP
+usage: unknown (drop data/operator-usage.json — do not guess)
+.P
+If the file is present but not valid JSON, or has no token/fill fields, the
+board says so and still does not guess.
+.P
+Copy
+.I data/operator-usage.example.json
+to
+.I data/operator-usage.json
+and fill
+.B real
+numbers. Do not pack a fake filled file. Install refresh must not overwrite
+.IR data/ .
+.SH ENVIRONMENT
+.TP
+.B GRZ_ROOT
+Pack root. Defaults to the directory containing
+.BR console.sh .
+.TP
+.B USAGE_FILE
+Path to the occupancy JSON. Default
+.IR $GRZ_ROOT/data/operator-usage.json .
+.TP
+.B HEALTH_URL
+Health endpoint. Default
+.BR http://127.0.0.1:8080/health .
+.TP
+.B CONSOLE_ONCE
+If
+.BR 1 ,
+print once and exit.
+.SH FILES
+.TP
+.I console.sh
+This board (portable pack root).
+.TP
+.I data/operator-usage.json
+Operator
+.B /usage
+drop-in.
+.TP
+.I data/operator-usage.example.json
+Schema only.
+.TP
+.I data/console.txt
+Optional one-shot capture from
+.BR start.sh .
+.TP
+.I data/serve.log
+Gateway TTY tee (not this board).
+.SH NOTES
+Pid discovery uses
+.BR ss (8)
+then
+.BR lsof (8)
+then
+.BR fuser (1)
+on the listen port. RSS/threads come from
+.I /proc/<pid>/status
+when present (Linux). On Windows/Android the pack may not ship this script;
+use the serve TTY and
+.I help\\index.html
+instead.
+.P
+Do not stop live listeners on :8080/:8187 from a docs-only session. Do not
+point this board at a foreign host. Do not use Windows
+.B stop.cmd
+against a Linux cursor serve.
+.SH SEE ALSO
+.BR green-roomz (1),
+.IR docs/strong-mind-will.md ,
+.IR docs/diagrams/serve-topology.md ,
+.IR docs/diagrams/memory-stack.md

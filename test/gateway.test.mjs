@@ -8,7 +8,8 @@ import { AgentRegistry } from '../src/registry.mjs';
 import { ProcessManager } from '../src/process-manager.mjs';
 import { PolicyGate } from '../src/scheduler.mjs';
 import { SessionLedger } from '../src/sessions.mjs';
-import { Gateway, prepareInferenceBody } from '../src/gateway.mjs';
+import { GATEWAY_IPC_RIGHTS, Gateway, prepareInferenceBody } from '../src/gateway.mjs';
+import { CAP } from '../src/monitor/ipc.mjs';
 import { sampleManifest } from './helpers.mjs';
 import { REQUIRED_ALIASES } from '../src/constants.mjs';
 
@@ -1124,4 +1125,189 @@ test('council: a /council slash message triggers the fan-out (same as the JSON f
   assert.match(res.headers['x-green-roomz-council'], /"judge":"field-vote"/);
   // the slash prefix is stripped before the variants see the prompt
   assert.ok(seen.every((c) => c === 'extract the brand'), JSON.stringify(seen));
+});
+
+function captureResponse() {
+  return {
+    statusCode: 0,
+    headers: {},
+    chunks: [],
+    writableFinished: true,
+    writableEnded: false,
+    headersSent: false,
+    writeHead(status, headers) {
+      this.statusCode = status;
+      this.headers = headers ?? {};
+      this.headersSent = true;
+    },
+    setHeader(key, value) { this.headers[key.toLowerCase()] = value; },
+    end(chunk) {
+      if (chunk) this.chunks.push(chunk);
+      this.writableEnded = true;
+    },
+    once() {},
+    on() {},
+  };
+}
+
+test('messages that are not arrays are 400 validation_error on /route and /v1/chat/completions', async (t) => {
+  const { server } = await withServer(t);
+  const bads = [42, true, {}, 'hi'];
+  for (const messages of bads) {
+    for (const path of ['/v1/chat/completions/route', '/v1/chat/completions']) {
+      const result = await request(server, {
+        path,
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: { messages },
+      });
+      assert.equal(result.status, 400, `${path} ${typeof messages}`);
+      assert.notEqual(result.status, 500);
+      assert.equal(result.body.error.type, 'validation_error');
+    }
+  }
+  const empty = await request(server, {
+    path: '/v1/chat/completions/route',
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: { messages: [] },
+  });
+  assert.equal(empty.status, 200);
+  const omitted = await request(server, {
+    path: '/v1/chat/completions/route',
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: {},
+  });
+  assert.equal(omitted.status, 200);
+});
+
+test('GET-family dumps reject POST PUT DELETE with 405', async (t) => {
+  const { server } = await withServer(t);
+  for (const path of ['/health', '/v1/models', '/metrics', '/props', '/v1/monitor/recent']) {
+    const get = await request(server, { path, method: 'GET' });
+    assert.equal(get.status, 200, path);
+    for (const method of ['POST', 'PUT', 'DELETE']) {
+      const result = await request(server, {
+        path,
+        method,
+        headers: { 'content-type': 'application/json' },
+        body: {},
+      });
+      assert.equal(result.status, 405, `${method} ${path}`);
+    }
+  }
+});
+
+test('mutating POST requires application/json Content-Type', async (t) => {
+  const { server } = await withServer(t);
+  const missing = await request(server, {
+    path: '/v1/chat/completions',
+    method: 'POST',
+    headers: {},
+    body: { messages: [{ role: 'user', content: 'hi' }] },
+  });
+  assert.equal(missing.status, 400);
+  const plain = await request(server, {
+    path: '/v1/chat/completions',
+    method: 'POST',
+    headers: { 'content-type': 'text/plain' },
+    body: { messages: [{ role: 'user', content: 'hi' }] },
+  });
+  assert.equal(plain.status, 400);
+});
+
+test('empty CORS does not reflect Origin; OPTIONS from denied peer is 403', async (t) => {
+  const { server, gateway } = await withServer(t);
+  gateway.manifest.gateway.cors_origins = [];
+  const get = await request(server, { path: '/health', headers: { origin: 'http://localhost' } });
+  assert.equal(get.status, 200);
+  assert.equal(get.headers['access-control-allow-origin'], undefined);
+  const res = captureResponse();
+  await gateway.handle({
+    method: 'OPTIONS',
+    url: '/health',
+    headers: { origin: 'http://localhost' },
+    socket: { remoteAddress: '8.8.8.8' },
+    on() {},
+  }, res);
+  assert.equal(res.statusCode, 403);
+});
+
+test('monitor recent hashes tickets; lockdown reboot slots stay 404', async (t) => {
+  const { server, gateway } = await withServer(t);
+  gateway.mailbox.push({
+    kind: 'success',
+    source: 'general-text-speculator',
+    ticket: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+  });
+  const recent = await request(server, { path: '/v1/monitor/recent' });
+  assert.equal(recent.status, 200);
+  const blob = JSON.stringify(recent.body);
+  assert.equal(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i.test(blob), false);
+  for (const path of ['/lockdown', '/reboot', '/slots']) {
+    const result = await request(server, { path });
+    assert.equal(result.status, 404, path);
+  }
+  assert.equal((GATEWAY_IPC_RIGHTS & CAP.LOCKDOWN) >>> 0, 0);
+  assert.equal((GATEWAY_IPC_RIGHTS & CAP.REBOOT) >>> 0, 0);
+});
+
+test('HEAD /health is bodyless; requestTimeout is finite; GET with Content-Length is 400', async (t) => {
+  const { server } = await withServer(t);
+  assert.notEqual(server.requestTimeout, 0);
+  assert.ok(server.requestTimeout > 0);
+  const head = await request(server, { path: '/health', method: 'HEAD' });
+  assert.equal(head.status, 200);
+  assert.equal(head.body, null);
+  const cl = await request(server, {
+    path: '/health',
+    method: 'GET',
+    headers: { 'content-length': '4' },
+    body: 'nope',
+  });
+  assert.equal(cl.status, 400);
+});
+
+test('fake 504 is not published as a success hop', async (t) => {
+  const { server, gateway } = await withServer(t, {}, {
+    ready: ['general-text-speculator'],
+    stubEnsure: true,
+    fetchImpl: async () => jsonFetch({ error: { message: 'timeout' } }, 504),
+  });
+  const result = await request(server, {
+    path: '/v1/chat/completions',
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: { model: 'general-text-speculator', messages: [{ role: 'user', content: 'hi' }] },
+  });
+  assert.equal(result.status, 504);
+  const hops = gateway.mailbox.recent();
+  assert.ok(hops.length > 0);
+  assert.notEqual(hops[hops.length - 1].kind, 'success');
+});
+
+test('council takes PolicyGate acquire', async (t) => {
+  const manifest = sampleManifest();
+  const vl = manifest.agents.find((a) => a.alias === 'vision-layout-agent');
+  manifest.agents.push({ ...vl, alias: 'vision-layout-agent@b', variant_of: 'vision-layout-agent', port: 18281, model: '/tmp/b.gguf' });
+  const registry = await new AgentRegistry(manifest).inspect();
+  for (const a of ['vision-layout-agent', 'vision-layout-agent@b', 'tool-router-agent']) registry.setStatus(a, 'ready');
+  const processes = new ProcessManager({ manifest, registry, spawnImpl() { throw new Error('no'); } });
+  processes.ensure = async (agent) => ({ alias: agent.alias, state: 'ready' });
+  const policy = new PolicyGate('maximize');
+  let acquired = 0;
+  const orig = policy.acquire.bind(policy);
+  policy.acquire = async (...args) => { acquired += 1; return orig(...args); };
+  const gateway = new Gateway({
+    manifest, registry, processes, sessions: new SessionLedger(), policy,
+    fetchImpl: async () => jsonFetch({ choices: [{ message: { role: 'assistant', content: '{"brand":"Acme"}' } }] }),
+  });
+  const server = await gateway.listen('127.0.0.1', 0);
+  t.after(() => server.close());
+  await request(server, {
+    path: '/v1/chat/completions', method: 'POST', headers: { 'content-type': 'application/json' },
+    body: { council: { of: 'vision-layout-agent' }, messages: [{ role: 'user', content: 'extract' }] },
+  });
+  assert.ok(acquired >= 1);
 });

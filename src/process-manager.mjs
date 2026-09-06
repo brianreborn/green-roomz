@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'no
 import { UnavailableError } from './errors.mjs';
 import { sleep } from './util.mjs';
 import { agentFootprintBytes, headroomBytes, profileAdmitted } from './memory.mjs';
+import { CpuSetAllocator, DEFAULT_THREADS } from './cpu-set.mjs';
 
 const MAX_LOG_CHARS = 64 * 1024;
 
@@ -35,6 +36,44 @@ export function withVulkanAllThreads(args, logicalCpus = os.cpus().length) {
     if (index !== -1 && index + 1 < next.length) next[index + 1] = threads;
   }
   return next;
+}
+
+export function argsThreadCount(args, fallback = DEFAULT_THREADS) {
+  const index = (args ?? []).indexOf('--threads');
+  if (index !== -1 && index + 1 < args.length) {
+    const n = Number(args[index + 1]);
+    if (Number.isFinite(n) && n > 0) return Math.trunc(n);
+  }
+  return fallback;
+}
+
+function stripFlag(args, flag) {
+  const next = [];
+  for (let i = 0; i < args.length; i += 1) {
+    if (args[i] === flag) {
+      if (i + 1 < args.length && !String(args[i + 1]).startsWith('-')) i += 1;
+      continue;
+    }
+    next.push(args[i]);
+  }
+  return next;
+}
+
+function hostBindsPublic(args) {
+  for (let i = 0; i < args.length - 1; i += 1) {
+    if (args[i] === '--host' && (args[i + 1] === '0.0.0.0' || args[i + 1] === '::')) return true;
+  }
+  return false;
+}
+
+function liveThreadSum(processes) {
+  let total = 0;
+  for (const rec of processes.values()) {
+    if (!rec || rec.child?.exitCode != null) continue;
+    if (!['ready', 'starting', 'suspended', 'stopping'].includes(rec.state)) continue;
+    total += argsThreadCount(rec.args ?? [], rec.threads ?? DEFAULT_THREADS);
+  }
+  return total;
 }
 
 
@@ -118,6 +157,7 @@ export class ProcessManager {
     this.processes = new Map();
     this.starting = new Map();
     this.idleSweeper = null;
+    this.cpuAllocator = new CpuSetAllocator(os.cpus().length);
     const g = manifest?.gateway ?? {};
     this.idleEvictMs = g.idle_evict_ms ?? 300_000;
     // Hard ceiling on warm specialists. Default: no artificial cap - free memory
@@ -151,6 +191,7 @@ export class ProcessManager {
   async checkpointModel(alias, tag = String(Date.now())) {
     const rec = this.processes.get(alias);
     if (!this.checkpointDir || !rec || rec.child.exitCode !== null) return null;
+    if ((rec.refs ?? 0) > 0) return null;
     const agent = this.manifest.agents.find((a) => a.alias === alias);
     const filename = `${tag}.bin`;
     try {
@@ -224,7 +265,10 @@ export class ProcessManager {
   async restoreModel(alias, filename) {
     const rec = this.processes.get(alias);
     if (!this.checkpointDir || !rec || rec.child.exitCode !== null) return false;
+    if ((rec.refs ?? 0) > 0) return false;
     const agent = this.manifest.agents.find((a) => a.alias === alias);
+    const idle = await this.slotIsIdle(agent.port);
+    if (!idle) return false;
     const target = filename ?? rec.checkpoints?.[rec.checkpoints.length - 1]?.filename;
     if (!target) return false;
     try {
@@ -237,18 +281,46 @@ export class ProcessManager {
   }
 
   suspendRecord(record) {
+    if ((record.refs ?? 0) > 0) return false;
     try { this.suspendImpl(record.child.pid); record.state = 'suspended'; return true; }
     catch { return false; }
+  }
+
+  pin(alias) {
+    const rec = this.processes.get(alias);
+    if (!rec) return () => {};
+    rec.refs = (rec.refs ?? 0) + 1;
+    rec.lastUsedAt = Date.now();
+    return () => {
+      rec.refs = Math.max(0, (rec.refs ?? 1) - 1);
+      rec.lastUsedAt = Date.now();
+    };
   }
 
   async resume(alias) {
     const record = this.processes.get(alias);
     if (!record || record.state !== 'suspended' || record.child.exitCode !== null) return null;
     try { this.resumeImpl(record.child.pid); } catch { return null; }
-    record.state = 'ready';
+    record.state = 'starting';
     record.lastUsedAt = Date.now();
-    this.registry.setStatus(alias, 'ready', { pid: record.child.pid, profileId: record.profileId, resumed: true });
-    return record;
+    this.registry.setStatus(alias, 'starting', { pid: record.child.pid, profileId: record.profileId, resumed: true });
+    const agent = this.manifest.agents.find((a) => a.alias === alias);
+    try {
+      const response = await this.fetch(`http://127.0.0.1:${agent.port}/health`, {
+        signal: AbortSignal.timeout(1500),
+        headers: { connection: 'close' },
+      });
+      const ok = response?.ok ?? (response?.status >= 200 && response?.status < 300);
+      if (!ok || record.child.exitCode !== null) throw new Error('resume health failed');
+      record.state = 'ready';
+      this.registry.setStatus(alias, 'ready', { pid: record.child.pid, profileId: record.profileId, resumed: true });
+      return record;
+    } catch {
+      await this.stopRecord(record);
+      if (this.processes.get(alias) === record) this.processes.delete(alias);
+      this.registry.setStatus(alias, 'cold');
+      return null;
+    }
   }
 
   get(alias) {
@@ -304,11 +376,21 @@ export class ProcessManager {
     if (runtime.kind === 'llama-server') {
       args.push('--port', String(agent.port), '--model', agent.model, '--alias', agent.alias, '--ctx-size', String(profile?.context_size ?? agent.context_size ?? 4096));
       args.push(...(agent.extra_args ?? []), ...(profile?.args ?? []));
+      if (hostBindsPublic(args)) {
+        throw new UnavailableError(`${agent.alias}: extra_args/profile must not bind 0.0.0.0`, { code: 'public_bind_refused' });
+      }
+      const noMetrics = stripFlag(args, '--metrics');
+      args.length = 0;
+      args.push(...noMetrics);
+      if (!args.includes('--no-webui')) args.push('--no-webui');
       // Only rewrite vulkan-all; hybrid/cpu-4 already set --threads and must not regress.
       if (profile?.id === 'vulkan-all') {
         const patched = withVulkanAllThreads(args, os.cpus().length);
         args.length = 0;
         args.push(...patched);
+      }
+      if (!args.includes('--threads')) {
+        args.push('--threads', String(DEFAULT_THREADS), '--threads-batch', String(DEFAULT_THREADS));
       }
       if (agent.projector) args.push('--mmproj', agent.projector);
       // Vision cost controls: cap image tokens (biggest lever for a slow box),
@@ -399,6 +481,7 @@ export class ProcessManager {
       );
     }
     const includeDraft = shouldAttachDraft(agent);
+    let failedThreads = null;
     for (const profile of this.profilesFor(agent)) {
       const admission = profileAdmitted(agent, profile, { freeMemoryBytes, includeDraft });
       if (!admission.ok) {
@@ -407,6 +490,18 @@ export class ProcessManager {
         );
         continue;
       }
+      const probeArgs = [...(this.manifest.runtimes[agent.runtime]?.base_args ?? []), ...(agent.extra_args ?? []), ...(profile?.args ?? [])];
+      let wantThreads = argsThreadCount(probeArgs, DEFAULT_THREADS);
+      if (profile?.id === 'vulkan-all') wantThreads = vulkanAllThreadCount();
+      const remaining = Math.max(0, os.cpus().length - liveThreadSum(this.processes));
+      if (wantThreads > remaining) {
+        lastError = new UnavailableError(
+          `${agent.alias} profile ${profile.id} skipped: cpu_oversubscribed (want ${wantThreads}, remaining ${remaining})`,
+          { code: 'cpu_oversubscribed' },
+        );
+        continue;
+      }
+      if (failedThreads != null && wantThreads > failedThreads) continue;
       try {
         return await this.startProfile(agent, profile, { signal });
       } catch (error) {
@@ -414,6 +509,9 @@ export class ProcessManager {
         if (signal?.aborted || /abort/i.test(String(error.message))) {
           this.registry.setStatus(agent.alias, 'cold', { lastError: error.message });
           throw error;
+        }
+        if (/health deadline|timed out|timeout|ENOMEM|OOM/i.test(String(error.message))) {
+          failedThreads = wantThreads;
         }
       }
     }
@@ -423,12 +521,23 @@ export class ProcessManager {
 
   async startProfile(agent, profile, { signal } = {}) {
     const launch = this.buildLaunch(agent, profile);
-    const child = this.spawn(launch.command, launch.args, {
-      env: launch.env,
-      windowsHide: true,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      shell: false,
-    });
+    const wantThreads = argsThreadCount(launch.args, DEFAULT_THREADS);
+    const cpus = this.cpuAllocator.allocate(agent.alias, wantThreads);
+    if (wantThreads > 0 && cpus.length === 0) {
+      throw new UnavailableError(`${agent.alias}: cpu_oversubscribed`, { code: 'cpu_oversubscribed' });
+    }
+    let child;
+    try {
+      child = this.spawn(launch.command, launch.args, {
+        env: launch.env,
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        shell: false,
+      });
+    } catch (error) {
+      this.cpuAllocator.release(agent.alias);
+      throw error;
+    }
     const record = {
       alias: agent.alias,
       child,
@@ -441,6 +550,9 @@ export class ProcessManager {
       logs: '',
       owned: true,
       resident: isResidentAgent(agent),
+      refs: 0,
+      threads: wantThreads,
+      cpus,
     };
     this.processes.set(agent.alias, record);
     this.registry.setStatus(agent.alias, 'starting', { profileId: profile.id });
@@ -463,6 +575,7 @@ export class ProcessManager {
       return record;
     } catch (error) {
       await this.stopRecord(record);
+      this.cpuAllocator.release(agent.alias);
       const detail = record.logs.trim().slice(-2000);
       throw new UnavailableError(`Failed to start ${agent.alias} with ${profile.id}: ${error.message}${detail ? `; ${detail}` : ''}`);
     }
@@ -509,6 +622,7 @@ export class ProcessManager {
 
   async stopRecord(record) {
     if (!record.owned || record.child.exitCode !== null) return;
+    this.cpuAllocator.release(record.alias);
     // A SIGSTOP'd process won't act on SIGTERM until it runs again.
     if (record.state === 'suspended') { try { this.resumeImpl(record.child.pid); } catch {} }
     record.state = 'stopping';
@@ -556,6 +670,7 @@ export class ProcessManager {
       : incoming;
     const live = [...this.processes.values()].filter((r) =>
       r.owned && !r.resident && r.alias !== incomingAlias && !this.isPinned(r.alias)
+      && (r.refs ?? 0) === 0
       && ['ready', 'starting', 'suspended'].includes(r.state) && r.child.exitCode === null);
     if (!live.length) return { suspended: [], terminated: [] };
     live.sort((a, b) => (a.lastUsedAt ?? a.createdAt ?? 0) - (b.lastUsedAt ?? b.createdAt ?? 0)); // LRU first
@@ -620,7 +735,7 @@ export class ProcessManager {
 
   async sweepIdle(now = Date.now()) {
     const specialists = [...this.processes.values()].filter((r) =>
-      r.owned && !r.resident && !this.isPinned(r.alias) && r.child.exitCode === null && !this.starting.has(r.alias));
+      r.owned && !r.resident && !this.isPinned(r.alias) && (r.refs ?? 0) === 0 && r.child.exitCode === null && !this.starting.has(r.alias));
     const ready = specialists.filter((r) => r.state === 'ready');
     ready.sort((a, b) => (b.lastUsedAt ?? b.createdAt ?? 0) - (a.lastUsedAt ?? a.createdAt ?? 0));
     const overCap = new Set(ready.slice(Math.max(0, this.maxWarmSpecialists)).map((r) => r.alias));
@@ -651,5 +766,36 @@ export class ProcessManager {
 
   stopIdleSweeper() {
     if (this.idleSweeper) { clearInterval(this.idleSweeper); this.idleSweeper = null; }
+  }
+
+  async slotIsIdle(port) {
+    if (!port) return false;
+    try {
+      const res = await this.fetch(`http://127.0.0.1:${port}/slots`, {
+        signal: AbortSignal.timeout(800),
+        headers: { connection: 'close' },
+      });
+      let json = null;
+      try {
+        json = typeof res.json === 'function' ? await res.json() : null;
+      } catch { json = null; }
+      if (json == null) return true;
+      const slots = Array.isArray(json) ? json : (json?.slots ?? []);
+      const list = Array.isArray(slots) ? slots : [];
+      if (list.length) return list.every((slot) => slot?.is_processing !== true);
+      if (typeof json === 'object' && 'is_processing' in json) return json.is_processing !== true;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async waitSlotIdle(port, { timeoutMs = 2000, intervalMs = 80 } = {}) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (await this.slotIsIdle(port)) return true;
+      await sleep(intervalMs);
+    }
+    return false;
   }
 }

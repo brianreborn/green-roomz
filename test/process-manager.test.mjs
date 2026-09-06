@@ -334,7 +334,12 @@ test('suspend/resume: an over-ceiling CPU model is frozen (SIGSTOP), revived by 
   const manifest = sampleManifest();
   const registry = new AgentRegistry(manifest);
   const signals = [];
-  const manager = new ProcessManager({ manifest, registry, spawnImpl() { throw new Error('no'); } });
+  const manager = new ProcessManager({
+    manifest,
+    registry,
+    spawnImpl() { throw new Error('no'); },
+    fetchImpl: async () => ({ ok: true, status: 200 }),
+  });
   manager.canSuspend = true;
   manager.suspendImpl = (pid) => signals.push(['STOP', pid]);
   manager.resumeImpl = (pid) => signals.push(['CONT', pid]);
@@ -488,4 +493,147 @@ test('maybeRestoreDefault: restores the default KV only when the prime snapshot 
   assert.equal(await manager.maybeRestoreDefault(agent, record), false);
 
   rmSync(dir, { recursive: true, force: true });
+});
+
+test('pin skips sweepIdle; unpin then sweep evicts', async () => {
+  const manager = new ProcessManager({
+    manifest: sampleManifest(),
+    registry: new AgentRegistry(sampleManifest()),
+    spawnImpl() { throw new Error('no'); },
+    fetchImpl: async () => ({ ok: true, status: 200 }),
+  });
+  manager.maxWarmSpecialists = 0;
+  manager.idleEvictMs = 10;
+  manager.canSuspend = false;
+  const now = Date.now();
+  manager.processes.set('qwenstral-code-speculator', {
+    alias: 'qwenstral-code-speculator', owned: true, resident: false, state: 'ready',
+    createdAt: now - 60_000, lastUsedAt: now - 60_000, child: new FakeChild(), refs: 0,
+  });
+  const unpin = manager.pin('qwenstral-code-speculator');
+  const skipped = await manager.sweepIdle(now);
+  assert.equal(skipped.includes('qwenstral-code-speculator'), false);
+  assert.ok(manager.processes.has('qwenstral-code-speculator'));
+  unpin();
+  const evicted = await manager.sweepIdle(now);
+  assert.ok(evicted.includes('qwenstral-code-speculator'));
+});
+
+test('resume without /health 200 restarts rather than ready', async () => {
+  const manifest = sampleManifest();
+  const registry = new AgentRegistry(manifest);
+  const manager = new ProcessManager({
+    manifest,
+    registry,
+    spawnImpl() { throw new Error('no spawn'); },
+    fetchImpl: async () => ({ ok: false, status: 503 }),
+  });
+  manager.canSuspend = true;
+  manager.suspendImpl = () => {};
+  manager.resumeImpl = () => {};
+  const child = Object.assign(new FakeChild(), { pid: 99 });
+  manager.processes.set('qwenstral-code-speculator', {
+    alias: 'qwenstral-code-speculator', owned: true, resident: false, state: 'suspended',
+    profileId: 'cpu-4', child, createdAt: Date.now(), lastUsedAt: Date.now(), refs: 0,
+  });
+  const resumed = await manager.resume('qwenstral-code-speculator');
+  assert.equal(resumed, null);
+  assert.equal(manager.processes.has('qwenstral-code-speculator'), false);
+});
+
+test('restoreModel is skipped while refs>0', async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'grz-restore-pin-'));
+  const manifest = sampleManifest();
+  manifest.gateway.checkpoint_dir = dir;
+  const calls = [];
+  const manager = new ProcessManager({
+    manifest, registry: new AgentRegistry(manifest), spawnImpl() { throw new Error('no'); },
+    fetchImpl: async (url, init) => {
+      calls.push({ url: String(url), body: init?.body && JSON.parse(init.body) });
+      return { ok: true, status: 200 };
+    },
+  });
+  const agent = manifest.agents.find((a) => a.alias === 'general-text-speculator');
+  manager.processes.set(agent.alias, {
+    alias: agent.alias, owned: true, resident: false, state: 'ready', child: new FakeChild(),
+    createdAt: Date.now(), refs: 1, checkpoints: [{ tag: 'snap1', filename: 'snap1.bin', at: Date.now() }],
+  });
+  assert.equal(await manager.restoreModel(agent.alias), false);
+  assert.equal(calls.some((c) => /action=restore/.test(c.url)), false);
+  manager.processes.get(agent.alias).refs = 0;
+  assert.equal(await manager.restoreModel(agent.alias), true);
+});
+
+test('timed-out cpu-4 does not retry cpu-6', async () => {
+  const manifest = sampleManifest();
+  const agent = manifest.agents.find((item) => item.alias === 'qwenstral-code-speculator');
+  agent.profiles = [
+    { id: 'cpu-4', args: ['--device', 'none', '--threads', '4', '--n-gpu-layers', '0'] },
+    { id: 'cpu-6', args: ['--device', 'none', '--threads', '6', '--n-gpu-layers', '0'] },
+  ];
+  const registry = new AgentRegistry(manifest);
+  registry.setStatus(agent.alias, 'cold');
+  const spawned = [];
+  const manager = new ProcessManager({
+    manifest,
+    registry,
+    hostAdapter: { applyPriority() { return true; }, sampleResources() { return { freeMemoryBytes: 40 * 1024 ** 3 }; } },
+    spawnImpl: (_command, args) => {
+      spawned.push(args);
+      throw new Error('timed out');
+    },
+    fetchImpl: async () => ({ ok: true }),
+  });
+  await assert.rejects(() => manager.start(agent), /timed out|Unavailable|Failed to start/);
+  assert.equal(spawned.length, 1);
+  assert.ok(spawned[0].includes('4'));
+  assert.equal(spawned.some((args) => args.includes('6') && args[args.indexOf('--threads') + 1] === '6'), false);
+});
+
+test('empty CPU set does not spawn', async () => {
+  const { CpuSetAllocator } = await import('../src/cpu-set.mjs');
+  const manifest = sampleManifest();
+  const agent = manifest.agents.find((item) => item.alias === 'qwenstral-code-speculator');
+  agent.extra_args = ['--threads', '4', '--threads-batch', '4'];
+  const registry = new AgentRegistry(manifest);
+  registry.setStatus(agent.alias, 'cold');
+  const spawned = [];
+  const manager = new ProcessManager({
+    manifest,
+    registry,
+    hostAdapter: { applyPriority() { return true; }, sampleResources() { return { freeMemoryBytes: 40 * 1024 ** 3 }; } },
+    spawnImpl: () => { spawned.push('x'); return new FakeChild(); },
+    fetchImpl: async () => ({ ok: true }),
+  });
+  manager.cpuAllocator = new CpuSetAllocator(0);
+  await assert.rejects(() => manager.start(agent), /cpu_oversubscribed|Unable to start|oversubscribed/);
+  assert.equal(spawned.length, 0);
+});
+
+test('Cursor nexus --threads stays 4; buildLaunch injects --no-webui and strips --metrics', () => {
+  const raw = JSON.parse(rfs(new URL('../config/agents.cursor.json', import.meta.url)));
+  const nexus = raw.agents.find((a) => a.alias === 'tool-router-agent');
+  const cpu4 = (nexus.profiles ?? []).find((p) => p.id === 'cpu-4');
+  assert.ok(cpu4);
+  assert.equal(cpu4.args[cpu4.args.indexOf('--threads') + 1], '4');
+  const manifest = sampleManifest();
+  const agent = manifest.agents.find((a) => a.alias === 'tool-router-agent');
+  const registry = new AgentRegistry(manifest);
+  const manager = new ProcessManager({ manifest, registry, spawnImpl() { throw new Error('no'); } });
+  const launch = manager.buildLaunch(agent, { id: 'cpu-2', args: ['--device', 'none', '--metrics', '1'] });
+  assert.ok(launch.args.includes('--no-webui'));
+  assert.equal(launch.args.includes('--metrics'), false);
+});
+
+test('extra_args --host 0.0.0.0 is refused', () => {
+  const manifest = sampleManifest();
+  const agent = manifest.agents.find((a) => a.alias === 'general-text-speculator');
+  agent.extra_args = ['--host', '0.0.0.0'];
+  const manager = new ProcessManager({
+    manifest, registry: new AgentRegistry(manifest), spawnImpl() { throw new Error('no'); },
+  });
+  assert.throws(
+    () => manager.buildLaunch(agent, { id: 'cpu-4', args: ['--device', 'none'] }),
+    /0\.0\.0\.0|public_bind/,
+  );
 });

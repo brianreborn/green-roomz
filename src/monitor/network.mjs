@@ -135,6 +135,8 @@ function decorateReject(envelope, extra) {
     envelope.ok = false;
     envelope.implemented = false;
     envelope.voted = false;
+    envelope.executed = false;
+    envelope.spawned = false;
     if (extra.state !== undefined) envelope.state = extra.state;
     if (extra.verb !== undefined) envelope.verb = extra.verb;
   }
@@ -236,8 +238,9 @@ export function createNetwork(options = {}) {
     }
 
     if (UNCALLABLE.has(verb)) {
-      // machine-only uncallable: throw, never execute.
-      throw new Error('complex-last');
+      return rejectOf({
+        from, to: verb, reason: `${verb} is uncallable (v1)`, target, ticket, source, state: from, verb,
+      });
     }
 
     if (verb === 'reset' && resetting.get(target) === true) {
