@@ -1,4 +1,4 @@
-# Green-Roomz Windows install (beta-0.2, no admin)
+# Green-Roomz Windows install (beta-0.4, no admin)
 
 Operator: **Brian**. Hosts: **qodesh** (Win11, Firefox, `C:\Users\brian`, Athlon II + 8600 GT) and **shalom** (Win).
 
@@ -69,3 +69,39 @@ Example:
 `%LOCALAPPDATA%\Green-Roomz\uninstall-windows.cmd`
 
 Removes `%LOCALAPPDATA%\Green-Roomz` and the Start Menu `Green-Roomz` folder only. Leaves Program Files, HKLM, Documents checkout, and `C:\LocalAI` alone.
+
+## Windows MVP chat (beta-0.4 path)
+
+Goal on **qodesh**: basic ChatGPT-style API (multi-turn, stream, stop via abort, model alias) on CPU llama — not a SPA, not an API-key product.
+
+1. After install, fetch the tiny Instruct GGUF (CPU only, ~0.40 GB):
+
+```bat
+"%LOCALAPPDATA%\Green-Roomz\scripts\fetch-tiny-instruct.cmd"
+```
+
+Default URL (verified):  
+`https://huggingface.co/bartowski/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf`  
+→ `models\Qwen2.5-0.5B-Instruct-Q4_K_M.gguf`
+
+2. Prefer MVP manifest on qodesh:
+
+```bat
+cd /d "%LOCALAPPDATA%\Green-Roomz"
+node bin\green-roomz.mjs serve --manifest config\agents.windows-mvp.json --host 127.0.0.1 --port 8080
+```
+
+- Nexus (`tool-router-agent`): existing Qwenstral 0.5B English JSON router (PF8).
+- Chat (`general-text-speculator`): Instruct Q4_K_M above, CPU only.
+- Code: cold until RAM allows.
+
+3. Chat example:
+
+```bat
+curl.exe -sS http://127.0.0.1:8080/v1/chat/completions -H "Content-Type: application/json" -d "{\"model\":\"general-text-speculator\",\"stream\":false,\"messages\":[{\"role\":\"user\",\"content\":\"Say hello\"}]}"
+```
+
+`start.cmd` defaults to `config\agents.windows-mvp.json` and prints these hints.
+Multi-turn console: `scripts\chat-mvp.cmd` (stream + Ctrl-C stop).
+See pack-root `WINDOWS-MVP.md` and `docs/windows-mvp-aliases.md`.
+

@@ -56,3 +56,27 @@ dir "%ProgramFiles(x86)%\Green-Roomz"
 - [ ] Start Menu `Green-Roomz` folder is gone (no leftover `.lnk` / `.url`).
 - [ ] No `Program Files\Green-Roomz` (this installer never created one).
 - [ ] Optional read-only: `reg query HKLM\Software\Microsoft\Windows\CurrentVersion\Uninstall /s /f Green-Roomz` — expect no key. Do not write HKLM.
+
+## 6. Windows MVP chat (qodesh, after install)
+
+CPU only. Never load GGUFs on the 8600 GT. Do not stop the Linux cursor serve.
+
+- [ ] Fetch tiny Instruct if missing:
+  `"%LOCALAPPDATA%\Green-Roomz\scripts\fetch-tiny-instruct.cmd"`
+  → `models\Qwen2.5-0.5B-Instruct-Q4_K_M.gguf` (~0.40 GB, bartowski Q4_K_M).
+- [ ] `start.cmd` prints `GRZ_MANIFEST=...\agents.windows-mvp.json` (override with `set GRZ_MANIFEST=...`).
+- [ ] Health + models:
+  ```bat
+  curl.exe -sS http://127.0.0.1:8080/health
+  curl.exe -sS http://127.0.0.1:8080/v1/models
+  ```
+- [ ] One-shot chat (non-stream):
+  ```bat
+  curl.exe -sS http://127.0.0.1:8080/v1/chat/completions -H "Content-Type: application/json" -d "{\"model\":\"general-text-speculator\",\"stream\":false,\"messages\":[{\"role\":\"user\",\"content\":\"Say hello in one short sentence.\"}]}"
+  ```
+- [ ] Multi-turn console: `"%LOCALAPPDATA%\Green-Roomz\scripts\chat-mvp.cmd"`
+  - pick model with `/model general-text-speculator`
+  - stream on by default; Ctrl-C stops the current completion
+  - `/quit` exits
+- [ ] Nexus stays router-only (`tool-router-agent` / Qwenstral 0.5B). Chat replies come from Instruct, not Tekken-as-buddy.
+

@@ -50,8 +50,40 @@ if not exist "%GRZ_ROOT%\runtime\llama-server.exe" (
   exit /b 1
 )
 
-echo Green-Roomz portable pack
+rem Prefer Windows MVP manifest on this .cmd launcher (qodesh). Override: set GRZ_MANIFEST=...
+if not defined GRZ_MANIFEST (
+  if exist "%GRZ_ROOT%\config\agents.windows-mvp.json" (
+    set "GRZ_MANIFEST=%GRZ_ROOT%\config\agents.windows-mvp.json"
+  ) else (
+    set "GRZ_MANIFEST=%GRZ_ROOT%\config\agents.cursor.json"
+  )
+)
+if not exist "%GRZ_MANIFEST%" (
+  echo FATAL: manifest missing: %GRZ_MANIFEST%
+  exit /b 1
+)
+
+if not exist "%GRZ_ROOT%\models\Qwen2.5-0.5B-Instruct-Q4_K_M.gguf" (
+  echo NOTE: tiny Instruct GGUF missing. Chat alias general-text-speculator will be cold until:
+  echo   scripts\fetch-tiny-instruct.cmd
+  echo ^(CPU only; never load GGUFs on 8600 GT^)
+  echo.
+)
+
+echo Green-Roomz portable pack ^(Windows MVP^)
 echo GRZ_ROOT=%GRZ_ROOT% GRZ_EXE=%GRZ_EXE% GRZ_LLAMA=%GRZ_LLAMA%
+echo GRZ_MANIFEST=%GRZ_MANIFEST%
 echo gateway http://127.0.0.1:8080
-node bin\green-roomz.mjs serve --manifest config\agents.cursor.json --host 127.0.0.1 --port 8080
+echo.
+echo How to chat (OpenAI-compatible; no API key^):
+echo   curl.exe -sS http://127.0.0.1:8080/health
+echo   curl.exe -sS http://127.0.0.1:8080/v1/models
+echo   curl.exe -sS http://127.0.0.1:8080/v1/chat/completions -H "Content-Type: application/json" -d "{\"model\":\"general-text-speculator\",\"stream\":false,\"messages\":[{\"role\":\"user\",\"content\":\"Say hello\"}]}"
+echo Multi-turn console (stream + Ctrl-C stop^): scripts\chat-mvp.cmd
+echo Stream curl: set "stream":true in JSON; Ctrl-C aborts.
+echo Fetch model: scripts\fetch-tiny-instruct.cmd
+echo Operator help UI (not chat SPA^): docs\help\index.html
+echo See WINDOWS-MVP.md
+echo.
+node bin\green-roomz.mjs serve --manifest "%GRZ_MANIFEST%" --host 127.0.0.1 --port 8080
 endlocal

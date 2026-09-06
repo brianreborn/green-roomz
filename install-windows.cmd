@@ -1,6 +1,6 @@
 @echo off
 setlocal EnableExtensions DisableDelayedExpansion
-rem Green-Roomz beta-0.2 no-admin per-user installer (CPU llama only).
+rem Green-Roomz beta-0.4 no-admin per-user installer (CPU llama only; MVP fetch: scripts\fetch-tiny-instruct.cmd).
 rem Operator: Brian. Hosts: qodesh (Win11/Firefox), shalom (Win).
 rem No UAC, no Program Files, no HKLM, no self-signed cert, no icacls.
 rem Never vulkan/cuda. Never load GGUFs on the 8600 GT.
@@ -216,6 +216,11 @@ exit /b 1
 
 :node_ok
 call :log ===== install-windows.cmd ok =====
+if not exist "%DEST%\models\Qwen2.5-0.5B-Instruct-Q4_K_M.gguf" (
+  echo MVP chat model not present yet. One-click fetch ^(CPU only^):
+  echo   "%DEST%\scripts\fetch-tiny-instruct.cmd"
+  echo Then serve with config\agents.windows-mvp.json — see WINDOWS-MVP.md
+)
 echo Done. Start via Start Menu "Green-Roomz" or:
 echo   "%DEST%\start.cmd"
 exit /b 0

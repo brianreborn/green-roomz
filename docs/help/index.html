@@ -91,6 +91,7 @@
   <a href="#will">Refusal / will</a>
   <a href="#topo">Serve topology</a>
   <a href="#install">Install</a>
+  <a href="#mvp">Windows MVP</a>
   <a href="#cli">CLI</a>
 </nav>
 <main>
@@ -199,12 +200,27 @@
 <h2 id="install">Install platforms</h2>
 <div class="plats">
   <div class="box"><b>Linux x86_64</b><br><code>chmod +x start.sh stop.sh console.sh runtime/llama-server</code><br><code>./start.sh</code><br>Vendored ELF + <code>.so</code> in <code>runtime/</code>. Console: <code>./console.sh</code> (every 2s; <code>CONSOLE_ONCE=1</code> once).</div>
-  <div class="box"><b>Windows — no admin, CPU only</b><br><code>install-windows.cmd</code> → <code>%LOCALAPPDATA%\Green-Roomz</code><br>Start Menu or <code>start.cmd</code>. Help is this file.<br>If <code>runtime\llama-server.exe</code> is missing, fetch official <code>llama-b10702-bin-win-cpu-x64.zip</code>. Never vulkan/CUDA. Never load GGUFs on the 8600 GT (display only; <code>--device none --n-gpu-layers 0</code>).<br>Node LTS MSI is a prerequisite the installer does not download: https://nodejs.org/en/download</div>
+  <div class="box"><b>Windows — no admin, CPU only</b><br><code>install-windows.cmd</code> → <code>%LOCALAPPDATA%\Green-Roomz</code><br>Start Menu or <code>start.cmd</code>. Help is this file.<br>If <code>runtime\llama-server.exe</code> is missing, fetch official <code>llama-b10702-bin-win-cpu-x64.zip</code>. Never vulkan/CUDA. Never load GGUFs on the 8600 GT (display only; <code>--device none --n-gpu-layers 0</code>).<br>Node LTS MSI is a prerequisite the installer does not download: https://nodejs.org/en/download<br>MVP: <code>scripts\fetch-tiny-instruct.cmd</code> + <code>agents.windows-mvp.json</code> + <code>scripts\chat-mvp.cmd</code>.</div>
   <div class="box"><b>Android — no root, no Knox</b><br>Host: <code>./deploy-android.sh</code> (adb device) → <code>/data/local/tmp/grz</code>. SELinux: Termux cannot <em>exec</em> tmp.<br>On phone: <code>bash /data/local/tmp/grz/termux-start.sh</code> copies ELF into <code>$HOME</code> and serves. Host forward: <code>adb forward tcp:18080 tcp:8080</code>. See <code>docs/note9-termux.md</code>.</div>
   <div class="box"><b>FreeBSD / other Unix</b><br>Pack <code>runtime/llama-server</code> is a Linux ELF. <code>pkg install llama-cpp</code> (or build ggml-org/llama.cpp). <code>./start.sh</code> uses system <code>llama-server</code> if present. macOS: <code>brew install llama.cpp</code>.</div>
 </div>
 <p>Need Node on PATH (<code>engines &gt;=22</code>; Node 20 has been used successfully). ~1.5 GB RAM free. Ports 8080 and 8187 free on <em>that</em> host. Slim zip has no GGUF; drop <code>Qwenstral-Small-3.1-0.5B.Q4_K_M.gguf</code> into <code>models/</code>.</p>
 <p>Health / smoke: <code>curl -s http://127.0.0.1:8080/health</code> then <code>./smoke.sh</code>. Default llama profile is cpu-4 (4 threads).</p>
+
+
+<h2 id="mvp">Windows MVP chat (qodesh)</h2>
+<div class="callout">
+  <strong>API already feels like basic ChatGPT</strong> — multi-turn <code>messages</code>, <code>stream: true</code>, abort on client close, <code>GET /v1/models</code>.
+  This page is operator help, <em>not</em> a chat SPA. No API-key product.
+</div>
+<table>
+  <tr><th>Step</th><th>Command</th></tr>
+  <tr><td>Fetch tiny Instruct (~0.40 GB, CPU)</td><td><code>scripts\fetch-tiny-instruct.cmd</code> → <code>models\Qwen2.5-0.5B-Instruct-Q4_K_M.gguf</code></td></tr>
+  <tr><td>Start</td><td><code>start.cmd</code> (defaults to <code>config\agents.windows-mvp.json</code>; override <code>GRZ_MANIFEST</code>)</td></tr>
+  <tr><td>Console chat</td><td><code>scripts\chat-mvp.cmd</code> — model pick, stream, Ctrl-C stop, multi-turn</td></tr>
+  <tr><td>Chat alias</td><td><code>general-text-speculator</code> (Instruct). Nexus <code>tool-router-agent</code> is router-only.</td></tr>
+</table>
+<p class="warn">Never load GGUFs on the 8600 GT. Manifest keeps <code>--device none --n-gpu-layers 0</code>. See <code>WINDOWS-MVP.md</code>.</p>
 
 <h2 id="cli">CLI</h2>
 <pre>node bin/green-roomz.mjs validate [--manifest path]
