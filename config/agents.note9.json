@@ -36,7 +36,7 @@
     },
     "whisper": {
       "kind": "whisper-server",
-      "command": "/data/local/tmp/grz/missing/whisper-server",
+      "command": "${HOME}/grz-runtime/missing/whisper-server",
       "base_args": [
         "--host",
         "127.0.0.1"
@@ -45,13 +45,13 @@
     },
     "piper": {
       "kind": "piper",
-      "command": "/data/local/tmp/grz/missing/piper",
+      "command": "${HOME}/grz-runtime/missing/piper",
       "base_args": [],
       "env": {}
     },
     "stable_diffusion": {
       "kind": "stable-diffusion",
-      "command": "/data/local/tmp/grz/missing/sd-server",
+      "command": "${HOME}/grz-runtime/missing/sd-server",
       "base_args": [
         "--listen-ip",
         "127.0.0.1"
@@ -74,7 +74,7 @@
         "image",
         "file"
       ],
-      "model": "/data/local/tmp/grz/missing/vision.gguf",
+      "model": "${HOME}/grz-runtime/missing/vision.gguf",
       "required_artifacts": [
         "model"
       ],
@@ -94,7 +94,7 @@
         "audio",
         "file"
       ],
-      "model": "/data/local/tmp/grz/missing/whisper.bin",
+      "model": "${HOME}/grz-runtime/missing/whisper.bin",
       "required_artifacts": [
         "model"
       ],
@@ -115,7 +115,7 @@
         "text",
         "file"
       ],
-      "model": "/data/local/tmp/grz/missing/code.gguf",
+      "model": "${HOME}/grz-runtime/missing/code.gguf",
       "required_artifacts": [
         "model"
       ],
@@ -156,7 +156,7 @@
         "text",
         "file"
       ],
-      "model": "/data/local/tmp/grz/missing/text.gguf",
+      "model": "${HOME}/grz-runtime/missing/text.gguf",
       "required_artifacts": [
         "model"
       ],
@@ -196,7 +196,7 @@
         "text",
         "file"
       ],
-      "model": "/data/local/tmp/grz/missing/embed.gguf",
+      "model": "${HOME}/grz-runtime/missing/embed.gguf",
       "required_artifacts": [
         "model"
       ],
@@ -220,7 +220,7 @@
       "gateway_accepted_capabilities": [
         "text"
       ],
-      "model": "/data/local/tmp/grz/missing/rerank.gguf",
+      "model": "${HOME}/grz-runtime/missing/rerank.gguf",
       "required_artifacts": [
         "model"
       ],
@@ -247,7 +247,7 @@
         "audio",
         "file"
       ],
-      "model": "/data/local/tmp/grz/models/Qwenstral-Small-3.1-0.5B.Q4_K_M.gguf",
+      "model": "${HOME}/grz-runtime/models/Qwenstral-Small-3.1-0.5B.Q4_K_M.gguf",
       "required_artifacts": [
         "model"
       ],
@@ -272,6 +272,9 @@
             "0"
           ]
         }
+      ],
+      "languages": [
+        "en"
       ]
     },
     {
@@ -287,7 +290,7 @@
       "gateway_accepted_capabilities": [
         "text"
       ],
-      "model": "/data/local/tmp/grz/missing/guard.gguf",
+      "model": "${HOME}/grz-runtime/missing/guard.gguf",
       "required_artifacts": [
         "model"
       ],
@@ -307,7 +310,7 @@
       "gateway_accepted_capabilities": [
         "text"
       ],
-      "model": "/data/local/tmp/grz/missing/voice.onnx",
+      "model": "${HOME}/grz-runtime/missing/voice.onnx",
       "required_artifacts": [
         "model"
       ],
@@ -327,7 +330,7 @@
         "text",
         "image"
       ],
-      "model": "/data/local/tmp/grz/missing/sd.gguf",
+      "model": "${HOME}/grz-runtime/missing/sd.gguf",
       "required_artifacts": [
         "model"
       ],

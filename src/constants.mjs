@@ -19,7 +19,7 @@ export const POLICIES = Object.freeze({
 });
 
 export const TRANSLATION_ALIAS = 'translation-agent';
-export const DEFAULT_MANIFEST = new URL('../config/agents.windows.json', import.meta.url);
+export const DEFAULT_MANIFEST = new URL('../config/agents.cursor.json', import.meta.url);
 
 export const NEXUS_ALIAS = 'tool-router-agent';
 /** High-level role of green-roomz / green-agentz agency: switch specialist registers. */

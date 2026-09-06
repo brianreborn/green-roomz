@@ -18,7 +18,7 @@
   "runtimes": {
     "llama_server": {
       "kind": "llama-server",
-      "command": "${GRZ_ROOT}/runtime/bin/llama-server",
+      "command": "${HOME}/grz-runtime/run-llama-server.sh",
       "base_args": [
         "--host",
         "127.0.0.1",
@@ -30,12 +30,13 @@
         "none"
       ],
       "env": {
-        "GGML_VULKAN": "0"
+        "GGML_VULKAN": "0",
+        "LD_LIBRARY_PATH": "${HOME}/grz-runtime/lib:${HOME}/grz-runtime/bin"
       }
     },
     "whisper": {
       "kind": "whisper-server",
-      "command": "${GRZ_ROOT}/missing/whisper-server",
+      "command": "${HOME}/grz-runtime/missing/whisper-server",
       "base_args": [
         "--host",
         "127.0.0.1"
@@ -44,13 +45,13 @@
     },
     "piper": {
       "kind": "piper",
-      "command": "${GRZ_ROOT}/missing/piper",
+      "command": "${HOME}/grz-runtime/missing/piper",
       "base_args": [],
       "env": {}
     },
     "stable_diffusion": {
       "kind": "stable-diffusion",
-      "command": "${GRZ_ROOT}/missing/sd-server",
+      "command": "${HOME}/grz-runtime/missing/sd-server",
       "base_args": [
         "--listen-ip",
         "127.0.0.1"
@@ -73,7 +74,7 @@
         "image",
         "file"
       ],
-      "model": "${GRZ_ROOT}/missing/vision.gguf",
+      "model": "${HOME}/grz-runtime/missing/vision.gguf",
       "required_artifacts": [
         "model"
       ],
@@ -93,7 +94,7 @@
         "audio",
         "file"
       ],
-      "model": "${GRZ_ROOT}/missing/whisper.bin",
+      "model": "${HOME}/grz-runtime/missing/whisper.bin",
       "required_artifacts": [
         "model"
       ],
@@ -114,7 +115,7 @@
         "text",
         "file"
       ],
-      "model": "${GRZ_ROOT}/missing/code.gguf",
+      "model": "${HOME}/grz-runtime/missing/code.gguf",
       "required_artifacts": [
         "model"
       ],
@@ -155,7 +156,7 @@
         "text",
         "file"
       ],
-      "model": "${GRZ_ROOT}/missing/text.gguf",
+      "model": "${HOME}/grz-runtime/missing/text.gguf",
       "required_artifacts": [
         "model"
       ],
@@ -195,7 +196,7 @@
         "text",
         "file"
       ],
-      "model": "${GRZ_ROOT}/missing/embed.gguf",
+      "model": "${HOME}/grz-runtime/missing/embed.gguf",
       "required_artifacts": [
         "model"
       ],
@@ -219,7 +220,7 @@
       "gateway_accepted_capabilities": [
         "text"
       ],
-      "model": "${GRZ_ROOT}/missing/rerank.gguf",
+      "model": "${HOME}/grz-runtime/missing/rerank.gguf",
       "required_artifacts": [
         "model"
       ],
@@ -246,7 +247,7 @@
         "audio",
         "file"
       ],
-      "model": "${GRZ_ROOT}/models/Qwenstral-Small-3.1-0.5B.Q4_K_M.gguf",
+      "model": "${HOME}/grz-runtime/models/Qwenstral-Small-3.1-0.5B.Q4_K_M.gguf",
       "required_artifacts": [
         "model"
       ],
@@ -271,6 +272,9 @@
             "0"
           ]
         }
+      ],
+      "languages": [
+        "en"
       ]
     },
     {
@@ -286,7 +290,7 @@
       "gateway_accepted_capabilities": [
         "text"
       ],
-      "model": "${GRZ_ROOT}/missing/guard.gguf",
+      "model": "${HOME}/grz-runtime/missing/guard.gguf",
       "required_artifacts": [
         "model"
       ],
@@ -306,7 +310,7 @@
       "gateway_accepted_capabilities": [
         "text"
       ],
-      "model": "${GRZ_ROOT}/missing/voice.onnx",
+      "model": "${HOME}/grz-runtime/missing/voice.onnx",
       "required_artifacts": [
         "model"
       ],
@@ -326,7 +330,7 @@
         "text",
         "image"
       ],
-      "model": "${GRZ_ROOT}/missing/sd.gguf",
+      "model": "${HOME}/grz-runtime/missing/sd.gguf",
       "required_artifacts": [
         "model"
       ],

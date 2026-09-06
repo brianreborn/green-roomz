@@ -2,7 +2,7 @@
   "version": 1,
   "frames": {
     "agency": "630aa044934545c120e6d1c7ca30f35a233abdc98518ccbc6ffb35a5d7fc4bb7",
-    "memory-feedback-loop": "39f7a566d10d591c15b9b03f493e3545eb4002e10d6477cb3ca0dce34d279887",
+    "memory-feedback-loop": "748f673379c5c93e19ef7e987978a355ee03d046f554f4bbc5bfcbd3c6ea5e30",
     "confidence": "0f41346e429830b75d3316257087bf082b79ac16e6a03c55c75773aad433e2b7",
     "handoff": "f3d3e225fa6b1935ef8e7b36f2afd2694cbf8996343ffff02afcbfde8f3d76fc"
   },
@@ -26,23 +26,23 @@
       "bytes": 1810
     },
     "qwenstral-code-speculator": {
-      "sha256": "abf61efc751a0223499a90f3d0db12bd93cd0b3e7b219c5e2addf7226bf73084",
+      "sha256": "79e0ed6a2a1a2357ad54f5a93067223eda231c235640ee62015eafc92ed90502",
       "layers": [
         "agency",
         "memory-feedback-loop",
         "confidence",
         "handoff"
       ],
-      "bytes": 3074
+      "bytes": 5804
     },
     "general-text-speculator": {
-      "sha256": "757f62b9226983b105da6b78c19673efb85630bce3de71582877df2618d9d494",
+      "sha256": "f3b2ec416964390bc786572a24b1afaa77dd9a44c72a509a72f675ba01ca818a",
       "layers": [
         "agency",
         "memory-feedback-loop",
         "confidence"
       ],
-      "bytes": 3013
+      "bytes": 5746
     },
     "tool-router-agent": {
       "sha256": "ac2b468fa9ac5d2fd5de9dd1b692ddd52b54330afd37fbe15f934cbcf437615a",

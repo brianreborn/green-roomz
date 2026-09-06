@@ -64,10 +64,10 @@ test -x "$RT/run-llama-server.sh" || { echo "ERROR: wrap not executable at $RT/r
 test -x "$RT/bin/llama-server" || { echo "ERROR: llama-server not executable at $RT/bin/llama-server"; ls -la "$RT/bin"; exit 1; }
 "$RT/run-llama-server.sh" --version | head -3 || echo "WARN: version probe failed"
 
-# Point manifest at copied model if present
+# PF5: note9.json already ships ${HOME}/grz-runtime paths; legacy sed kept as no-op belt.
 MAN="$HOME_GRZ/config/agents.note9.json"
-if [[ -f $RT/models/Qwenstral-Small-3.1-0.5B.Q4_K_M.gguf ]]; then
-  sed -i 's#/data/local/tmp/grz/models/Qwenstral-Small-3.1-0.5B.Q4_K_M.gguf#${HOME}/grz-runtime/models/Qwenstral-Small-3.1-0.5B.Q4_K_M.gguf#g' "$MAN"
+if [[ -f $MAN ]]; then
+  sed -i 's#/data/local/tmp/grz/models/Qwenstral-Small-3.1-0.5B.Q4_K_M.gguf#${HOME}/grz-runtime/models/Qwenstral-Small-3.1-0.5B.Q4_K_M.gguf#g' "$MAN" 2>/dev/null || true
 fi
 
 test -f "$HOME_GRZ/bin/green-roomz.mjs"
@@ -80,13 +80,24 @@ cd "$HOME_GRZ"
 echo "=== validate ==="
 node ./bin/green-roomz.mjs validate --manifest ./config/agents.note9.json | tee "$HOME/grz-validate.json" | tee "$SD/validate.json"
 
-pkill -f 'green-roomz.mjs serve' 2>/dev/null || true
-sleep 1
+# PF1/PF5: pidfile stop + wait ports (no pkill -f)
+mkdir -p "$HOME_GRZ/data"
+if [[ -f $HOME_GRZ/data/serve.pid ]]; then
+  oldpid="$(tr -d ' \n\r\t' < "$HOME_GRZ/data/serve.pid" || true)"
+  [[ -n "${oldpid:-}" ]] && kill -TERM "$oldpid" 2>/dev/null || true
+fi
+for _ in 1 2 3 4 5 6 7 8; do
+  busy=0
+  command -v ss >/dev/null 2>&1 && { ss -ltn 2>/dev/null | grep -q ':8080' && busy=1; ss -ltn 2>/dev/null | grep -q ':8187' && busy=1; }
+  [[ $busy -eq 0 ]] && break
+  sleep 1
+done
 
 echo "=== serve ==="
 nohup node ./bin/green-roomz.mjs serve --manifest ./config/agents.note9.json --host 127.0.0.1 --port 8080 \
   >"$HOME/grz-serve.out.log" 2>"$HOME/grz-serve.err.log" &
 echo "serve_pid=$!"
+echo $! >"$HOME_GRZ/data/serve.pid"
 echo $! >"$HOME/grz-serve.pid"
 cp "$HOME/grz-serve.pid" "$SD/serve.pid" 2>/dev/null || true
 

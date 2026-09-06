@@ -12,9 +12,10 @@ import {
   NEXUS_ALIAS,
   MONITOR_ALIAS,
   MICROKERNEL_MAX_CHARS,
+  DEFAULT_MANIFEST,
 } from './constants.mjs';
 import { ValidationError } from './errors.mjs';
-import { digestObject, expandEnvironment, resolveManifestPath } from './util.mjs';
+import { digestObject, expandEnvironment, resolveManifestPath, nfcPath } from './util.mjs';
 import { readFileSync, existsSync } from 'node:fs';
 import { assertNexusKernelText, kernelBindingIssues } from './kernel-text.mjs';
 
@@ -87,20 +88,89 @@ export function loadDeclaredKernel(agent) {
   return text;
 }
 
-export async function loadManifest(input = new URL('../config/agents.windows.json', import.meta.url), env = process.env) {
-  const manifestPath = input instanceof URL ? fileURLToPath(input) : path.resolve(input);
-  const raw = await readFile(manifestPath, 'utf8');
-  const manifest = expandEnvironment(JSON.parse(raw), env);
-  validateManifest(manifest, env);
+function packageRoot() {
+  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+}
+
+/** Default GRZ_ROOT / GRZ_EXE / GRZ_LLAMA for portable manifests (PF2/PF3/PF4). */
+export function withDefaultGrzEnv(env = process.env, root = packageRoot()) {
+  const out = { ...env };
+  if (!out.GRZ_ROOT) out.GRZ_ROOT = root;
+  if (out.GRZ_EXE === undefined || out.GRZ_EXE === null) {
+    out.GRZ_EXE = process.platform === 'win32' ? '.exe' : '';
+  }
+  if (!out.GRZ_LLAMA) {
+    out.GRZ_LLAMA = path.join(out.GRZ_ROOT, 'runtime', `llama-server${out.GRZ_EXE || ''}`);
+  }
+  if (!out.HOME && process.env.HOME) out.HOME = process.env.HOME;
+  return out;
+}
+
+function assertRuntimeCommands(manifest) {
+  const issues = [];
+  for (const [name, runtime] of Object.entries(manifest.runtimes ?? {})) {
+    const cmd = runtime?.command;
+    if (cmd == null || String(cmd).trim() === '') {
+      issues.push(`runtime ${name}: empty command path after expand (fail closed)`);
+      continue;
+    }
+    if (/\$\{/.test(String(cmd))) {
+      issues.push(`runtime ${name}: unresolved \${} in command (fail closed)`);
+    }
+    // Collapsed empty GRZ_ROOT historically produced "/runtime/llama-server"
+    if (String(cmd) === '/runtime/llama-server' || String(cmd).startsWith('/runtime/llama-server')) {
+      issues.push(`runtime ${name}: command collapsed to ${cmd} (unset GRZ_ROOT); fail closed`);
+    }
+  }
+  if (issues.length) throw new ValidationError('Invalid Green-Roomz manifest runtime commands', issues);
+}
+
+function joinExpandedPath(value) {
+  if (value == null || value === '') return value;
+  // Normalize mixed separators after expand (PF2 P4) without breaking UNC / drive paths.
+  if (/^[A-Za-z]:[\\/]/.test(value) || value.startsWith('\\\\')) {
+    return path.normalize(value);
+  }
+  if (path.isAbsolute(value)) return path.normalize(value);
+  return path.normalize(value);
+}
+
+export async function loadManifest(input = DEFAULT_MANIFEST, env = process.env) {
+  const root = packageRoot();
+  const effectiveEnv = withDefaultGrzEnv(env, root);
+  const manifestPath = nfcPath(input instanceof URL ? fileURLToPath(input) : path.resolve(input));
+  let raw = await readFile(manifestPath, 'utf8');
+  if (raw.charCodeAt(0) === 0xFEFF) raw = raw.slice(1); // UTF-8 BOM (PF8)
+  const parsed = JSON.parse(raw);
+  const manifest = expandEnvironment(parsed, effectiveEnv);
+  assertRuntimeCommands(manifest);
+  validateManifest(manifest, effectiveEnv);
   for (const agent of manifest.agents) {
     for (const field of ['model', 'draft_model', 'projector', 'system_policy']) {
-      if (agent[field]) agent[field] = resolveManifestPath(manifestPath, agent[field]);
+      if (agent[field]) {
+        agent[field] = nfcPath(joinExpandedPath(resolveManifestPath(manifestPath, agent[field])));
+      }
+    }
+  }
+  for (const runtime of Object.values(manifest.runtimes ?? {})) {
+    if (runtime.command) {
+      runtime.command = nfcPath(joinExpandedPath(resolveManifestPath(manifestPath, runtime.command)));
+    }
+    if (runtime.env && typeof runtime.env === 'object') {
+      for (const [k, v] of Object.entries(runtime.env)) {
+        if (typeof v === 'string' && (k.includes('PATH') || k.includes('DIR') || /path/i.test(k))) {
+          runtime.env[k] = joinExpandedPath(v);
+        }
+      }
     }
   }
   expandVariants(manifest, manifestPath);
   const nexus = manifest.agents.find((agent) => agent.alias === NEXUS_ALIAS);
   if (nexus?.system_policy) loadDeclaredKernel(nexus);
-  Object.defineProperty(manifest, '_meta', { value: Object.freeze({ path: manifestPath, digest: digestObject(JSON.parse(raw)) }), enumerable: false });
+  Object.defineProperty(manifest, '_meta', {
+    value: Object.freeze({ path: manifestPath, digest: digestObject(parsed), packageRoot: root }),
+    enumerable: false,
+  });
   return deepFreeze(manifest);
 }
 

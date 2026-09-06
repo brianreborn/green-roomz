@@ -115,7 +115,22 @@ export class BenchmarkRunner {
 
   async runLlamaProfile(agent, profile, { quick = false } = {}) {
     const runtime = this.manifest.runtimes[agent.runtime];
-    const benchCommand = runtime.command.replace(/llama-server\.exe$/i, 'llama-bench.exe').replace(/llama-server$/i, 'llama-bench');
+    // PF5: wrap scripts (run-llama-server.sh) are not the bench binary — resolve next to the ELF.
+    let benchCommand = runtime.bench_command;
+    if (!benchCommand) {
+      const cmd = String(runtime.command ?? '');
+      if (/run-llama-server\.sh$/i.test(cmd) || /termux/i.test(cmd)) {
+        const pathMod = await import('node:path');
+        const dir = pathMod.default.dirname(cmd);
+        // Prefer bin/llama-bench beside the ELF the wrap executes
+        const homeBin = cmd.includes('grz-runtime')
+          ? pathMod.default.join(pathMod.default.dirname(dir), 'bin', 'llama-bench')
+          : pathMod.default.join(dir, 'llama-bench');
+        benchCommand = homeBin;
+      } else {
+        benchCommand = cmd.replace(/llama-server\.exe$/i, 'llama-bench.exe').replace(/llama-server$/i, 'llama-bench');
+      }
+    }
     const args = [
       '--model', agent.model,
       '--n-prompt', quick ? '64' : '256',

@@ -1,7 +1,8 @@
 import { spawn } from 'node:child_process';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync, unlinkSync } from 'node:fs';
 import { UnavailableError } from './errors.mjs';
 import { sleep } from './util.mjs';
 import { agentFootprintBytes, headroomBytes, profileAdmitted } from './memory.mjs';
@@ -170,7 +171,9 @@ export class ProcessManager {
     // (a native suspend helper could be wired via suspendImpl later). GPU-pinned
     // VRAM is never freed by suspend, so a Vulkan model still gets terminated
     // when we actually need memory back.
-    this.canSuspend = g.suspend_evicted !== false && process.platform !== 'win32';
+    // PF7: do not SIGSTOP a bound llama-server (LISTEN stays occupied; fights PF1/RF4).
+    // Opt-in only via gateway.suspend_evicted === true (still POSIX-only).
+    this.canSuspend = g.suspend_evicted === true && process.platform !== 'win32';
     this.suspendImpl = (pid) => process.kill(pid, 'SIGSTOP');
     this.resumeImpl = (pid) => process.kill(pid, 'SIGCONT');
     // Disk-backed KV checkpoints. Off unless a dir is configured.
@@ -181,6 +184,58 @@ export class ProcessManager {
     // snapshot still matches is restored so the model wakes holding its stock
     // prompt instead of an empty context. See `green-roomz prime`.
     this.stockPromptSha = null;
+    // PF1/PF4: pack root for cwd + pidfile/children.json under data/
+    this.packRoot = g.pack_root
+      ?? manifest?._meta?.packageRoot
+      ?? process.env.GRZ_ROOT
+      ?? (manifest?._meta?.path ? path.resolve(path.dirname(manifest._meta.path), '..') : process.cwd());
+    this.dataDir = path.join(this.packRoot, 'data');
+  }
+
+  /** Owned child ports for out-of-process stop (PF1). */
+  ownedPorts() {
+    const ports = [];
+    for (const rec of this.processes.values()) {
+      if (!rec?.owned) continue;
+      const agent = this.manifest.agents.find((a) => a.alias === rec.alias);
+      if (agent?.port) ports.push(agent.port);
+    }
+    const gw = this.manifest.gateway?.port;
+    if (gw) ports.push(gw);
+    return [...new Set(ports)];
+  }
+
+  childrenSnapshot() {
+    const rows = [];
+    for (const rec of this.processes.values()) {
+      if (!rec?.owned || rec.child?.exitCode != null) continue;
+      const agent = this.manifest.agents.find((a) => a.alias === rec.alias);
+      rows.push({ alias: rec.alias, pid: rec.pid ?? rec.child?.pid, port: agent?.port ?? null, state: rec.state });
+    }
+    return rows;
+  }
+
+  writeChildrenFile() {
+    try {
+      const file = path.join(this.dataDir, 'children.json');
+      const rows = this.childrenSnapshot();
+      // Avoid creating empty children.json under cwd during unit tests.
+      if (!rows.length && !existsSync(file)) return;
+      mkdirSync(this.dataDir, { recursive: true });
+      writeFileSync(file, `${JSON.stringify(rows, null, 2)}\n`);
+    } catch {}
+  }
+
+  writeServePid(pid = process.pid) {
+    try {
+      mkdirSync(this.dataDir, { recursive: true });
+      writeFileSync(path.join(this.dataDir, 'serve.pid'), `${pid}\n`);
+    } catch {}
+  }
+
+  clearServePid() {
+    try { unlinkSync(path.join(this.dataDir, 'serve.pid')); } catch {}
+    try { unlinkSync(path.join(this.dataDir, 'children.json')); } catch {}
   }
 
   checkpointPathFor(alias) {
@@ -282,8 +337,14 @@ export class ProcessManager {
 
   suspendRecord(record) {
     if ((record.refs ?? 0) > 0) return false;
-    try { this.suspendImpl(record.child.pid); record.state = 'suspended'; return true; }
-    catch { return false; }
+    // PF7: even if canSuspend, a bound listener must not be left SIGSTOP'd for waitForPortsFree.
+    // Callers that force suspendImpl still update state; prefer terminate path via canSuspend=false.
+    try {
+      this.suspendImpl(record.child.pid);
+      record.state = 'suspended';
+      this.writeChildrenFile();
+      return true;
+    } catch { return false; }
   }
 
   pin(alias) {
@@ -441,6 +502,18 @@ export class ProcessManager {
       throw new UnavailableError(`Runtime ${runtime.kind} has no server adapter yet`);
     }
     const env = { ...process.env, ...(runtime.env ?? {}) };
+    // PF4: prepend loader paths; never clobber host /usr/local/lib (BSD) or DYLD.
+    if (process.platform !== 'win32') {
+      for (const key of ['LD_LIBRARY_PATH', 'DYLD_LIBRARY_PATH']) {
+        const fromRuntime = runtime.env?.[key];
+        if (!fromRuntime) continue;
+        const existing = process.env[key];
+        env[key] = existing ? `${fromRuntime}${path.delimiter}${existing}` : fromRuntime;
+      }
+    } else {
+      // Win32: DLL search uses PATH from start.cmd; do not set LD_LIBRARY_PATH.
+      delete env.LD_LIBRARY_PATH;
+    }
     for (let i = 0; i < args.length - 1; i += 1) {
       if (args[i] === '--device' && args[i + 1] === 'none') {
         env.GGML_VULKAN = '0';
@@ -530,6 +603,7 @@ export class ProcessManager {
     try {
       child = this.spawn(launch.command, launch.args, {
         env: launch.env,
+        cwd: this.packRoot,
         windowsHide: true,
         stdio: ['ignore', 'pipe', 'pipe'],
         shell: false,
@@ -571,6 +645,7 @@ export class ProcessManager {
       await this.waitForReady(agent, record, signal);
       record.state = 'ready';
       this.registry.setStatus(agent.alias, 'ready', { pid: child.pid, profileId: profile.id });
+      this.writeChildrenFile();
       await this.maybeRestoreDefault(agent, record).catch(() => {});
       return record;
     } catch (error) {
@@ -617,6 +692,7 @@ export class ProcessManager {
     await this.stopRecord(record);
     this.processes.delete(alias);
     this.registry.setStatus(alias, 'cold');
+    this.writeChildrenFile();
     return true;
   }
 
@@ -642,6 +718,7 @@ export class ProcessManager {
   async stopAll() {
     this.stopIdleSweeper();
     await Promise.all([...this.processes.keys()].map((alias) => this.stop(alias)));
+    this.writeChildrenFile();
   }
 
   /**
@@ -719,18 +796,31 @@ export class ProcessManager {
     return { suspended: suspended.map((r) => r.alias), terminated: terminated.map((r) => r.alias) };
   }
 
-  /** Poll until nothing answers on these loopback ports (evicted model fully released). */
+  /** True when something still accepts TCP on loopback:port (SIGSTOP'd listener counts as busy). */
+  portBusy(port, timeoutMs = 400) {
+    return new Promise((resolve) => {
+      const sock = net.connect({ host: '127.0.0.1', port: Number(port) });
+      const done = (busy) => {
+        sock.removeAllListeners();
+        try { sock.destroy(); } catch {}
+        resolve(busy);
+      };
+      sock.setTimeout(timeoutMs, () => done(true)); // timeout => treat as still bound (PF7)
+      sock.once('connect', () => done(true));
+      sock.once('error', (err) => done(err && err.code !== 'ECONNREFUSED'));
+    });
+  }
+
+  /** Poll until ports are bind-free. Timeout => still occupied (fail closed; RF4/PF7). */
   async waitForPortsFree(ports, { timeoutMs = 8000 } = {}) {
-    if (!ports?.length) return;
+    if (!ports?.length) return true;
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
-      const alive = await Promise.all(ports.map(async (p) => {
-        try { await this.fetch(`http://127.0.0.1:${p}/health`, { signal: AbortSignal.timeout(400), headers: { connection: 'close' } }); return true; }
-        catch { return false; }
-      }));
-      if (!alive.some(Boolean)) return;
+      const busy = await Promise.all(ports.map((p) => this.portBusy(p)));
+      if (!busy.some(Boolean)) return true;
       await sleep(150);
     }
+    return false;
   }
 
   async sweepIdle(now = Date.now()) {

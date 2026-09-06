@@ -1,9 +1,10 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -euo pipefail
-cd /workspace/green-roomz
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
 status=0
 for f in test/*.test.mjs; do
   echo RUN "$f"
-  /usr/bin/node "$f" || status=1
+  /usr/bin/node --test "$f" || status=1
 done
 exit $status

@@ -65,7 +65,7 @@ test('compileStockPrompt is deterministic', () => {
 });
 
 test('compileManifestPrompts: every non-variant agent, index carries frame + agent digests', async () => {
-  const manifest = await loadManifest();
+  const manifest = await loadManifest(new URL('../config/agents.windows.json', import.meta.url));
   const { prompts, index } = compileManifestPrompts(manifest, loadDeclaredKernel);
 
   const baseAliases = manifest.agents.filter((a) => !a.variant_of && loadDeclaredKernel(a)).map((a) => a.alias);
@@ -86,7 +86,7 @@ test('compileManifestPrompts: every non-variant agent, index carries frame + age
 });
 
 test('build/prompts/ is committed fresh — run `green-roomz compile` if this fails', async () => {
-  const manifest = await loadManifest();
+  const manifest = await loadManifest(new URL('../config/agents.windows.json', import.meta.url));
   const { prompts, index } = compileManifestPrompts(manifest, loadDeclaredKernel);
   const dir = fileURLToPath(new URL('../build/prompts/', import.meta.url));
   const read = (name) => readFileSync(dir + name, 'utf8').replace(/\r\n/g, '\n');

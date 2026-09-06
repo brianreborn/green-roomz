@@ -2,3 +2,10 @@
 # so `green-roomz compile --check` is stable across platforms.
 build/prompts/** text eol=lf
 policies/**       text eol=lf
+
+*.sh text eol=lf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+*.mjs text eol=lf
+*.json text eol=lf
+bin/green-roomz.mjs text eol=lf

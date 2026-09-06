@@ -637,3 +637,84 @@ test('extra_args --host 0.0.0.0 is refused', () => {
     /0\.0\.0\.0|public_bind/,
   );
 });
+
+test('PF7: canSuspend defaults false (no SIGSTOP of bound llama)', () => {
+  const manager = new ProcessManager({
+    manifest: sampleManifest(),
+    registry: new AgentRegistry(sampleManifest()),
+    spawnImpl() { throw new Error('no'); },
+  });
+  assert.equal(manager.canSuspend, false);
+});
+
+test('PF7: waitForPortsFree treats connect-timeout / listening as busy (fail closed)', async () => {
+  const manager = new ProcessManager({
+    manifest: sampleManifest(),
+    registry: new AgentRegistry(sampleManifest()),
+    spawnImpl() { throw new Error('no'); },
+  });
+  // Fake a busy port: portBusy returns true
+  manager.portBusy = async () => true;
+  const ok = await manager.waitForPortsFree([59999], { timeoutMs: 300 });
+  assert.equal(ok, false);
+});
+
+test('PF4: buildLaunch prepends LD_LIBRARY_PATH instead of clobbering', () => {
+  const prev = process.env.LD_LIBRARY_PATH;
+  process.env.LD_LIBRARY_PATH = '/usr/local/lib';
+  try {
+    const manifest = sampleManifest();
+    manifest.runtimes.llama_server.env = { LD_LIBRARY_PATH: '/pack/runtime' };
+    const registry = new AgentRegistry(manifest);
+    const manager = new ProcessManager({ manifest, registry, spawnImpl() { throw new Error('no spawn'); } });
+    const agent = manifest.agents.find((a) => a.alias === 'tool-router-agent');
+    const launch = manager.buildLaunch(agent, { id: 'cpu-2', args: ['--device', 'none'] });
+    assert.match(launch.env.LD_LIBRARY_PATH, /\/pack\/runtime/);
+    assert.match(launch.env.LD_LIBRARY_PATH, /\/usr\/local\/lib/);
+    assert.ok(launch.env.LD_LIBRARY_PATH.startsWith('/pack/runtime'));
+  } finally {
+    if (prev === undefined) delete process.env.LD_LIBRARY_PATH;
+    else process.env.LD_LIBRARY_PATH = prev;
+  }
+});
+
+test('PF4: spawn options include cwd packRoot', async () => {
+  const manifest = sampleManifest();
+  const registry = new AgentRegistry(manifest);
+  const spawned = [];
+  const manager = new ProcessManager({
+    manifest,
+    registry,
+    spawnImpl: (command, args, opts) => {
+      spawned.push({ command, args, opts });
+      const child = new FakeChild();
+      queueMicrotask(() => child.emit('exit', 0, null));
+      return child;
+    },
+    fetchImpl: async () => ({ ok: true, status: 200, arrayBuffer: async () => new ArrayBuffer(0) }),
+  });
+  manager.packRoot = '/tmp/grz-pack-root';
+  manager.cpuAllocator.allocate = () => [0, 1];
+  const agent = manifest.agents.find((a) => a.alias === 'tool-router-agent');
+  agent.profiles = [{ id: 'cpu-2', args: ['--device', 'none', '--threads', '2', '--threads-batch', '2', '--n-gpu-layers', '0'] }];
+  try {
+    await manager.startProfile(agent, agent.profiles[0]);
+  } catch {
+    // may fail health; we only care spawn opts
+  }
+  assert.ok(spawned.length >= 1);
+  assert.equal(spawned[0].opts.cwd, '/tmp/grz-pack-root');
+  assert.equal(spawned[0].opts.shell, false);
+  assert.equal(spawned[0].opts.windowsHide, true);
+});
+
+test('PF1: stopAll on empty manager is ok; childrenSnapshot empty', async () => {
+  const manager = new ProcessManager({
+    manifest: sampleManifest(),
+    registry: new AgentRegistry(sampleManifest()),
+    spawnImpl() { throw new Error('no'); },
+  });
+  await manager.stopAll();
+  assert.deepEqual(manager.childrenSnapshot(), []);
+  assert.deepEqual(manager.ownedPorts().sort(), [18080].sort());
+});

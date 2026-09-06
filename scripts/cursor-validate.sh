@@ -1,4 +1,7 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -euo pipefail
-cd /workspace/green-roomz
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
+export GRZ_ROOT="$ROOT"
+export GRZ_EXE="${GRZ_EXE-}"
 exec node bin/green-roomz.mjs validate --manifest config/agents.cursor.json

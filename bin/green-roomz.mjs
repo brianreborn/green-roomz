@@ -35,7 +35,7 @@ Commands:
   fingerprint [--manifest path]
   doctor [--manifest path]
   agents [--manifest path]
-  stop [--manifest path]   (asks a running local gateway to drain; currently local-process only)
+  stop [--manifest path]   (SIGTERM gateway from data/serve.pid; reap owned children.json PIDs)
 `;
 }
 
@@ -114,7 +114,11 @@ async function cmdBenchmark(ctx, args) {
 }
 
 async function cmdServe(ctx, args) {
-  attachServeConsole({ root: process.cwd() });
+  const packRoot = ctx.manifest._meta?.packageRoot ?? process.env.GRZ_ROOT ?? process.cwd();
+  attachServeConsole({ root: packRoot });
+  ctx.processes.packRoot = packRoot;
+  ctx.processes.dataDir = (await import('node:path')).default.join(packRoot, 'data');
+  ctx.processes.writeServePid(process.pid);
   const objective = POLICIES[ctx.manifest.gateway.policy]?.objective ?? 'throughput';
   try {
     await applyStoreWinners(ctx.processes, { objective });
@@ -147,10 +151,16 @@ async function cmdServe(ctx, args) {
     console.error('draining owned backends');
     server.close();
     try { await ctx.processes.stopAll(); } catch (error) { console.error(`stopAll failed: ${error?.message}`); }
+    try { ctx.processes.clearServePid(); } catch {}
     process.exit(code);
   };
   process.on('SIGINT', () => shutdown(0));
   process.on('SIGTERM', () => shutdown(0));
+  // PF7: SIGHUP must drain the same way as SIGTERM (POSIX). Win32: Ctrl-C is SIGINT;
+  // closing the console is CTRL_CLOSE_EVENT (Node may not map it to SIGTERM).
+  if (process.platform !== 'win32') {
+    process.on('SIGHUP', () => shutdown(0));
+  }
 
   // A stray rejection in a request path must not kill the gateway.
   process.on('unhandledRejection', (reason) => {
@@ -320,11 +330,77 @@ async function cmdDeploy(ctx, args) {
   return cmdServe(ctx, args);
 }
 
+async function cmdStopFromPidfile(ctx) {
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const packRoot = ctx.manifest._meta?.packageRoot ?? process.env.GRZ_ROOT ?? process.cwd();
+  const dataDir = path.join(packRoot, 'data');
+  const pidFile = path.join(dataDir, 'serve.pid');
+  const childrenFile = path.join(dataDir, 'children.json');
+  if (!fs.existsSync(pidFile)) {
+    return { ok: false, stopped: false, error: 'no serve pidfile', path: pidFile };
+  }
+  let gatewayPid;
+  try {
+    gatewayPid = Number(String(fs.readFileSync(pidFile, 'utf8')).trim());
+  } catch {
+    return { ok: false, stopped: false, error: 'unreadable serve pidfile', path: pidFile };
+  }
+  if (!Number.isFinite(gatewayPid) || gatewayPid <= 0) {
+    return { ok: false, stopped: false, error: 'invalid serve pidfile', path: pidFile };
+  }
+  const childRows = [];
+  if (fs.existsSync(childrenFile)) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(childrenFile, 'utf8'));
+      if (Array.isArray(parsed)) childRows.push(...parsed);
+    } catch {}
+  }
+  // SIGTERM gateway so in-process drain (stopAll) runs when possible.
+  try { process.kill(gatewayPid, 'SIGTERM'); } catch (error) {
+    if (error?.code !== 'ESRCH') {
+      return { ok: false, stopped: false, error: `kill gateway ${gatewayPid}: ${error.message}` };
+    }
+  }
+  // Wait briefly for gateway exit, then reap remaining child PIDs by PID (never by image name).
+  const deadline = Date.now() + 8000;
+  while (Date.now() < deadline) {
+    try { process.kill(gatewayPid, 0); await new Promise((r) => setTimeout(r, 200)); }
+    catch { break; }
+  }
+  const reaped = [];
+  for (const row of childRows) {
+    const pid = Number(row?.pid);
+    if (!Number.isFinite(pid) || pid <= 0 || pid === gatewayPid) continue;
+    try {
+      process.kill(pid, 'SIGTERM');
+      reaped.push(pid);
+    } catch {}
+  }
+  await new Promise((r) => setTimeout(r, 1000));
+  for (const pid of reaped) {
+    try { process.kill(pid, 'SIGKILL'); } catch {}
+  }
+  try { fs.unlinkSync(pidFile); } catch {}
+  try { fs.unlinkSync(childrenFile); } catch {}
+  return { ok: true, stopped: true, gatewayPid, reaped };
+}
+
 async function main(argv) {
   const args = argv.slice(2);
   const command = args[0];
   if (!command || command === 'help' || command === '--help' || command === '-h') {
     process.stdout.write(usage());
+    return;
+  }
+  if (command === 'stop') {
+    // Lightweight: load manifest for packRoot only; do not claim stopAll on an empty ProcessManager.
+    const { loadManifest } = await import('../src/config.mjs');
+    const manifestPath = argValue(args, '--manifest');
+    const manifest = await loadManifest(manifestPath);
+    const result = await cmdStopFromPidfile({ manifest, processes: null });
+    console.log(JSON.stringify(result));
+    if (!result.ok) process.exitCode = 1;
     return;
   }
   const ctx = await bootstrap(args);
@@ -338,11 +414,8 @@ async function main(argv) {
   if (command === 'prime') return cmdPrime(ctx, args);
   if (command === 'serve') return cmdServe(ctx, args);
   if (command === 'deploy') return cmdDeploy(ctx, args);
-  if (command === 'stop') {
-    await ctx.processes.stopAll();
-    console.log(JSON.stringify({ stopped: true }));
-    return;
-  }
+  // stop handled before bootstrap (PF1)
+
   throw new Error(`Unknown command: ${command}`);
 }
 

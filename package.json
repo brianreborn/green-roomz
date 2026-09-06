@@ -8,7 +8,7 @@
     "green-roomz": "./bin/green-roomz.mjs"
   },
   "scripts": {
-    "start": "node ./bin/green-roomz.mjs serve",
+    "start": "node ./bin/green-roomz.mjs serve --manifest config/agents.cursor.json",
     "validate": "node ./bin/green-roomz.mjs validate",
     "benchmark": "node ./bin/green-roomz.mjs benchmark",
     "test": "node --test",

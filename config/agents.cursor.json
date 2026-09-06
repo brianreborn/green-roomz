@@ -20,7 +20,7 @@
   "runtimes": {
     "llama_server": {
       "kind": "llama-server",
-      "command": "/workspace/green-roomz/runtime/llama-server",
+      "command": "${GRZ_LLAMA}",
       "base_args": [
         "--host",
         "127.0.0.1",
@@ -37,12 +37,12 @@
       ],
       "env": {
         "GGML_VULKAN": "0",
-        "LD_LIBRARY_PATH": "/workspace/green-roomz/runtime"
+        "LD_LIBRARY_PATH": "${GRZ_ROOT}/runtime"
       }
     },
     "whisper": {
       "kind": "whisper-server",
-      "command": "/workspace/green-roomz/runtime/missing-whisper-server",
+      "command": "${GRZ_ROOT}/runtime/missing-whisper-server",
       "base_args": [
         "--host",
         "127.0.0.1"
@@ -51,13 +51,13 @@
     },
     "piper": {
       "kind": "piper",
-      "command": "/workspace/green-roomz/runtime/missing-piper",
+      "command": "${GRZ_ROOT}/runtime/missing-piper",
       "base_args": [],
       "env": {}
     },
     "stable_diffusion": {
       "kind": "stable-diffusion",
-      "command": "/workspace/green-roomz/runtime/missing-sd-server",
+      "command": "${GRZ_ROOT}/runtime/missing-sd-server",
       "base_args": [
         "--listen-ip",
         "127.0.0.1"
@@ -80,7 +80,7 @@
         "image",
         "file"
       ],
-      "model": "/workspace/green-roomz/models/missing-vision.gguf",
+      "model": "${GRZ_ROOT}/models/missing-vision.gguf",
       "required_artifacts": [
         "model"
       ],
@@ -100,7 +100,7 @@
         "audio",
         "file"
       ],
-      "model": "/workspace/green-roomz/models/missing-whisper.bin",
+      "model": "${GRZ_ROOT}/models/missing-whisper.bin",
       "required_artifacts": [
         "model"
       ],
@@ -109,7 +109,7 @@
     },
     {
       "alias": "qwenstral-code-speculator",
-      "description": "Code generation, transformation, and schema-constrained output",
+      "description": "Code specialist (requires instruct/coder GGUF; 0.5B Tekken is nexus-only)",
       "runtime": "llama_server",
       "port": 8183,
       "native_capabilities": [
@@ -121,7 +121,7 @@
         "text",
         "file"
       ],
-      "model": "/workspace/green-roomz/models/Qwenstral-Small-3.1-0.5B.Q4_K_M.gguf",
+      "model": "${GRZ_ROOT}/models/missing-qwen-instruct.gguf",
       "required_artifacts": [
         "model"
       ],
@@ -169,11 +169,14 @@
           ]
         }
       ],
-      "kv_cache": "f16"
+      "kv_cache": "f16",
+      "languages": [
+        "en"
+      ]
     },
     {
       "alias": "general-text-speculator",
-      "description": "General reasoning, writing, verification, and explicit translation",
+      "description": "General reasoning/writing (requires Qwen-tokenizer instruct GGUF; 0.5B Tekken is nexus-only)",
       "runtime": "llama_server",
       "port": 8184,
       "native_capabilities": [
@@ -185,7 +188,7 @@
         "text",
         "file"
       ],
-      "model": "/workspace/green-roomz/models/Qwenstral-Small-3.1-0.5B.Q4_K_M.gguf",
+      "model": "${GRZ_ROOT}/models/missing-qwen-instruct.gguf",
       "required_artifacts": [
         "model"
       ],
@@ -233,7 +236,10 @@
           ]
         }
       ],
-      "kv_cache": "f16"
+      "kv_cache": "f16",
+      "languages": [
+        "en"
+      ]
     },
     {
       "alias": "semantic-embedding-agent",
@@ -248,7 +254,7 @@
         "text",
         "file"
       ],
-      "model": "/workspace/green-roomz/models/missing-embed.gguf",
+      "model": "${GRZ_ROOT}/models/missing-embed.gguf",
       "required_artifacts": [
         "model"
       ],
@@ -272,7 +278,7 @@
       "gateway_accepted_capabilities": [
         "text"
       ],
-      "model": "/workspace/green-roomz/models/missing-rerank.gguf",
+      "model": "${GRZ_ROOT}/models/missing-rerank.gguf",
       "required_artifacts": [
         "model"
       ],
@@ -284,7 +290,7 @@
     },
     {
       "alias": "tool-router-agent",
-      "description": "Resident CPU nexus: route each turn to a specialist and accept HANDOFF",
+      "description": "Resident English JSON nexus (Tekken 0.5B en-only): route each turn to a specialist and accept HANDOFF",
       "runtime": "llama_server",
       "port": 8187,
       "resident": true,
@@ -299,7 +305,7 @@
         "audio",
         "file"
       ],
-      "model": "/workspace/green-roomz/models/Qwenstral-Small-3.1-0.5B.Q4_K_M.gguf",
+      "model": "${GRZ_ROOT}/models/Qwenstral-Small-3.1-0.5B.Q4_K_M.gguf",
       "required_artifacts": [
         "model"
       ],
@@ -347,7 +353,10 @@
           ]
         }
       ],
-      "kv_cache": "f16"
+      "kv_cache": "f16",
+      "languages": [
+        "en"
+      ]
     },
     {
       "alias": "safety-policy-agent",
@@ -362,7 +371,7 @@
       "gateway_accepted_capabilities": [
         "text"
       ],
-      "model": "/workspace/green-roomz/models/missing-guard.gguf",
+      "model": "${GRZ_ROOT}/models/missing-guard.gguf",
       "required_artifacts": [
         "model"
       ],
@@ -382,7 +391,7 @@
       "gateway_accepted_capabilities": [
         "text"
       ],
-      "model": "/workspace/green-roomz/models/missing-voice.onnx",
+      "model": "${GRZ_ROOT}/models/missing-voice.onnx",
       "required_artifacts": [
         "model"
       ],
@@ -402,7 +411,7 @@
         "text",
         "image"
       ],
-      "model": "/workspace/green-roomz/models/missing-sd.gguf",
+      "model": "${GRZ_ROOT}/models/missing-sd.gguf",
       "required_artifacts": [
         "model"
       ],

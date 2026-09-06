@@ -6,7 +6,7 @@ import { sampleManifest } from './helpers.mjs';
 import { REQUIRED_ALIASES } from '../src/constants.mjs';
 
 test('windows manifest has exactly eleven required aliases and no translation agent', async () => {
-  const manifest = await loadManifest();
+  const manifest = await loadManifest(new URL('../config/agents.windows.json', import.meta.url));
   const aliases = manifest.agents.map((agent) => agent.alias);
   assert.deepEqual([...aliases].sort(), [...REQUIRED_ALIASES].sort());
   assert.equal(aliases.includes('translation-agent'), false);
@@ -33,4 +33,20 @@ test('projector is prohibited on text-only agents', () => {
   try { validateManifest(manifest); } catch (error) { caught = error; }
   assert.ok(caught instanceof ValidationError);
   assert.match(String(caught.details), /projector/);
+});
+
+test('default manifest is portable cursor (not windows/shalom)', async () => {
+  const { readFileSync } = await import('node:fs');
+  const raw = readFileSync(new URL('../config/agents.cursor.json', import.meta.url), 'utf8');
+  assert.ok(!raw.includes('/workspace/green-roomz'), 'raw cursor json must be portable');
+  const manifest = await loadManifest();
+  assert.match(manifest.manifest_version, /cursor/i);
+  assert.equal(manifest.gateway.policy, 'responsive');
+  const nexus = manifest.agents.find((a) => a.alias === 'tool-router-agent');
+  assert.deepEqual(nexus.languages, ['en']);
+  assert.ok(String(nexus.model).includes('Qwenstral-Small-3.1-0.5B'));
+  const code = manifest.agents.find((a) => a.alias === 'qwenstral-code-speculator');
+  assert.ok(!String(code.model).includes('Qwenstral-Small-3.1-0.5B'), '0.5B must not bind code');
+  const textAgent = manifest.agents.find((a) => a.alias === 'general-text-speculator');
+  assert.ok(!String(textAgent.model).includes('Qwenstral-Small-3.1-0.5B'), '0.5B must not bind general-text');
 });

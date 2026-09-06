@@ -1,9 +1,26 @@
 $ErrorActionPreference = 'Stop'
-$Root = 'C:\Users\brian\Documents\green-roomz'
-$Node = 'C:\Program Files\nodejs\node.exe'
+# PF3: portable roots — PSScriptRoot/.. or LocalAppData\Green-Roomz; node from PATH.
+$here = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
+$RootCandidate = (Resolve-Path (Join-Path $here '..')).Path
+if (Test-Path (Join-Path $RootCandidate 'bin\green-roomz.mjs')) {
+  $Root = $RootCandidate
+} elseif (Test-Path (Join-Path $env:LOCALAPPDATA 'Green-Roomz\bin\green-roomz.mjs')) {
+  $Root = Join-Path $env:LOCALAPPDATA 'Green-Roomz'
+} else {
+  $Root = $RootCandidate
+}
+$nodeCmd = Get-Command node -ErrorAction SilentlyContinue
+if (-not $nodeCmd) {
+  Write-Error "Node.js not on PATH (where.exe node). Install Node >=20 and reopen the shell."
+  exit 1
+}
+$Node = $nodeCmd.Source
 $Log = Join-Path $Root 'data\serve.log'
 $Port = 8080
 $Cmd = Join-Path $env:SystemRoot 'System32\cmd.exe'
+$env:GRZ_ROOT = $Root
+$env:GRZ_EXE = '.exe'
+if (-not $env:GRZ_LLAMA) { $env:GRZ_LLAMA = Join-Path $Root 'runtime\llama-server.exe' }
 
 function Test-Listening {
   $conns = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
@@ -12,7 +29,6 @@ function Test-Listening {
 
 function Show-ServeConsole {
   param([string]$Line)
-  # UseShellExecute + cmd start: new console that survives the agent Job Object.
   $window = Join-Path $Root 'scripts\serve-window.cmd'
   $psi = New-Object System.Diagnostics.ProcessStartInfo
   $psi.FileName = $Cmd
@@ -37,7 +53,6 @@ if (Test-Listening) {
 $stamp = Get-Date -Format 'yyyy-MM-ddTHH:mm:ssK'
 Add-Content -Path $Log -Value "[$stamp] starting green-roomz serve (visible console)"
 
-# Visible cmd via `start` so it outlives the agent Job Object. Process tees to serve.log.
 Show-ServeConsole ''
 
 Start-Sleep -Seconds 2
