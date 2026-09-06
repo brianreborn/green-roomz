@@ -128,7 +128,7 @@
       "context_size": 4096,
       "profiles": [
         {
-          "id": "cpu-4",
+          "id": "cpu-1",
           "args": [
             "--load-mode",
             "mmap",
@@ -138,9 +138,9 @@
             "none",
             "--no-op-offload",
             "--threads",
-            "4",
+            "1",
             "--threads-batch",
-            "4",
+            "1",
             "--n-gpu-layers",
             "0",
             "--repeat-penalty",
@@ -148,7 +148,7 @@
           ]
         },
         {
-          "id": "cpu-6",
+          "id": "cpu-1b",
           "args": [
             "--load-mode",
             "mmap",
@@ -158,9 +158,9 @@
             "none",
             "--no-op-offload",
             "--threads",
-            "6",
+            "1",
             "--threads-batch",
-            "6",
+            "1",
             "--n-gpu-layers",
             "0",
             "--repeat-penalty",
@@ -195,7 +195,7 @@
       "context_size": 4096,
       "profiles": [
         {
-          "id": "cpu-4",
+          "id": "cpu-1",
           "args": [
             "--load-mode",
             "mmap",
@@ -205,9 +205,9 @@
             "none",
             "--no-op-offload",
             "--threads",
-            "4",
+            "1",
             "--threads-batch",
-            "4",
+            "1",
             "--n-gpu-layers",
             "0",
             "--repeat-penalty",
@@ -215,7 +215,7 @@
           ]
         },
         {
-          "id": "cpu-6",
+          "id": "cpu-1b",
           "args": [
             "--load-mode",
             "mmap",
@@ -225,9 +225,9 @@
             "none",
             "--no-op-offload",
             "--threads",
-            "6",
+            "1",
             "--threads-batch",
-            "6",
+            "1",
             "--n-gpu-layers",
             "0",
             "--repeat-penalty",
@@ -322,7 +322,7 @@
       "context_size": 4096,
       "profiles": [
         {
-          "id": "cpu-4",
+          "id": "cpu-1",
           "args": [
             "--load-mode",
             "mmap",
@@ -332,9 +332,9 @@
             "none",
             "--no-op-offload",
             "--threads",
-            "4",
+            "1",
             "--threads-batch",
-            "4",
+            "1",
             "--n-gpu-layers",
             "0",
             "--repeat-penalty",
@@ -342,7 +342,7 @@
           ]
         },
         {
-          "id": "cpu-6",
+          "id": "cpu-1b",
           "args": [
             "--load-mode",
             "mmap",
@@ -352,9 +352,9 @@
             "none",
             "--no-op-offload",
             "--threads",
-            "6",
+            "1",
             "--threads-batch",
-            "6",
+            "1",
             "--n-gpu-layers",
             "0",
             "--repeat-penalty",

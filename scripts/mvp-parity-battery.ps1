@@ -1,4 +1,4 @@
-# Green-Roomz Windows MVP parity battery — capability surface vs basic ChatGPT/Grok.
+﻿# Green-Roomz Windows MVP parity battery - capability surface vs basic ChatGPT/Grok.
 # Hits localhost gateway only. CPU chat path. Never loads GGUFs on 8600 GT.
 # Operator: Brian. Host: qodesh (Athlon-friendly; short prompts).
 # Usage: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\mvp-parity-battery.ps1
@@ -38,7 +38,7 @@ function Add-Case([string]$Id, [string]$Name, [string]$Status, [string]$Detail, 
     "FAIL" { "Red" }
     default { "Gray" }
   }
-  Write-Host ("[{0}] {1} — {2}" -f $Id, $Status, $Name) -ForegroundColor $color
+  Write-Host ("[{0}] {1} - {2}" -f $Id, $Status, $Name) -ForegroundColor $color
   if ($Detail) { Write-Host ("       {0}" -f $Detail) -ForegroundColor DarkGray }
 }
 
@@ -82,7 +82,7 @@ function Start-CurlProcess([string]$Arguments) {
 Write-Host "Green-Roomz MVP parity battery" -ForegroundColor Cyan
 Write-Host "  base=$BaseUrl  model=$Model" -ForegroundColor DarkGray
 Write-Host "  out=$OutPath" -ForegroundColor DarkGray
-Write-Host "  CPU localhost only — never GGUF on 8600 GT." -ForegroundColor DarkGray
+Write-Host "  CPU localhost only - never GGUF on 8600 GT." -ForegroundColor DarkGray
 Write-Host ""
 
 # --- A: health ---
@@ -174,7 +174,7 @@ try {
   } else {
     $snip = $reply.Trim()
     if ($snip.Length -gt 80) { $snip = $snip.Substring(0, 80) + "..." }
-    $hint = if ($reply -match '(?i)Ada') { "contains Ada" } else { "no literal Ada (soft — still PASS if HTTP ok)" }
+    $hint = if ($reply -match '(?i)Ada') { "contains Ada" } else { "no literal Ada (soft - still PASS if HTTP ok)" }
     Add-Case "D" "multi-turn name recall" "PASS" "http=$($r.StatusCode) $hint reply='$snip'" $r.Ms
   }
 } catch {
@@ -301,7 +301,8 @@ $failN = @($cases | Where-Object { $_.status -eq "FAIL" }).Count
 $skipN = @($cases | Where-Object { $_.status -eq "SKIP" }).Count
 $overall = if ($failN -gt 0 -or $failClosed) { "FAIL" } else { "PASS" }
 
-$result = [ordered]@{
+# Build as PSCustomObject to avoid PS5.1 [ordered] nested type mismatch
+$result = [pscustomobject]@{
   schema = "green-roomz.mvp-parity-battery.v1"
   product = "Green-Roomz"
   host_hint = "qodesh-windows-mvp"
@@ -310,8 +311,10 @@ $result = [ordered]@{
   started_utc = $started.ToString("o")
   finished_utc = $finished.ToString("o")
   overall = $overall
-  summary = [ordered]@{ pass = $passN; fail = $failN; skip = $skipN; total = $cases.Count }
-  cases = @($cases)
+  summary = [pscustomobject]@{ pass = [int]$passN; fail = [int]$failN; skip = [int]$skipN; total = [int]$cases.Count }
+  cases = @($cases | ForEach-Object {
+    [pscustomobject]@{ id = $_.id; name = $_.name; status = $_.status; detail = [string]$_.detail; ms = [int]$_.ms }
+  })
   notes = @(
     "Capability surface check (not SOTA quality).",
     "Athlon-friendly: short prompts, max_tokens 48-128.",
