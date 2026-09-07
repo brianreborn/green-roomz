@@ -8,7 +8,7 @@ import {
   REBUKE_OP,
   YOLO_TOKEN,
 } from './constants.mjs';
-import { agentCanAdmit } from './memory.mjs';
+import { admitWhenTightOf, agentCanAdmit } from './memory.mjs';
 
 function inspectContentPart(part, found) {
   if (!part || typeof part !== 'object') return;
@@ -23,7 +23,8 @@ function inspectContentPart(part, found) {
 
 export function detectModalities(body) {
   const found = { image: false, audio: false };
-  for (const message of body?.messages ?? []) {
+  const messages = Array.isArray(body?.messages) ? body.messages : [];
+  for (const message of messages) {
     if (!Array.isArray(message?.content)) continue;
     for (const part of message.content) inspectContentPart(part, found);
   }
@@ -41,7 +42,7 @@ function messageText(message) {
 }
 
 export function latestUserMessageText(body) {
-  const messages = body?.messages ?? [];
+  const messages = Array.isArray(body?.messages) ? body.messages : [];
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     if (messages[index]?.role === 'user') return messageText(messages[index]);
   }
@@ -49,7 +50,8 @@ export function latestUserMessageText(body) {
 }
 
 export function audioDataFromBody(body) {
-  for (const message of body?.messages ?? []) {
+  const messages = Array.isArray(body?.messages) ? body.messages : [];
+  for (const message of messages) {
     if (!Array.isArray(message?.content)) continue;
     for (const part of message.content) {
       if (!part || typeof part !== 'object') continue;
@@ -61,7 +63,8 @@ export function audioDataFromBody(body) {
 }
 
 export function isExplicitTranslationRequest(body) {
-  const text = (body?.messages ?? []).flatMap((message) => typeof message?.content === 'string' ? [message.content] : []).join('\n');
+  const messages = Array.isArray(body?.messages) ? body.messages : [];
+  const text = messages.flatMap((message) => typeof message?.content === 'string' ? [message.content] : []).join('\n');
   return /\btranslate\b|\btranslation\b/i.test(text);
 }
 
@@ -94,7 +97,10 @@ export function aliasCanAdmit(registry, alias, processes) {
   } catch {
     freeMemoryBytes = undefined;
   }
-  return agentCanAdmit(agent, { freeMemoryBytes }).ok;
+  return agentCanAdmit(agent, {
+    freeMemoryBytes,
+    admitWhenTight: admitWhenTightOf(processes?.manifest ?? registry?.manifest),
+  }).ok;
 }
 
 export function availableAliases(registry, visited = new Set()) {
@@ -122,6 +128,16 @@ function finish(body, registry, alias, reason, modality) {
 
 /** Model ids that mean "route this for me" rather than pinning a specific agent. */
 const AUTO_MODEL_IDS = new Set(['auto', 'green-roomz', 'green-roomz-auto', 'default', 'gpt-4', 'gpt-4o', 'gpt-3.5-turbo']);
+
+/** Continue / curl / ChatGPT-compat clients. llama.app last-alias (e.g. after /code) is not this. */
+export function isGenericChatRequest(body) {
+  const requested = body?.model;
+  if (requested == null || requested === '') return true;
+  const id = String(requested).toLowerCase();
+  if (AUTO_MODEL_IDS.has(id)) return true;
+  if (id === 'general-text-speculator') return true;
+  return false;
+}
 
 const SLASH_ALIASES = Object.freeze({
   vision: 'vision-layout-agent',
@@ -376,14 +392,23 @@ export function hardRuleRoute(body, registry) {
     return finish(body, registry, MONITOR_ALIAS, 'mailbox', modality);
   }
   const requested = body?.model ?? null;
-  // `model: "auto"` / "green-roomz" / "default" => let the nexus route (for OpenAI
-  // clients that must send some model id but want routing, e.g. Continue).
+  // llama.app sends the last alias as `model`. Ignore it unless lock_alias.
+  // Unavailable native/speech still pin so /draw on a missing sd-server is 503.
   if (requested && !AUTO_MODEL_IDS.has(String(requested).toLowerCase())) {
-    const reason = body.lock_alias === true ? 'lock_alias' : 'requested_alias';
-    if (requested === NEXUS_ALIAS && body.lock_alias === true && registry.agents.has(requested) && registry.status(requested).state !== 'unavailable') {
+    const locked = body.lock_alias === true;
+    const reason = locked ? 'lock_alias' : 'requested_alias';
+    if (locked && requested === NEXUS_ALIAS && registry.agents.has(requested) && registry.status(requested).state !== 'unavailable') {
       return finish(body, registry, requested, reason, modality);
     }
-    if (requested !== NEXUS_ALIAS && isRoutableAlias(registry, requested)) {
+    if (locked && requested !== NEXUS_ALIAS && isRoutableAlias(registry, requested)) {
+      return finish(body, registry, requested, reason, modality);
+    }
+    if (
+      requested !== NEXUS_ALIAS
+      && registry.agents.has(requested)
+      && (NATIVE_CHAT[requested] || requested === 'speech-synthesis-agent')
+      && !isRoutableAlias(registry, requested)
+    ) {
       return finish(body, registry, requested, reason, modality);
     }
   }

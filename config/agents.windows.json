@@ -1,589 +1,574 @@
 {
-  "schema_version": 1,
-  "manifest_version": "0.1.0-windows",
-  "product": "Green-Roomz",
-  "gateway": {
-    "host": "127.0.0.1",
-    "port": 8080,
-    "policy": "maximize",
-    "request_body_limit_bytes": 16777216,
-    "cold_start_timeout_ms": 120000,
-    "retry_initial_ms": 150,
-    "retry_max_ms": 2000,
-    "retry_deadline_ms": 120000,
-    "session_ttl_ms": 3600000,
-    "session_limit": 2048,
-    "cors_origins": [
-      "http://localhost",
-      "http://127.0.0.1"
-    ],
-    "max_warm_specialists": 1,
-    "idle_evict_ms": 120000
-  },
-  "runtimes": {
-    "llama_server": {
-      "kind": "llama-server",
-      "command": "C:\\LocalAI\\llama-b10665-bin-win-vulkan-x64\\llama-server.exe",
-      "base_args": [
-        "--host",
-        "127.0.0.1",
-        "--parallel",
-        "1",
-        "--prio",
-        "-1",
-        "--split-mode",
-        "none",
-        "--main-gpu",
-        "0"
-      ],
-      "env": {
-        "GGML_VULKAN": "1"
-      }
-    },
-    "whisper": {
-      "kind": "whisper-server",
-      "command": "C:\\LocalAI\\whisper\\whisper-server.exe",
-      "base_args": [
-        "--host",
-        "127.0.0.1"
-      ],
-      "env": {}
-    },
-    "piper": {
-      "kind": "piper",
-      "command": "C:\\LocalAI\\piper\\piper.exe",
-      "base_args": [],
-      "env": {}
-    },
-    "stable_diffusion": {
-      "kind": "stable-diffusion",
-      "command": "C:\\LocalAI\\stable-diffusion.cpp\\bin\\sd-server.exe",
-      "base_args": [
-        "--listen-ip",
-        "127.0.0.1"
-      ],
-      "env": {}
-    }
-  },
-  "agents": [
-    {
-      "alias": "vision-layout-agent",
-      "description": "Document OCR, tables, and structural visual extraction",
-      "runtime": "llama_server",
-      "port": 8181,
-      "native_capabilities": [
-        "text",
-        "image"
-      ],
-      "gateway_accepted_capabilities": [
-        "text",
-        "image",
-        "file"
-      ],
-      "model": "C:\\LocalAI\\qwen2.5-vl-3b-instruct-q4_k_m.gguf",
-      "projector": "C:\\LocalAI\\qwen2.5-vl-3b-mmproj-f16.gguf",
-      "required_artifacts": [
-        "model",
-        "projector"
-      ],
-      "system_policy": "policies/vision-layout.md",
-      "context_size": 8192,
-      "profiles": [
-        {
-          "id": "vulkan-all",
-          "args": [
-            "--load-mode",
-            "mmap",
-            "--fit",
-            "off",
-            "--device",
-            "Vulkan0",
-            "--n-gpu-layers",
-            "all",
-            "--threads",
-            "4",
-            "--threads-batch",
-            "4",
-            "--batch-size",
-            "256",
-            "--ubatch-size",
-            "64",
-            "--cache-type-k",
-            "q8_0",
-            "--cache-type-v",
-            "q8_0"
-          ]
-        },
-        {
-          "id": "cpu-4",
-          "args": [
-            "--load-mode",
-            "mmap",
-            "--fit",
-            "off",
-            "--device",
-            "none",
-            "--no-op-offload",
-            "--n-gpu-layers",
-            "0",
-            "--threads",
-            "4",
-            "--threads-batch",
-            "4",
-            "--batch-size",
-            "256",
-            "--ubatch-size",
-            "64",
-            "--cache-type-k",
-            "q8_0",
-            "--cache-type-v",
-            "q8_0",
-            "--no-mmproj-offload"
-          ]
-        }
-      ]
-    },
-    {
-      "alias": "audio-transcription-agent",
-      "description": "Verbatim and technical-normalized speech transcription",
-      "runtime": "whisper",
-      "port": 8182,
-      "native_capabilities": [
-        "audio"
-      ],
-      "gateway_accepted_capabilities": [
-        "audio",
-        "file"
-      ],
-      "model": "C:\\LocalAI\\whisper\\models\\ggml-small.bin",
-      "required_artifacts": [
-        "model"
-      ],
-      "system_policy": "policies/audio-transcription.md",
-      "profiles": []
-    },
-    {
-      "alias": "qwenstral-code-speculator",
-      "description": "Code generation, transformation, and schema-constrained output",
-      "runtime": "llama_server",
-      "port": 8183,
-      "native_capabilities": [
-        "text",
-        "json",
-        "code"
-      ],
-      "gateway_accepted_capabilities": [
-        "text",
-        "file"
-      ],
-      "model": "C:\\LocalAI\\qwen2.5-coder-7b-instruct-q4_k_m.gguf",
-      "draft_model": "C:\\LocalAI\\qwen2.5-coder-1.5b-instruct-q4_k_m.gguf",
-      "required_artifacts": [
-        "model",
-        "draft_model"
-      ],
-      "draft_enabled": true,
-      "draft_type": "draft-simple",
-      "draft_args": [
-        "--spec-draft-device",
-        "none",
-        "--n-gpu-layers-draft",
-        "0",
-        "--spec-draft-n-max",
-        "3"
-      ],
-      "system_policy": "policies/code-structured.md",
-      "context_size": 4096,
-      "profiles": [
-        {
-          "id": "vulkan-all",
-          "args": [
-            "--load-mode",
-            "mmap",
-            "--fit",
-            "off",
-            "--device",
-            "Vulkan0",
-            "--op-offload",
-            "--threads",
-            "6",
-            "--threads-batch",
-            "6",
-            "--n-gpu-layers",
-            "all",
-            "--batch-size",
-            "512",
-            "--ubatch-size",
-            "128",
-            "--cache-type-k",
-            "q8_0",
-            "--cache-type-v",
-            "q8_0"
-          ]
-        },
-        {
-          "id": "hybrid-12",
-          "args": [
-            "--load-mode",
-            "mmap",
-            "--fit",
-            "off",
-            "--device",
-            "Vulkan0",
-            "--op-offload",
-            "--threads",
-            "4",
-            "--threads-batch",
-            "4",
-            "--n-gpu-layers",
-            "12",
-            "--batch-size",
-            "512",
-            "--ubatch-size",
-            "128",
-            "--cache-type-k",
-            "q8_0",
-            "--cache-type-v",
-            "q8_0"
-          ]
-        },
-        {
-          "id": "cpu-4",
-          "args": [
-            "--load-mode",
-            "mmap",
-            "--fit",
-            "off",
-            "--device",
-            "none",
-            "--no-op-offload",
-            "--threads",
-            "4",
-            "--threads-batch",
-            "4",
-            "--n-gpu-layers",
-            "0",
-            "--batch-size",
-            "512",
-            "--ubatch-size",
-            "128",
-            "--cache-type-k",
-            "q8_0",
-            "--cache-type-v",
-            "q8_0"
-          ]
-        }
-      ]
-    },
-    {
-      "alias": "general-text-speculator",
-      "description": "General reasoning, writing, verification, and explicit translation",
-      "runtime": "llama_server",
-      "port": 8184,
-      "native_capabilities": [
-        "text",
-        "json",
-        "translation-on-request"
-      ],
-      "gateway_accepted_capabilities": [
-        "text",
-        "file"
-      ],
-      "model": "C:\\LocalAI\\Qwen3-4B-Q4_K_M.gguf",
-      "draft_model": "C:\\LocalAI\\Qwen3-4B-eagle3-BF16.gguf",
-      "required_artifacts": [
-        "model"
-      ],
-      "optional_artifacts": [
-        "draft_model"
-      ],
-      "artifact_sources": {
-        "model": {
-          "repository": "Qwen/Qwen3-4B-GGUF",
-          "file": "Qwen3-4B-Q4_K_M.gguf",
-          "sha256": "7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5"
-        },
-        "draft_model": {
-          "repository": "AngelSlim/Qwen3-4B_eagle3",
-          "source_file": "model.safetensors",
-          "source_sha256": "58ac5bbfdd71047ebaa5d5535b895c2af37004eb820ca2dda55bd7666658853e",
-          "conversion": "convert_hf_to_gguf.py <draft-snapshot> --target-model-dir <Qwen/Qwen3-4B-snapshot> --outtype bf16 --outfile Qwen3-4B-eagle3-BF16.gguf"
-        }
-      },
-      "draft_enabled": true,
-      "draft_optional": true,
-      "draft_type": "draft-eagle3",
-      "draft_args": [
-        "--spec-draft-device",
-        "none",
-        "--n-gpu-layers-draft",
-        "0",
-        "--spec-draft-n-max",
-        "3"
-      ],
-      "system_policy": "policies/general-text.md",
-      "context_size": 8192,
-      "experimental": [
-        "qualification-gated-eagle3-speculation"
-      ],
-      "profiles": [
-        {
-          "id": "vulkan-all",
-          "args": [
-            "--load-mode",
-            "mmap",
-            "--fit",
-            "off",
-            "--device",
-            "Vulkan0",
-            "--op-offload",
-            "--threads",
-            "6",
-            "--threads-batch",
-            "6",
-            "--n-gpu-layers",
-            "all",
-            "--batch-size",
-            "512",
-            "--ubatch-size",
-            "128",
-            "--cache-type-k",
-            "q8_0",
-            "--cache-type-v",
-            "q8_0"
-          ]
-        },
-        {
-          "id": "hybrid-12",
-          "args": [
-            "--load-mode",
-            "mmap",
-            "--fit",
-            "off",
-            "--device",
-            "Vulkan0",
-            "--op-offload",
-            "--threads",
-            "4",
-            "--threads-batch",
-            "4",
-            "--n-gpu-layers",
-            "12",
-            "--batch-size",
-            "512",
-            "--ubatch-size",
-            "128",
-            "--cache-type-k",
-            "q8_0",
-            "--cache-type-v",
-            "q8_0"
-          ]
-        },
-        {
-          "id": "cpu-4",
-          "args": [
-            "--load-mode",
-            "mmap",
-            "--fit",
-            "off",
-            "--device",
-            "none",
-            "--no-op-offload",
-            "--threads",
-            "4",
-            "--threads-batch",
-            "4",
-            "--n-gpu-layers",
-            "0",
-            "--batch-size",
-            "512",
-            "--ubatch-size",
-            "128",
-            "--cache-type-k",
-            "q8_0",
-            "--cache-type-v",
-            "q8_0"
-          ]
-        }
-      ]
-    },
-    {
-      "alias": "semantic-embedding-agent",
-      "description": "Text embeddings for retrieval, clustering, and memory",
-      "runtime": "llama_server",
-      "port": 8185,
-      "native_capabilities": [
-        "text",
-        "embedding"
-      ],
-      "gateway_accepted_capabilities": [
-        "text",
-        "file"
-      ],
-      "model": "C:\\LocalAI\\qwen3-embedding-0.6b-q8_0.gguf",
-      "required_artifacts": [
-        "model"
-      ],
-      "context_size": 8192,
-      "extra_args": [
-        "--embeddings",
-        "--pooling",
-        "last"
-      ],
-      "profiles": []
-    },
-    {
-      "alias": "retrieval-rerank-agent",
-      "description": "Cross-encoder relevance scoring for retrieved passages",
-      "runtime": "llama_server",
-      "port": 8186,
-      "native_capabilities": [
-        "text",
-        "reranking"
-      ],
-      "gateway_accepted_capabilities": [
-        "text"
-      ],
-      "model": "C:\\LocalAI\\qwen3-reranker-0.6b-q8_0.gguf",
-      "required_artifacts": [
-        "model"
-      ],
-      "context_size": 8192,
-      "extra_args": [
-        "--reranking"
-      ],
-      "profiles": []
-    },
-    {
-      "alias": "tool-router-agent",
-      "description": "Resident CPU nexus: route each turn to a specialist and accept HANDOFF",
-      "runtime": "llama_server",
-      "port": 8187,
-      "resident": true,
-      "native_capabilities": [
-        "text",
-        "routing",
-        "json"
-      ],
-      "gateway_accepted_capabilities": [
-        "text",
-        "image",
-        "audio",
-        "file"
-      ],
-      "model": "C:\\LocalAI\\Qwenstral-Small-3.1-0.5B.Q4_K_M.gguf",
-      "required_artifacts": [
-        "model"
-      ],
-      "system_policy": "policies/tool-router.md",
-      "context_size": 2048,
-      "profiles": [
-        {
-          "id": "cpu-2",
-          "args": [
-            "--load-mode",
-            "mmap",
-            "--fit",
-            "off",
-            "--device",
-            "none",
-            "--no-op-offload",
-            "--threads",
-            "2",
-            "--threads-batch",
-            "2",
-            "--n-gpu-layers",
-            "0"
-          ]
-        }
-      ]
-    },
-    {
-      "alias": "safety-policy-agent",
-      "description": "Structured input and output policy classification",
-      "runtime": "llama_server",
-      "port": 8188,
-      "native_capabilities": [
-        "text",
-        "classification",
-        "json"
-      ],
-      "gateway_accepted_capabilities": [
-        "text"
-      ],
-      "model": "C:\\LocalAI\\qwen3guard-gen-0.6b-q4_k_m.gguf",
-      "required_artifacts": [
-        "model"
-      ],
-      "system_policy": "policies/safety.md",
-      "context_size": 4096,
-      "profiles": []
-    },
-    {
-      "alias": "speech-synthesis-agent",
-      "description": "Local text-to-speech synthesis",
-      "runtime": "piper",
-      "port": 8189,
-      "native_capabilities": [
-        "text",
-        "audio-output"
-      ],
-      "gateway_accepted_capabilities": [
-        "text"
-      ],
-      "model": "C:\\LocalAI\\piper\\voices\\en_US-lessac-medium.onnx",
-      "required_artifacts": [
-        "model"
-      ],
-      "profiles": []
-    },
-    {
-      "alias": "image-generation-agent",
-      "description": "Queued local image generation and editing",
-      "runtime": "stable_diffusion",
-      "port": 8190,
-      "native_capabilities": [
-        "text",
-        "image-output",
-        "image-edit"
-      ],
-      "gateway_accepted_capabilities": [
-        "text",
-        "image"
-      ],
-      "model": "C:\\LocalAI\\stable-diffusion.cpp\\models\\sd15-q4_0.gguf",
-      "required_artifacts": [
-        "model"
-      ],
-      "system_policy": "policies/image-generation.md",
-      "profiles": []
-    },
-    {
-      "alias": "security-monitor-agent",
-      "description": "Async mailbox security monitor (PQ-style ring). Producers push and return immediately; not a GGUF.",
-      "runtime": "logical",
-      "native_capabilities": [
-        "text",
-        "json"
-      ],
-      "gateway_accepted_capabilities": [
-        "text"
-      ],
-      "system_policy": "policies/security-monitor.md"
-    }
-  ],
-  "optional_agents": [
-    {
-      "alias": "video-understanding-agent",
-      "description": "Sampled-frame video understanding composed with transcription",
-      "enabled": false,
-      "native_capabilities": [
-        "video"
-      ],
-      "gateway_accepted_capabilities": [
-        "video",
-        "file"
-      ]
-    }
-  ]
+    "schema_version":  1,
+    "manifest_version":  "0.1.0-windows",
+    "product":  "Green-Roomz",
+    "gateway":  {
+                    "host":  "127.0.0.1",
+                    "port":  8080,
+                    "policy":  "maximize",
+                    "request_body_limit_bytes":  16777216,
+                    "cold_start_timeout_ms":  120000,
+                    "retry_initial_ms":  150,
+                    "retry_max_ms":  2000,
+                    "retry_deadline_ms":  120000,
+                    "session_ttl_ms":  3600000,
+                    "session_limit":  2048,
+                    "cors_origins":  [
+                                         "http://localhost",
+                                         "http://127.0.0.1"
+                                     ],
+                    "timing_privacy":  "off",
+                    "max_warm_specialists":  2,
+                    "idle_evict_ms":  300000,
+                    "upstream_timeout_ms":  180000,
+                    "request_timeout_ms":  180000,
+                    "agent_chat_timeout_ms":  180000,
+                    "agent_max_tokens":  768,
+                    "nexus_consult_timeout_ms":  25000,
+                    "handoff_peek_timeout_ms":  20000,
+                    "handoff_peek_chars":  48,
+                    "admit_when_tight":  "refuse",
+                    "apply_store_winners":  false,
+                    "health_aliases":  [
+                                           "tool-router-agent",
+                                           "general-text-speculator"
+                                       ]
+                },
+    "runtimes":  {
+                     "llama_server":  {
+                                          "kind":  "llama-server",
+                                          "command":  "C:\\Users\\brian\\Documents\\green-roomz\\runtime\\llama-b10702-bin-win-cpu-x64\\llama-server.exe",
+                                          "base_args":  [
+                                                            "--host",
+                                                            "127.0.0.1",
+                                                            "--parallel",
+                                                            "1",
+                                                            "--prio",
+                                                            "-1",
+                                                            "--split-mode",
+                                                            "none",
+                                                            "--flash-attn",
+                                                            "off",
+                                                            "--poll",
+                                                            "0"
+                                                        ],
+                                          "env":  {
+                                                      "GGML_VULKAN":  "0"
+                                                  }
+                                      },
+                     "whisper":  {
+                                     "kind":  "whisper-server",
+                                     "command":  "C:\\LocalAI\\whisper\\whisper-server.exe",
+                                     "base_args":  [
+                                                       "--host",
+                                                       "127.0.0.1"
+                                                   ],
+                                     "env":  {
+
+                                             }
+                                 },
+                     "piper":  {
+                                   "kind":  "piper",
+                                   "command":  "C:\\LocalAI\\piper\\piper.exe",
+                                   "base_args":  [
+
+                                                 ],
+                                   "env":  {
+
+                                           }
+                               },
+                     "stable_diffusion":  {
+                                              "kind":  "stable-diffusion",
+                                              "command":  "C:\\LocalAI\\stable-diffusion.cpp\\bin\\sd-server.exe",
+                                              "base_args":  [
+                                                                "--listen-ip",
+                                                                "127.0.0.1"
+                                                            ],
+                                              "env":  {
+
+                                                      }
+                                          }
+                 },
+    "agents":  [
+                   {
+                       "alias":  "vision-layout-agent",
+                       "description":  "Document OCR, tables, and structural visual extraction",
+                       "runtime":  "llama_server",
+                       "port":  8181,
+                       "native_capabilities":  [
+                                                   "text",
+                                                   "image"
+                                               ],
+                       "gateway_accepted_capabilities":  [
+                                                             "text",
+                                                             "image",
+                                                             "file"
+                                                         ],
+                       "model":  "C:\\LocalAI\\qwen2.5-vl-3b-instruct-q4_k_m.gguf",
+                       "projector":  "C:\\LocalAI\\qwen2.5-vl-3b-mmproj-f16.gguf",
+                       "required_artifacts":  [
+                                                  "model",
+                                                  "projector"
+                                              ],
+                       "system_policy":  "policies/vision-layout.md",
+                       "context_size":  8192,
+                       "profiles":  [
+
+                                    ]
+                   },
+                   {
+                       "alias":  "audio-transcription-agent",
+                       "description":  "Verbatim and technical-normalized speech transcription",
+                       "runtime":  "whisper",
+                       "port":  8182,
+                       "native_capabilities":  [
+                                                   "audio"
+                                               ],
+                       "gateway_accepted_capabilities":  [
+                                                             "audio",
+                                                             "file"
+                                                         ],
+                       "model":  "C:\\LocalAI\\whisper\\models\\ggml-small.bin",
+                       "required_artifacts":  [
+                                                  "model"
+                                              ],
+                       "system_policy":  "policies/audio-transcription.md",
+                       "profiles":  [
+
+                                    ]
+                   },
+                   {
+                       "alias":  "qwenstral-code-speculator",
+                       "description":  "Code generation, transformation, and schema-constrained output",
+                       "runtime":  "llama_server",
+                       "port":  8183,
+                       "native_capabilities":  [
+                                                   "text",
+                                                   "json",
+                                                   "code"
+                                               ],
+                       "gateway_accepted_capabilities":  [
+                                                             "text",
+                                                             "file"
+                                                         ],
+                       "model":  "C:\\LocalAI\\qwen2.5-coder-7b-instruct-q4_k_m.gguf",
+                       "draft_model":  "C:\\LocalAI\\qwen2.5-coder-1.5b-instruct-q4_k_m.gguf",
+                       "required_artifacts":  [
+                                                  "model",
+                                                  "draft_model"
+                                              ],
+                       "draft_enabled":  true,
+                       "draft_type":  "draft-simple",
+                       "draft_args":  [
+                                          "--spec-draft-device",
+                                          "none",
+                                          "--n-gpu-layers-draft",
+                                          "0",
+                                          "--spec-draft-n-max",
+                                          "3"
+                                      ],
+                       "system_policy":  "policies/code-structured.md",
+                       "context_size":  4096,
+                       "profiles":  [
+                                        {
+                                            "id":  "vulkan-all",
+                                            "args":  [
+                                                         "--load-mode",
+                                                         "mmap",
+                                                         "--fit",
+                                                         "off",
+                                                         "--device",
+                                                         "Vulkan0",
+                                                         "--op-offload",
+                                                         "--threads",
+                                                         "6",
+                                                         "--threads-batch",
+                                                         "6",
+                                                         "--n-gpu-layers",
+                                                         "all",
+                                                         "--batch-size",
+                                                         "512",
+                                                         "--ubatch-size",
+                                                         "128",
+                                                         "--cache-type-k",
+                                                         "q8_0",
+                                                         "--cache-type-v",
+                                                         "q8_0"
+                                                     ]
+                                        },
+                                        {
+                                            "id":  "hybrid-12",
+                                            "args":  [
+                                                         "--load-mode",
+                                                         "mmap",
+                                                         "--fit",
+                                                         "off",
+                                                         "--device",
+                                                         "Vulkan0",
+                                                         "--op-offload",
+                                                         "--threads",
+                                                         "4",
+                                                         "--threads-batch",
+                                                         "4",
+                                                         "--n-gpu-layers",
+                                                         "12",
+                                                         "--batch-size",
+                                                         "512",
+                                                         "--ubatch-size",
+                                                         "128",
+                                                         "--cache-type-k",
+                                                         "q8_0",
+                                                         "--cache-type-v",
+                                                         "q8_0"
+                                                     ]
+                                        },
+                                        {
+                                            "id":  "cpu-4",
+                                            "args":  [
+                                                         "--load-mode",
+                                                         "mmap",
+                                                         "--fit",
+                                                         "off",
+                                                         "--device",
+                                                         "none",
+                                                         "--no-op-offload",
+                                                         "--threads",
+                                                         "4",
+                                                         "--threads-batch",
+                                                         "4",
+                                                         "--n-gpu-layers",
+                                                         "0",
+                                                         "--batch-size",
+                                                         "512",
+                                                         "--ubatch-size",
+                                                         "128",
+                                                         "--cache-type-k",
+                                                         "q8_0",
+                                                         "--cache-type-v",
+                                                         "q8_0"
+                                                     ]
+                                        }
+                                    ]
+                   },
+                   {
+                       "alias":  "general-text-speculator",
+                       "description":  "General reasoning, writing, verification, and explicit translation",
+                       "runtime":  "llama_server",
+                       "port":  8184,
+                       "native_capabilities":  [
+                                                   "text",
+                                                   "json",
+                                                   "translation-on-request"
+                                               ],
+                       "gateway_accepted_capabilities":  [
+                                                             "text",
+                                                             "file"
+                                                         ],
+                       "model":  "C:\\LocalAI\\Qwen3-4B-Q4_K_M.gguf",
+                       "draft_model":  "C:\\LocalAI\\Qwen3-4B-eagle3-BF16.gguf",
+                       "required_artifacts":  [
+                                                  "model"
+                                              ],
+                       "optional_artifacts":  [
+                                                  "draft_model"
+                                              ],
+                       "artifact_sources":  {
+                                                "model":  {
+                                                              "repository":  "Qwen/Qwen3-4B-GGUF",
+                                                              "file":  "Qwen3-4B-Q4_K_M.gguf",
+                                                              "sha256":  "7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5"
+                                                          },
+                                                "draft_model":  {
+                                                                    "repository":  "AngelSlim/Qwen3-4B_eagle3",
+                                                                    "source_file":  "model.safetensors",
+                                                                    "source_sha256":  "58ac5bbfdd71047ebaa5d5535b895c2af37004eb820ca2dda55bd7666658853e",
+                                                                    "conversion":  "convert_hf_to_gguf.py \u003cdraft-snapshot\u003e --target-model-dir \u003cQwen/Qwen3-4B-snapshot\u003e --outtype bf16 --outfile Qwen3-4B-eagle3-BF16.gguf"
+                                                                }
+                                            },
+                       "draft_enabled":  true,
+                       "draft_optional":  true,
+                       "draft_type":  "draft-eagle3",
+                       "draft_args":  [
+                                          "--spec-draft-device",
+                                          "none",
+                                          "--n-gpu-layers-draft",
+                                          "0",
+                                          "--spec-draft-n-max",
+                                          "3"
+                                      ],
+                       "system_policy":  "policies/general-text.md",
+                       "context_size":  8192,
+                       "experimental":  [
+                                            "qualification-gated-eagle3-speculation"
+                                        ],
+                       "profiles":  [
+                                        {
+                                            "id":  "vulkan-all",
+                                            "args":  [
+                                                         "--load-mode",
+                                                         "mmap",
+                                                         "--fit",
+                                                         "off",
+                                                         "--device",
+                                                         "Vulkan0",
+                                                         "--op-offload",
+                                                         "--threads",
+                                                         "6",
+                                                         "--threads-batch",
+                                                         "6",
+                                                         "--n-gpu-layers",
+                                                         "all",
+                                                         "--batch-size",
+                                                         "512",
+                                                         "--ubatch-size",
+                                                         "128",
+                                                         "--cache-type-k",
+                                                         "q8_0",
+                                                         "--cache-type-v",
+                                                         "q8_0"
+                                                     ]
+                                        },
+                                        {
+                                            "id":  "hybrid-12",
+                                            "args":  [
+                                                         "--load-mode",
+                                                         "mmap",
+                                                         "--fit",
+                                                         "off",
+                                                         "--device",
+                                                         "Vulkan0",
+                                                         "--op-offload",
+                                                         "--threads",
+                                                         "4",
+                                                         "--threads-batch",
+                                                         "4",
+                                                         "--n-gpu-layers",
+                                                         "12",
+                                                         "--batch-size",
+                                                         "512",
+                                                         "--ubatch-size",
+                                                         "128",
+                                                         "--cache-type-k",
+                                                         "q8_0",
+                                                         "--cache-type-v",
+                                                         "q8_0"
+                                                     ]
+                                        },
+                                        {
+                                            "id":  "cpu-4",
+                                            "args":  [
+                                                         "--load-mode",
+                                                         "mmap",
+                                                         "--fit",
+                                                         "off",
+                                                         "--device",
+                                                         "none",
+                                                         "--no-op-offload",
+                                                         "--threads",
+                                                         "4",
+                                                         "--threads-batch",
+                                                         "4",
+                                                         "--n-gpu-layers",
+                                                         "0",
+                                                         "--batch-size",
+                                                         "512",
+                                                         "--ubatch-size",
+                                                         "128",
+                                                         "--cache-type-k",
+                                                         "q8_0",
+                                                         "--cache-type-v",
+                                                         "q8_0"
+                                                     ]
+                                        }
+                                    ]
+                   },
+                   {
+                       "alias":  "semantic-embedding-agent",
+                       "description":  "Text embeddings for retrieval, clustering, and memory",
+                       "runtime":  "llama_server",
+                       "port":  8185,
+                       "native_capabilities":  [
+                                                   "text",
+                                                   "embedding"
+                                               ],
+                       "gateway_accepted_capabilities":  [
+                                                             "text",
+                                                             "file"
+                                                         ],
+                       "model":  "C:\\LocalAI\\qwen3-embedding-0.6b-q8_0.gguf",
+                       "required_artifacts":  [
+                                                  "model"
+                                              ],
+                       "context_size":  8192,
+                       "extra_args":  [
+                                          "--embeddings",
+                                          "--pooling",
+                                          "last"
+                                      ],
+                       "profiles":  [
+
+                                    ]
+                   },
+                   {
+                       "alias":  "retrieval-rerank-agent",
+                       "description":  "Cross-encoder relevance scoring for retrieved passages",
+                       "runtime":  "llama_server",
+                       "port":  8186,
+                       "native_capabilities":  [
+                                                   "text",
+                                                   "reranking"
+                                               ],
+                       "gateway_accepted_capabilities":  [
+                                                             "text"
+                                                         ],
+                       "model":  "C:\\LocalAI\\qwen3-reranker-0.6b-q8_0.gguf",
+                       "required_artifacts":  [
+                                                  "model"
+                                              ],
+                       "context_size":  8192,
+                       "extra_args":  [
+                                          "--reranking"
+                                      ],
+                       "profiles":  [
+
+                                    ]
+                   },
+                   {
+                       "alias":  "tool-router-agent",
+                       "description":  "Resident CPU nexus: route each turn to a specialist and accept HANDOFF",
+                       "runtime":  "llama_server",
+                       "port":  8187,
+                       "resident":  true,
+                       "native_capabilities":  [
+                                                   "text",
+                                                   "routing",
+                                                   "json"
+                                               ],
+                       "gateway_accepted_capabilities":  [
+                                                             "text",
+                                                             "image",
+                                                             "audio",
+                                                             "file"
+                                                         ],
+                       "model":  "C:\\LocalAI\\Qwenstral-Small-3.1-0.5B.Q4_K_M.gguf",
+                       "required_artifacts":  [
+                                                  "model"
+                                              ],
+                       "system_policy":  "policies/tool-router.md",
+                       "context_size":  2048,
+                       "profiles":  [
+                                        {
+                                            "id":  "cpu-2",
+                                            "args":  [
+                                                         "--load-mode",
+                                                         "mmap",
+                                                         "--fit",
+                                                         "off",
+                                                         "--device",
+                                                         "none",
+                                                         "--no-op-offload",
+                                                         "--threads",
+                                                         "2",
+                                                         "--threads-batch",
+                                                         "2",
+                                                         "--n-gpu-layers",
+                                                         "0"
+                                                     ]
+                                        }
+                                    ]
+                   },
+                   {
+                       "alias":  "safety-policy-agent",
+                       "description":  "Structured input and output policy classification",
+                       "runtime":  "llama_server",
+                       "port":  8188,
+                       "native_capabilities":  [
+                                                   "text",
+                                                   "classification",
+                                                   "json"
+                                               ],
+                       "gateway_accepted_capabilities":  [
+                                                             "text"
+                                                         ],
+                       "model":  "C:\\LocalAI\\qwen3guard-gen-0.6b-q4_k_m.gguf",
+                       "required_artifacts":  [
+                                                  "model"
+                                              ],
+                       "system_policy":  "policies/safety.md",
+                       "context_size":  4096,
+                       "profiles":  [
+
+                                    ]
+                   },
+                   {
+                       "alias":  "speech-synthesis-agent",
+                       "description":  "Local text-to-speech synthesis",
+                       "runtime":  "piper",
+                       "port":  8189,
+                       "native_capabilities":  [
+                                                   "text",
+                                                   "audio-output"
+                                               ],
+                       "gateway_accepted_capabilities":  [
+                                                             "text"
+                                                         ],
+                       "model":  "C:\\LocalAI\\piper\\voices\\en_US-lessac-medium.onnx",
+                       "required_artifacts":  [
+                                                  "model"
+                                              ],
+                       "profiles":  [
+
+                                    ]
+                   },
+                   {
+                       "alias":  "image-generation-agent",
+                       "description":  "Queued local image generation and editing",
+                       "runtime":  "stable_diffusion",
+                       "port":  8190,
+                       "native_capabilities":  [
+                                                   "text",
+                                                   "image-output",
+                                                   "image-edit"
+                                               ],
+                       "gateway_accepted_capabilities":  [
+                                                             "text",
+                                                             "image"
+                                                         ],
+                       "model":  "C:\\LocalAI\\stable-diffusion.cpp\\models\\sd15-q4_0.gguf",
+                       "required_artifacts":  [
+                                                  "model"
+                                              ],
+                       "system_policy":  "policies/image-generation.md",
+                       "profiles":  [
+
+                                    ]
+                   },
+                   {
+                       "alias":  "security-monitor-agent",
+                       "description":  "Async mailbox security monitor (PQ-style ring). Producers push and return immediately; not a GGUF.",
+                       "runtime":  "logical",
+                       "native_capabilities":  [
+                                                   "text",
+                                                   "json"
+                                               ],
+                       "gateway_accepted_capabilities":  [
+                                                             "text"
+                                                         ],
+                       "system_policy":  "policies/security-monitor.md"
+                   }
+               ],
+    "optional_agents":  [
+                            {
+                                "alias":  "video-understanding-agent",
+                                "description":  "Sampled-frame video understanding composed with transcription",
+                                "enabled":  false,
+                                "native_capabilities":  [
+                                                            "video"
+                                                        ],
+                                "gateway_accepted_capabilities":  [
+                                                                      "video",
+                                                                      "file"
+                                                                  ]
+                            }
+                        ]
 }

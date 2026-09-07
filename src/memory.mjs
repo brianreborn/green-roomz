@@ -44,14 +44,14 @@ export function agentFootprintBytes(agent, { includeDraft = true } = {}) {
   return bytes ? Math.round(bytes * 1.15 + CPU_RESIDENT_PAD_BYTES) : null;
 }
 
+export function admitWhenTightOf(manifest) {
+  return manifest?.gateway?.admit_when_tight === 'page' ? 'page' : 'refuse';
+}
+
 /**
- * Admission is advisory, not a veto. mmap'd weights and KV are reclaimable —
- * the OS pages. We never refuse to load a model just because `free` RAM is low;
- * we only flag memory pressure so /health and logs can show a degraded run.
- * The one genuine stop is a missing/zero-byte model file (caught upstream as a
- * missing artifact, not here).
+ * Tight RAM: `refuse` (default) marks the profile impractical. `page` loads anyway.
  */
-export function profileAdmitted(agent, profile, { freeMemoryBytes, includeDraft } = {}) {
+export function profileAdmitted(agent, profile, { freeMemoryBytes, includeDraft, admitWhenTight = 'refuse' } = {}) {
   const headroom = headroomBytes();
   const estimateBytes = estimateResidentBytes(agent, profile, { includeDraft });
   if (estimateBytes == null) {
@@ -63,29 +63,33 @@ export function profileAdmitted(agent, profile, { freeMemoryBytes, includeDraft 
   if (estimateBytes + headroom <= freeMemoryBytes) {
     return { ok: true, estimateBytes, headroomBytes: headroom, reason: 'admitted', pressure: 'ok' };
   }
-  // Load anyway; let the OS page. Report the pressure for observability.
-  return { ok: true, estimateBytes, headroomBytes: headroom, reason: 'tight', pressure: 'tight' };
+  if (admitWhenTight === 'page') {
+    return { ok: true, estimateBytes, headroomBytes: headroom, reason: 'tight', pressure: 'tight' };
+  }
+  return { ok: false, estimateBytes, headroomBytes: headroom, reason: 'impractical', pressure: 'tight' };
 }
 
-export function agentCanAdmit(agent, { freeMemoryBytes, includeDraft } = {}) {
+export function agentCanAdmit(agent, { freeMemoryBytes, includeDraft, admitWhenTight = 'refuse' } = {}) {
   if (!agent || agent.runtime === 'logical') {
     return { ok: true, reason: 'logical', estimateBytes: null, headroomBytes: headroomBytes() };
   }
-  const profiles = agent.profiles?.length ? agent.profiles : [{ id: 'default', args: [] }];
+  const profiles = agent.profiles?.length ? agent.profiles : [{ id: 'default', args: ['--device', 'none', '--n-gpu-layers', '0'] }];
   const draft = includeDraft ?? Boolean(agent.draft_enabled && agent.draft_model);
   let admitted = null;
   let tight = null;
   let unknown = null;
   for (const profile of profiles) {
-    const admission = profileAdmitted(agent, profile, { freeMemoryBytes, includeDraft: draft });
+    const admission = profileAdmitted(agent, profile, { freeMemoryBytes, includeDraft: draft, admitWhenTight });
     const tagged = { ...admission, profileId: profile.id };
     if (admission.reason === 'admitted') { if (!admitted) admitted = tagged; }
-    else if (admission.reason === 'tight') {
+    else if (admission.reason === 'impractical' || admission.reason === 'tight') {
       if (!tight || (admission.estimateBytes ?? 0) < (tight.estimateBytes ?? Infinity)) tight = tagged;
     } else if (!unknown) unknown = tagged;
   }
-  // Everything is admittable now; prefer a comfortable profile, else the tightest-fitting.
-  return admitted ?? unknown ?? tight ?? { ok: true, reason: 'unknown', estimateBytes: null, headroomBytes: headroomBytes(), pressure: 'unknown' };
+  if (admitted) return admitted;
+  if (admitWhenTight === 'page') return unknown ?? tight ?? { ok: true, reason: 'unknown', estimateBytes: null, headroomBytes: headroomBytes(), pressure: 'unknown' };
+  if (tight) return { ...tight, ok: false, reason: 'impractical' };
+  return unknown ?? { ok: true, reason: 'unknown', estimateBytes: null, headroomBytes: headroomBytes(), pressure: 'unknown' };
 }
 
 export { artifactSizeBytes, cpuResidentWeightBytes, profileKeepsWeightsOnCpu };

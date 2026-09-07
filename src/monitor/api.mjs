@@ -6,6 +6,7 @@
 
 import { normalizeU64, u64 } from './ids.mjs';
 import { isAllowlistedOp } from './calls.mjs';
+import { makeReject } from './states.mjs';
 
 export {
   SLOT_BYTES,
@@ -91,12 +92,28 @@ export function makeUpcall(partial = {}) {
   return envelope;
 }
 
+function uncallableEnvelope(verb) {
+  const envelope = makeReject({
+    from: 'api',
+    to: verb,
+    reason: `${verb} is uncallable (v1)`,
+    source: 'api',
+    target: 'machine',
+  });
+  envelope.ok = false;
+  envelope.executed = false;
+  envelope.implemented = false;
+  envelope.spawned = false;
+  envelope.voted = false;
+  return envelope;
+}
+
 export function vote() {
-  throw new Error('complex-last');
+  return uncallableEnvelope('vote');
 }
 
 export function secureReboot() {
-  throw new Error('complex-last');
+  return uncallableEnvelope('secure_reboot');
 }
 
 export function zeroId() {

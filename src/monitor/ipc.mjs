@@ -6,7 +6,7 @@
  * seq is logical 64-bit {hi,lo}; 32-bit ring index is occupancy, not identity.
  * ticket accepts live string session ids AND {hi,lo}.
  *
- * vote / lockdown / reboot / secure_reboot stay uncallable stubs (throw).
+ * vote / lockdown / reboot / secure_reboot stay uncallable (reject envelope).
  * Missing capability bit => reject envelope, never silent no-op.
  */
 
@@ -310,24 +310,46 @@ export class MonitorIpc {
     return this.recentBuf.slice(-n).map((event) => cloneEnvelope(event));
   }
 
+  _uncallable(verb) {
+    const posted = this._reject({
+      from: this.role,
+      to: verb,
+      reason: `${verb} is uncallable (v1)`,
+      source: 'ipc',
+      target: 'machine',
+    });
+    const envelope = posted.reject ?? posted;
+    envelope.ok = false;
+    envelope.executed = false;
+    envelope.implemented = false;
+    envelope.spawned = false;
+    envelope.voted = false;
+    envelope.kind = envelope.kind ?? 'reject';
+    return envelope;
+  }
+
   vote() {
-    apiVote();
+    const fromApi = apiVote();
+    if (fromApi && fromApi.ok === false) return fromApi;
+    return this._uncallable('vote');
   }
 
   lockdown() {
-    throw new Error('complex-last');
+    return this._uncallable('lockdown');
   }
 
   reboot() {
-    throw new Error('complex-last');
+    return this._uncallable('reboot');
   }
 
   secureReboot() {
-    apiSecureReboot();
+    const fromApi = apiSecureReboot();
+    if (fromApi && fromApi.ok === false) return fromApi;
+    return this._uncallable('secure_reboot');
   }
 
   secure_reboot() {
-    this.secureReboot();
+    return this.secureReboot();
   }
 
   push(partial = {}, opts = {}) {

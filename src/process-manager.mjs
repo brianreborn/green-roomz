@@ -1,10 +1,12 @@
 import { spawn } from 'node:child_process';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync, unlinkSync } from 'node:fs';
 import { UnavailableError } from './errors.mjs';
 import { sleep } from './util.mjs';
 import { agentFootprintBytes, headroomBytes, profileAdmitted } from './memory.mjs';
+import { CpuSetAllocator, defaultThreadCount } from './cpu-set.mjs';
 
 const MAX_LOG_CHARS = 64 * 1024;
 
@@ -19,7 +21,7 @@ const READY_PROBE = {
 
 export function vulkanAllThreadCount(logicalCpus = os.cpus().length) {
   const n = Number(logicalCpus);
-  const logical = Number.isFinite(n) && n > 0 ? Math.trunc(n) : 8;
+  const logical = Number.isFinite(n) && n > 0 ? Math.trunc(n) : 1;
   // Ryzen 5 7520U APU: 8 logical CPUs, AMD Radeon ~8058 MiB shared Vulkan.
   // vulkan-all uses logical-2 (6 on this host): those two cores are reserved for the
   // resident CPU nexus (--threads 2) so it can run concurrently with a GPU specialist.
@@ -35,6 +37,45 @@ export function withVulkanAllThreads(args, logicalCpus = os.cpus().length) {
     if (index !== -1 && index + 1 < next.length) next[index + 1] = threads;
   }
   return next;
+}
+
+export function argsThreadCount(args, fallback = defaultThreadCount()) {
+  const index = (args ?? []).indexOf('--threads');
+  if (index !== -1 && index + 1 < args.length) {
+    const n = Number(args[index + 1]);
+    if (Number.isFinite(n) && n > 0) return Math.trunc(n);
+  }
+  return fallback;
+}
+
+function stripFlag(args, flag) {
+  const next = [];
+  for (let i = 0; i < args.length; i += 1) {
+    if (args[i] === flag) {
+      if (i + 1 < args.length && !String(args[i + 1]).startsWith('-')) i += 1;
+      continue;
+    }
+    next.push(args[i]);
+  }
+  return next;
+}
+
+function hostBindsPublic(args) {
+  for (let i = 0; i < args.length - 1; i += 1) {
+    if (args[i] === '--host' && (args[i + 1] === '0.0.0.0' || args[i + 1] === '::')) return true;
+  }
+  return false;
+}
+
+function liveThreadSum(processes, logicalCpus) {
+  let total = 0;
+  const fallback = defaultThreadCount(logicalCpus);
+  for (const rec of processes.values()) {
+    if (!rec || rec.child?.exitCode != null) continue;
+    if (!['ready', 'starting', 'suspended', 'stopping'].includes(rec.state)) continue;
+    total += argsThreadCount(rec.args ?? [], rec.threads ?? fallback);
+  }
+  return total;
 }
 
 
@@ -90,7 +131,7 @@ export function isResidentAgent(agent) {
 
 export function orderProfiles(agent, profiles, { preferredId, freeMemoryBytes } = {}) {
   const list = [...(profiles ?? [])];
-  if (!list.length) return [{ id: 'default', args: [] }];
+  if (!list.length) return [{ id: 'default', args: ['--device', 'none', '--n-gpu-layers', '0'] }];
   const weights = cpuResidentWeightBytes(agent);
   const ramTight = Number.isFinite(freeMemoryBytes) && weights != null && weights > freeMemoryBytes;
   return list.sort((a, b) => {
@@ -108,7 +149,7 @@ export function orderProfiles(agent, profiles, { preferredId, freeMemoryBytes } 
 }
 
 export class ProcessManager {
-  constructor({ manifest, registry, hostAdapter, fetchImpl = fetch, spawnImpl = spawn, selectedProfiles = new Map() }) {
+  constructor({ manifest, registry, hostAdapter, fetchImpl = fetch, spawnImpl = spawn, selectedProfiles = new Map(), logicalCpus = os.cpus().length }) {
     this.manifest = manifest;
     this.registry = registry;
     this.hostAdapter = hostAdapter;
@@ -118,19 +159,23 @@ export class ProcessManager {
     this.processes = new Map();
     this.starting = new Map();
     this.idleSweeper = null;
+    const n = Number(logicalCpus);
+    this.logicalCpus = Number.isFinite(n) && n > 0 ? Math.trunc(n) : os.cpus().length;
+    this.cpuAllocator = new CpuSetAllocator(this.logicalCpus);
     const g = manifest?.gateway ?? {};
-    this.idleEvictMs = g.idle_evict_ms ?? 300_000;
-    // Hard ceiling on warm specialists. Default: no artificial cap - free memory
-    // is the real gate (see evictForNewSpecialist). A tight box sets this low.
-    this.maxWarmSpecialists = g.max_warm_specialists
-      ?? Math.max(1, (manifest?.agents ?? []).filter((a) => a.runtime === 'llama_server' && !isResidentAgent(a)).length);
+    this.idleEvictMs = Number(g.idle_evict_ms);
+    if (!Number.isFinite(this.idleEvictMs) || this.idleEvictMs < 0) this.idleEvictMs = 0;
+    this.maxWarmSpecialists = Math.max(1, Number(g.max_warm_specialists) || 1);
+    this.admitWhenTight = g.admit_when_tight === 'page' ? 'page' : 'refuse';
     // Suspend/resume makes evict->revive cheap: SIGSTOP freezes the model, the
     // OS pages its (now idle) memory out under pressure and back in on SIGCONT -
     // no re-mmap, no KV realloc, no warm-up. POSIX only; on Windows we terminate
     // (a native suspend helper could be wired via suspendImpl later). GPU-pinned
     // VRAM is never freed by suspend, so a Vulkan model still gets terminated
     // when we actually need memory back.
-    this.canSuspend = g.suspend_evicted !== false && process.platform !== 'win32';
+    // PF7: do not SIGSTOP a bound llama-server (LISTEN stays occupied; fights PF1/RF4).
+    // Opt-in only via gateway.suspend_evicted === true (still POSIX-only).
+    this.canSuspend = g.suspend_evicted === true && process.platform !== 'win32';
     this.suspendImpl = (pid) => process.kill(pid, 'SIGSTOP');
     this.resumeImpl = (pid) => process.kill(pid, 'SIGCONT');
     // Disk-backed KV checkpoints. Off unless a dir is configured.
@@ -141,6 +186,58 @@ export class ProcessManager {
     // snapshot still matches is restored so the model wakes holding its stock
     // prompt instead of an empty context. See `green-roomz prime`.
     this.stockPromptSha = null;
+    // PF1/PF4: pack root for cwd + pidfile/children.json under data/
+    this.packRoot = g.pack_root
+      ?? manifest?._meta?.packageRoot
+      ?? process.env.GRZ_ROOT
+      ?? (manifest?._meta?.path ? path.resolve(path.dirname(manifest._meta.path), '..') : process.cwd());
+    this.dataDir = path.join(this.packRoot, 'data');
+  }
+
+  /** Owned child ports for out-of-process stop (PF1). */
+  ownedPorts() {
+    const ports = [];
+    for (const rec of this.processes.values()) {
+      if (!rec?.owned) continue;
+      const agent = this.manifest.agents.find((a) => a.alias === rec.alias);
+      if (agent?.port) ports.push(agent.port);
+    }
+    const gw = this.manifest.gateway?.port;
+    if (gw) ports.push(gw);
+    return [...new Set(ports)];
+  }
+
+  childrenSnapshot() {
+    const rows = [];
+    for (const rec of this.processes.values()) {
+      if (!rec?.owned || rec.child?.exitCode != null) continue;
+      const agent = this.manifest.agents.find((a) => a.alias === rec.alias);
+      rows.push({ alias: rec.alias, pid: rec.pid ?? rec.child?.pid, port: agent?.port ?? null, state: rec.state });
+    }
+    return rows;
+  }
+
+  writeChildrenFile() {
+    try {
+      const file = path.join(this.dataDir, 'children.json');
+      const rows = this.childrenSnapshot();
+      // Avoid creating empty children.json under cwd during unit tests.
+      if (!rows.length && !existsSync(file)) return;
+      mkdirSync(this.dataDir, { recursive: true });
+      writeFileSync(file, `${JSON.stringify(rows, null, 2)}\n`);
+    } catch {}
+  }
+
+  writeServePid(pid = process.pid) {
+    try {
+      mkdirSync(this.dataDir, { recursive: true });
+      writeFileSync(path.join(this.dataDir, 'serve.pid'), `${pid}\n`);
+    } catch {}
+  }
+
+  clearServePid() {
+    try { unlinkSync(path.join(this.dataDir, 'serve.pid')); } catch {}
+    try { unlinkSync(path.join(this.dataDir, 'children.json')); } catch {}
   }
 
   checkpointPathFor(alias) {
@@ -151,6 +248,7 @@ export class ProcessManager {
   async checkpointModel(alias, tag = String(Date.now())) {
     const rec = this.processes.get(alias);
     if (!this.checkpointDir || !rec || rec.child.exitCode !== null) return null;
+    if ((rec.refs ?? 0) > 0) return null;
     const agent = this.manifest.agents.find((a) => a.alias === alias);
     const filename = `${tag}.bin`;
     try {
@@ -224,7 +322,10 @@ export class ProcessManager {
   async restoreModel(alias, filename) {
     const rec = this.processes.get(alias);
     if (!this.checkpointDir || !rec || rec.child.exitCode !== null) return false;
+    if ((rec.refs ?? 0) > 0) return false;
     const agent = this.manifest.agents.find((a) => a.alias === alias);
+    const idle = await this.slotIsIdle(agent.port);
+    if (!idle) return false;
     const target = filename ?? rec.checkpoints?.[rec.checkpoints.length - 1]?.filename;
     if (!target) return false;
     try {
@@ -237,18 +338,73 @@ export class ProcessManager {
   }
 
   suspendRecord(record) {
-    try { this.suspendImpl(record.child.pid); record.state = 'suspended'; return true; }
-    catch { return false; }
+    if ((record.refs ?? 0) > 0) return false;
+    // PF7: even if canSuspend, a bound listener must not be left SIGSTOP'd for waitForPortsFree.
+    // Callers that force suspendImpl still update state; prefer terminate path via canSuspend=false.
+    try {
+      this.suspendImpl(record.child.pid);
+      record.state = 'suspended';
+      this.writeChildrenFile();
+      return true;
+    } catch { return false; }
+  }
+
+  pin(alias) {
+    const rec = this.processes.get(alias);
+    if (!rec) return () => {};
+    rec.refs = (rec.refs ?? 0) + 1;
+    rec.lastUsedAt = Date.now();
+    return () => {
+      rec.refs = Math.max(0, (rec.refs ?? 1) - 1);
+      rec.lastUsedAt = Date.now();
+    };
+  }
+
+  /** Empty/default --threads: min(DEFAULT_THREADS, logical CPUs, remaining set). */
+  implicitThreadCount() {
+    const cap = defaultThreadCount(this.logicalCpus);
+    const liveRoom = Math.max(0, this.logicalCpus - liveThreadSum(this.processes, this.logicalCpus));
+    const room = Math.min(liveRoom, this.cpuAllocator.remaining());
+    return Math.max(1, Math.min(cap, room > 0 ? room : cap));
+  }
+
+  /** Council pin() skips eviction; do not fan out more specialists than maxWarm. */
+  canParallelCouncil(aliases, requested = true) {
+    if (!requested) return false;
+    const list = Array.isArray(aliases) ? aliases : [];
+    if (list.length <= 1) return false;
+    let specialists = 0;
+    for (const alias of list) {
+      const agent = this.manifest?.agents?.find((a) => a.alias === alias);
+      if (!agent || !isResidentAgent(agent)) specialists += 1;
+    }
+    return specialists <= Math.max(1, this.maxWarmSpecialists);
   }
 
   async resume(alias) {
     const record = this.processes.get(alias);
     if (!record || record.state !== 'suspended' || record.child.exitCode !== null) return null;
     try { this.resumeImpl(record.child.pid); } catch { return null; }
-    record.state = 'ready';
+    record.state = 'starting';
     record.lastUsedAt = Date.now();
-    this.registry.setStatus(alias, 'ready', { pid: record.child.pid, profileId: record.profileId, resumed: true });
-    return record;
+    this.registry.setStatus(alias, 'starting', { pid: record.child.pid, profileId: record.profileId, resumed: true });
+    const agent = this.manifest.agents.find((a) => a.alias === alias);
+    try {
+      const response = await this.fetch(`http://127.0.0.1:${agent.port}/health`, {
+        signal: AbortSignal.timeout(1500),
+        headers: { connection: 'close' },
+      });
+      const ok = response?.ok ?? (response?.status >= 200 && response?.status < 300);
+      if (!ok || record.child.exitCode !== null) throw new Error('resume health failed');
+      record.state = 'ready';
+      this.registry.setStatus(alias, 'ready', { pid: record.child.pid, profileId: record.profileId, resumed: true });
+      return record;
+    } catch {
+      await this.stopRecord(record);
+      if (this.processes.get(alias) === record) this.processes.delete(alias);
+      this.registry.setStatus(alias, 'cold');
+      return null;
+    }
   }
 
   get(alias) {
@@ -304,11 +460,22 @@ export class ProcessManager {
     if (runtime.kind === 'llama-server') {
       args.push('--port', String(agent.port), '--model', agent.model, '--alias', agent.alias, '--ctx-size', String(profile?.context_size ?? agent.context_size ?? 4096));
       args.push(...(agent.extra_args ?? []), ...(profile?.args ?? []));
+      if (hostBindsPublic(args)) {
+        throw new UnavailableError(`${agent.alias}: extra_args/profile must not bind 0.0.0.0`, { code: 'public_bind_refused' });
+      }
+      const noMetrics = stripFlag(args, '--metrics');
+      args.length = 0;
+      args.push(...noMetrics);
+      if (!args.includes('--no-webui')) args.push('--no-webui');
       // Only rewrite vulkan-all; hybrid/cpu-4 already set --threads and must not regress.
       if (profile?.id === 'vulkan-all') {
-        const patched = withVulkanAllThreads(args, os.cpus().length);
+        const patched = withVulkanAllThreads(args, this.logicalCpus);
         args.length = 0;
         args.push(...patched);
+      }
+      if (!args.includes('--threads')) {
+        const threads = String(this.implicitThreadCount());
+        args.push('--threads', threads, '--threads-batch', threads);
       }
       if (agent.projector) args.push('--mmproj', agent.projector);
       // Vision cost controls: cap image tokens (biggest lever for a slow box),
@@ -359,6 +526,18 @@ export class ProcessManager {
       throw new UnavailableError(`Runtime ${runtime.kind} has no server adapter yet`);
     }
     const env = { ...process.env, ...(runtime.env ?? {}) };
+    // PF4: prepend loader paths; never clobber host /usr/local/lib (BSD) or DYLD.
+    if (process.platform !== 'win32') {
+      for (const key of ['LD_LIBRARY_PATH', 'DYLD_LIBRARY_PATH']) {
+        const fromRuntime = runtime.env?.[key];
+        if (!fromRuntime) continue;
+        const existing = process.env[key];
+        env[key] = existing ? `${fromRuntime}${path.delimiter}${existing}` : fromRuntime;
+      }
+    } else {
+      // Win32: DLL search uses PATH from start.cmd; do not set LD_LIBRARY_PATH.
+      delete env.LD_LIBRARY_PATH;
+    }
     for (let i = 0; i < args.length - 1; i += 1) {
       if (args[i] === '--device' && args[i + 1] === 'none') {
         env.GGML_VULKAN = '0';
@@ -399,14 +578,27 @@ export class ProcessManager {
       );
     }
     const includeDraft = shouldAttachDraft(agent);
+    let failedThreads = null;
     for (const profile of this.profilesFor(agent)) {
-      const admission = profileAdmitted(agent, profile, { freeMemoryBytes, includeDraft });
+      const admission = profileAdmitted(agent, profile, { freeMemoryBytes, includeDraft, admitWhenTight: this.admitWhenTight });
       if (!admission.ok) {
         lastError = new UnavailableError(
           `${agent.alias} profile ${profile.id} skipped: ${admission.reason} (estimate ${admission.estimateBytes} + headroom ${admission.headroomBytes} > free ${freeMemoryBytes})`,
         );
         continue;
       }
+      const probeArgs = [...(this.manifest.runtimes[agent.runtime]?.base_args ?? []), ...(agent.extra_args ?? []), ...(profile?.args ?? [])];
+      let wantThreads = argsThreadCount(probeArgs, this.implicitThreadCount());
+      if (profile?.id === 'vulkan-all') wantThreads = vulkanAllThreadCount(this.logicalCpus);
+      const remaining = Math.max(0, this.logicalCpus - liveThreadSum(this.processes, this.logicalCpus));
+      if (wantThreads > remaining) {
+        lastError = new UnavailableError(
+          `${agent.alias} profile ${profile.id} skipped: cpu_oversubscribed (want ${wantThreads}, remaining ${remaining})`,
+          { code: 'cpu_oversubscribed' },
+        );
+        continue;
+      }
+      if (failedThreads != null && wantThreads > failedThreads) continue;
       try {
         return await this.startProfile(agent, profile, { signal });
       } catch (error) {
@@ -414,6 +606,9 @@ export class ProcessManager {
         if (signal?.aborted || /abort/i.test(String(error.message))) {
           this.registry.setStatus(agent.alias, 'cold', { lastError: error.message });
           throw error;
+        }
+        if (/health deadline|timed out|timeout|ENOMEM|OOM/i.test(String(error.message))) {
+          failedThreads = wantThreads;
         }
       }
     }
@@ -423,12 +618,24 @@ export class ProcessManager {
 
   async startProfile(agent, profile, { signal } = {}) {
     const launch = this.buildLaunch(agent, profile);
-    const child = this.spawn(launch.command, launch.args, {
-      env: launch.env,
-      windowsHide: true,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      shell: false,
-    });
+    const wantThreads = argsThreadCount(launch.args, this.implicitThreadCount());
+    const cpus = this.cpuAllocator.allocate(agent.alias, wantThreads);
+    if (wantThreads > 0 && cpus.length === 0) {
+      throw new UnavailableError(`${agent.alias}: cpu_oversubscribed`, { code: 'cpu_oversubscribed' });
+    }
+    let child;
+    try {
+      child = this.spawn(launch.command, launch.args, {
+        env: launch.env,
+        cwd: this.packRoot,
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        shell: false,
+      });
+    } catch (error) {
+      this.cpuAllocator.release(agent.alias);
+      throw error;
+    }
     const record = {
       alias: agent.alias,
       child,
@@ -441,6 +648,9 @@ export class ProcessManager {
       logs: '',
       owned: true,
       resident: isResidentAgent(agent),
+      refs: 0,
+      threads: wantThreads,
+      cpus,
     };
     this.processes.set(agent.alias, record);
     this.registry.setStatus(agent.alias, 'starting', { profileId: profile.id });
@@ -452,17 +662,24 @@ export class ProcessManager {
       record.state = 'exited';
       record.exitCode = code;
       record.exitSignal = signalName;
-      if (this.processes.get(agent.alias) === record) this.registry.setStatus(agent.alias, 'cold', { lastExitCode: code });
+      this.cpuAllocator.release(agent.alias);
+      if (this.processes.get(agent.alias) === record) {
+        this.processes.delete(agent.alias);
+        this.registry.setStatus(agent.alias, 'cold', { lastExitCode: code });
+      }
     });
     child.once('error', append);
     try {
       await this.waitForReady(agent, record, signal);
       record.state = 'ready';
       this.registry.setStatus(agent.alias, 'ready', { pid: child.pid, profileId: profile.id });
+      this.writeChildrenFile();
       await this.maybeRestoreDefault(agent, record).catch(() => {});
       return record;
     } catch (error) {
       await this.stopRecord(record);
+      this.cpuAllocator.release(agent.alias);
+      if (this.processes.get(agent.alias) === record) this.processes.delete(agent.alias);
       const detail = record.logs.trim().slice(-2000);
       throw new UnavailableError(`Failed to start ${agent.alias} with ${profile.id}: ${error.message}${detail ? `; ${detail}` : ''}`);
     }
@@ -504,11 +721,13 @@ export class ProcessManager {
     await this.stopRecord(record);
     this.processes.delete(alias);
     this.registry.setStatus(alias, 'cold');
+    this.writeChildrenFile();
     return true;
   }
 
   async stopRecord(record) {
     if (!record.owned || record.child.exitCode !== null) return;
+    this.cpuAllocator.release(record.alias);
     // A SIGSTOP'd process won't act on SIGTERM until it runs again.
     if (record.state === 'suspended') { try { this.resumeImpl(record.child.pid); } catch {} }
     record.state = 'stopping';
@@ -528,6 +747,7 @@ export class ProcessManager {
   async stopAll() {
     this.stopIdleSweeper();
     await Promise.all([...this.processes.keys()].map((alias) => this.stop(alias)));
+    this.writeChildrenFile();
   }
 
   /**
@@ -556,6 +776,7 @@ export class ProcessManager {
       : incoming;
     const live = [...this.processes.values()].filter((r) =>
       r.owned && !r.resident && r.alias !== incomingAlias && !this.isPinned(r.alias)
+      && (r.refs ?? 0) === 0
       && ['ready', 'starting', 'suspended'].includes(r.state) && r.child.exitCode === null);
     if (!live.length) return { suspended: [], terminated: [] };
     live.sort((a, b) => (a.lastUsedAt ?? a.createdAt ?? 0) - (b.lastUsedAt ?? b.createdAt ?? 0)); // LRU first
@@ -604,23 +825,36 @@ export class ProcessManager {
     return { suspended: suspended.map((r) => r.alias), terminated: terminated.map((r) => r.alias) };
   }
 
-  /** Poll until nothing answers on these loopback ports (evicted model fully released). */
+  /** True when something still accepts TCP on loopback:port (SIGSTOP'd listener counts as busy). */
+  portBusy(port, timeoutMs = 400) {
+    return new Promise((resolve) => {
+      const sock = net.connect({ host: '127.0.0.1', port: Number(port) });
+      const done = (busy) => {
+        sock.removeAllListeners();
+        try { sock.destroy(); } catch {}
+        resolve(busy);
+      };
+      sock.setTimeout(timeoutMs, () => done(true)); // timeout => treat as still bound (PF7)
+      sock.once('connect', () => done(true));
+      sock.once('error', (err) => done(err && err.code !== 'ECONNREFUSED'));
+    });
+  }
+
+  /** Poll until ports are bind-free. Timeout => still occupied (fail closed; RF4/PF7). */
   async waitForPortsFree(ports, { timeoutMs = 8000 } = {}) {
-    if (!ports?.length) return;
+    if (!ports?.length) return true;
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
-      const alive = await Promise.all(ports.map(async (p) => {
-        try { await this.fetch(`http://127.0.0.1:${p}/health`, { signal: AbortSignal.timeout(400), headers: { connection: 'close' } }); return true; }
-        catch { return false; }
-      }));
-      if (!alive.some(Boolean)) return;
+      const busy = await Promise.all(ports.map((p) => this.portBusy(p)));
+      if (!busy.some(Boolean)) return true;
       await sleep(150);
     }
+    return false;
   }
 
   async sweepIdle(now = Date.now()) {
     const specialists = [...this.processes.values()].filter((r) =>
-      r.owned && !r.resident && !this.isPinned(r.alias) && r.child.exitCode === null && !this.starting.has(r.alias));
+      r.owned && !r.resident && !this.isPinned(r.alias) && (r.refs ?? 0) === 0 && r.child.exitCode === null && !this.starting.has(r.alias));
     const ready = specialists.filter((r) => r.state === 'ready');
     ready.sort((a, b) => (b.lastUsedAt ?? b.createdAt ?? 0) - (a.lastUsedAt ?? a.createdAt ?? 0));
     const overCap = new Set(ready.slice(Math.max(0, this.maxWarmSpecialists)).map((r) => r.alias));
@@ -628,7 +862,7 @@ export class ProcessManager {
     const doomed = [];
     for (const r of ready) {
       const idleFor = now - (r.lastUsedAt ?? r.createdAt ?? now);
-      if (!overCap.has(r.alias) && !(this.idleEvictMs > 0 && idleFor > this.idleEvictMs)) continue;
+      if (!overCap.has(r.alias) && idleFor < this.idleEvictMs) continue;
       // Freeze the merely-idle ones (cheap revive); over-cap or long-idle -> terminate.
       if (this.canSuspend && overCap.has(r.alias) === false && idleFor < this.idleEvictMs * 3) {
         if (this.suspendRecord(r)) { this.registry.setStatus(r.alias, 'suspended'); continue; }
@@ -644,12 +878,43 @@ export class ProcessManager {
   }
 
   startIdleSweeper(intervalMs = 30_000) {
-    if (this.idleSweeper || this.idleEvictMs <= 0) return;
+    if (this.idleSweeper) return;
     this.idleSweeper = setInterval(() => { this.sweepIdle().catch(() => {}); }, intervalMs);
     this.idleSweeper.unref?.();
   }
 
   stopIdleSweeper() {
     if (this.idleSweeper) { clearInterval(this.idleSweeper); this.idleSweeper = null; }
+  }
+
+  async slotIsIdle(port) {
+    if (!port) return false;
+    try {
+      const res = await this.fetch(`http://127.0.0.1:${port}/slots`, {
+        signal: AbortSignal.timeout(800),
+        headers: { connection: 'close' },
+      });
+      let json = null;
+      try {
+        json = typeof res.json === 'function' ? await res.json() : null;
+      } catch { json = null; }
+      if (json == null) return true;
+      const slots = Array.isArray(json) ? json : (json?.slots ?? []);
+      const list = Array.isArray(slots) ? slots : [];
+      if (list.length) return list.every((slot) => slot?.is_processing !== true);
+      if (typeof json === 'object' && 'is_processing' in json) return json.is_processing !== true;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async waitSlotIdle(port, { timeoutMs = 2000, intervalMs = 80 } = {}) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (await this.slotIsIdle(port)) return true;
+      await sleep(intervalMs);
+    }
+    return false;
   }
 }

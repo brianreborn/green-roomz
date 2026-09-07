@@ -143,7 +143,11 @@ export class BenchmarkRunner {
     if (cached && hasUsableMetrics(cached) && (!requireFull || hasFullMetrics(cached))) {
       return { ...cached, key, alias, profile };
     }
-    const admission = profileAdmitted(agent, profile, { freeMemoryBytes, includeDraft: false });
+    const admission = profileAdmitted(agent, profile, {
+      freeMemoryBytes,
+      includeDraft: false,
+      admitWhenTight: this.manifest?.gateway?.admit_when_tight === 'page' ? 'page' : 'refuse',
+    });
     if (!admission.ok) {
       return {
         key,

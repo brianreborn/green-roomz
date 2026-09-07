@@ -2,7 +2,7 @@
  * Dedicated append-only hash-chained audit sink.
  * NOT the 256-slot hot ring. Calls: emit, read.
  * No lockdown / reboot / secure_reboot rights.
- * Fail-open: disk full or write failure DROPs the record and returns.
+ * Fail-closed on drop: missing path / flood / write failure returns {ok:false, dropped:true}.
  * No retry-storm, no busy loop, no sync fsync. Flood must not block IPC push.
  * Chain: each record hashes previous hash + payload into opaque hex (v1).
  * Never stores passwords / tokens / keys. Never invokes respond verbs.
@@ -19,6 +19,7 @@ import {
 
 const GENESIS = '0'.repeat(64);
 const MAX_IN_FLIGHT = 4;
+const MAX_CHAIN = 256;
 const FAT_STRING = 256;
 
 const SECRET_KEYS = new Set([
@@ -80,7 +81,7 @@ function emitRole(role) {
 }
 
 function defaultWrite(path) {
-  if (!path) return () => undefined;
+  if (!path) return null;
   return (record) => appendFile(path, `${JSON.stringify(record)}\n`);
 }
 
@@ -119,8 +120,11 @@ export function createLogger(options = {}) {
     }
     assertCaller('emit', emitRole(callerRole));
 
+    if (typeof write !== 'function') {
+      return { ok: false, dropped: true };
+    }
     if (inFlight >= MAX_IN_FLIGHT) {
-      return { ok: true, dropped: true };
+      return { ok: false, dropped: true };
     }
     inFlight += 1;
 
@@ -151,6 +155,7 @@ export function createLogger(options = {}) {
       seq = nextSeq;
       prev = record.hash;
       chain.push(record);
+      if (chain.length > MAX_CHAIN) chain.splice(0, chain.length - MAX_CHAIN);
       return { ok: true, dropped: false, hash: record.hash };
     };
 
@@ -159,7 +164,7 @@ export function createLogger(options = {}) {
     try {
       return await mine;
     } catch {
-      return { ok: true, dropped: true };
+      return { ok: false, dropped: true };
     } finally {
       inFlight -= 1;
     }

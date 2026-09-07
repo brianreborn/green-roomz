@@ -1,4 +1,7 @@
 node_modules/
+runtime/
+models/
+*.bak
 data/*.log
 data/*.out.log
 data/*.hdr.txt
@@ -6,6 +9,7 @@ data/*.req.json
 data/*.res.json
 data/*.headers.txt
 data/*.json
+data/*.txt
 data/local-ci-last.txt
 data/serve*
 data/ram-watch*
@@ -13,6 +17,11 @@ data/open-taskmgr.ps1
 data/shalom-ram-watch.ps1
 data/*.stdout.log
 data/*.note.txt
+data/agent-e2e/
+data/agent-ws*/
+scripts/_*.ps1
+scripts/_*.mjs
+_qodesh-size-probe.ps1
 *.gguf
 .DS_Store
 Thumbs.db

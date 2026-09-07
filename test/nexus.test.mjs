@@ -91,6 +91,7 @@ function nexusThenSpecialists(nexusReplies, specialistFn) {
 }
 
 const imageAskAfterCpp = {
+  model: 'qwenstral-code-speculator',
   messages: [
     { role: 'user', content: 'write a C++ program about a hero who saves a village' },
     { role: 'assistant', content: '#include <iostream>\nint main() { std::cout << "hero"; }\n' },
@@ -177,9 +178,7 @@ test('visited blocks looping the same specialist', async (t) => {
     ready: ['tool-router-agent', 'qwenstral-code-speculator', 'general-text-speculator'],
     fetchImpl: nexusThenSpecialists(
       [{ route: 'qwenstral-code-speculator', confidence: 1, reason: 'always code' }],
-      (url) => (String(url).includes(':18184')
-        ? sseFetch('sure, hi')                                                   // general-text answers
-        : sseFetch('HANDOFF {"reason":"not my job","suggest":"qwenstral-code-speculator"}')), // code hands off
+      () => sseFetch('HANDOFF {"reason":"not my job","suggest":"qwenstral-code-speculator"}'),
     ),
   });
   const original = processes.ensure;
@@ -188,7 +187,6 @@ test('visited blocks looping the same specialist', async (t) => {
     if (ensured.filter((alias) => alias === agent.alias && alias !== 'tool-router-agent').length > 1) {
       throw new Error(`loop ensure ${agent.alias}`);
     }
-    if (['tool-router-agent', 'general-text-speculator'].includes(agent.alias)) return { alias: agent.alias, state: 'ready' };
     return original(agent);
   };
   const result = await request(server, {
@@ -197,11 +195,10 @@ test('visited blocks looping the same specialist', async (t) => {
     headers: { 'content-type': 'application/json' },
     body: { messages: [{ role: 'user', content: 'hello' }] },
   });
-  // The same specialist is never tried twice, and instead of failing closed the
-  // turn lands on the general-text fallback.
-  assert.equal(result.status, 200);
-  assert.equal(result.headers['x-green-roomz-effective-alias'], 'general-text-speculator');
   assert.equal(ensured.filter((alias) => alias === 'qwenstral-code-speculator').length, 1);
+  assert.equal(result.status, 200);
+  assert.equal(result.headers['x-green-roomz-route-reason'], 'resident_fallback');
+  assert.match(result.headers['x-green-roomz-hops'] ?? '', /qwenstral-code-speculator/);
 });
 
 test('actual image part still routes to vision without asking the nexus', async (t) => {
@@ -254,7 +251,7 @@ test('consultNexus omits impractical aliases from AVAILABLE the way unused visio
     path: '/v1/chat/completions',
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: { messages: [{ role: 'user', content: 'write a python function named hello' }] },
+    body: { model: 'tool-router-agent', messages: [{ role: 'user', content: 'write a python function named hello' }] },
   });
   assert.equal(result.status, 200);
   assert.equal(result.headers['x-green-roomz-effective-alias'], 'general-text-speculator');

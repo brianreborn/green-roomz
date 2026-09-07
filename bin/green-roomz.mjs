@@ -35,7 +35,12 @@ Commands:
   fingerprint [--manifest path]
   doctor [--manifest path]
   agents [--manifest path]
-  stop [--manifest path]   (asks a running local gateway to drain; currently local-process only)
+  agent --goal TEXT [--workspace dir] [--offline] [--lang py] [--max-steps N]
+                           [--max-tokens N] [--timeout-ms N] [--manifest path]
+                           (write/run/test loop; language from goal/extension; learns runtimes as it goes.
+                            live max_tokens/timeout come from gateway.agent_max_tokens and
+                            gateway.agent_chat_timeout_ms unless the flags are set)
+  stop [--manifest path]   (SIGTERM gateway from data/serve.pid; reap owned children.json PIDs)
 `;
 }
 
@@ -54,10 +59,12 @@ async function bootstrap(args) {
     ttlMs: manifest.gateway.session_ttl_ms,
     limit: manifest.gateway.session_limit,
   });
-  const objective = POLICIES[manifest.gateway.policy]?.objective ?? 'throughput';
-  try {
-    await applyStoreWinners(processes, { objective });
-  } catch {}
+  const objective = POLICIES[manifest.gateway.policy]?.objective ?? 'interactive';
+  if (manifest.gateway.apply_store_winners === true) {
+    try {
+      await applyStoreWinners(processes, { objective });
+    } catch {}
+  }
   return { manifest, registry, hostAdapter, processes, policy, sessions };
 }
 
@@ -114,11 +121,17 @@ async function cmdBenchmark(ctx, args) {
 }
 
 async function cmdServe(ctx, args) {
-  attachServeConsole({ root: process.cwd() });
-  const objective = POLICIES[ctx.manifest.gateway.policy]?.objective ?? 'throughput';
-  try {
-    await applyStoreWinners(ctx.processes, { objective });
-  } catch {}
+  const packRoot = ctx.manifest._meta?.packageRoot ?? process.env.GRZ_ROOT ?? process.cwd();
+  attachServeConsole({ root: packRoot });
+  ctx.processes.packRoot = packRoot;
+  ctx.processes.dataDir = (await import('node:path')).default.join(packRoot, 'data');
+  ctx.processes.writeServePid(process.pid);
+  if (ctx.manifest.gateway.apply_store_winners === true) {
+    const objective = POLICIES[ctx.manifest.gateway.policy]?.objective ?? 'interactive';
+    try {
+      await applyStoreWinners(ctx.processes, { objective });
+    } catch {}
+  }
   const gateway = new Gateway(ctx);
   // A cold start restores its `default` prime snapshot when it still matches the
   // live compiled stock prompt — model wakes holding its system prompt.
@@ -135,9 +148,34 @@ async function cmdServe(ctx, args) {
   if (nexus && ctx.registry.status(nexus.alias).state !== 'unavailable') {
     try {
       await ctx.processes.ensure(nexus);
-      console.error(`pre-warmed ${nexus.alias} on :${nexus.port} (resident cpu kernel; specialists stay cold)`);
+      console.error(`pre-warmed ${nexus.alias} on :${nexus.port} (resident cpu kernel)`);
     } catch (error) {
       console.error(`nexus pre-warm failed: ${error.message}`);
+    }
+  }
+  const chatAgent = ctx.registry.agents.get('general-text-speculator');
+  if (chatAgent && ctx.registry.status(chatAgent.alias).state !== 'unavailable') {
+    try {
+      await ctx.processes.ensure(chatAgent);
+      console.error(`pre-warmed ${chatAgent.alias} on :${chatAgent.port} (pinned chat; generic clients skip mmap)`);
+      try {
+        await fetch(`http://127.0.0.1:${chatAgent.port}/v1/chat/completions`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            model: chatAgent.alias,
+            messages: [{ role: 'user', content: '.' }],
+            max_tokens: 1,
+            stream: false,
+          }),
+          signal: AbortSignal.timeout(60_000),
+        });
+        console.error(`primed ${chatAgent.alias} (1 token; first client turn should stay under a minute)`);
+      } catch (error) {
+        console.error(`chat prime failed: ${error.message}`);
+      }
+    } catch (error) {
+      console.error(`chat pre-warm failed: ${error.message}`);
     }
   }
   let shuttingDown = false;
@@ -147,10 +185,16 @@ async function cmdServe(ctx, args) {
     console.error('draining owned backends');
     server.close();
     try { await ctx.processes.stopAll(); } catch (error) { console.error(`stopAll failed: ${error?.message}`); }
+    try { ctx.processes.clearServePid(); } catch {}
     process.exit(code);
   };
   process.on('SIGINT', () => shutdown(0));
   process.on('SIGTERM', () => shutdown(0));
+  // PF7: SIGHUP must drain the same way as SIGTERM (POSIX). Win32: Ctrl-C is SIGINT;
+  // closing the console is CTRL_CLOSE_EVENT (Node may not map it to SIGTERM).
+  if (process.platform !== 'win32') {
+    process.on('SIGHUP', () => shutdown(0));
+  }
 
   // A stray rejection in a request path must not kill the gateway.
   process.on('unhandledRejection', (reason) => {
@@ -320,11 +364,130 @@ async function cmdDeploy(ctx, args) {
   return cmdServe(ctx, args);
 }
 
+async function cmdStopFromPidfile(ctx) {
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const packRoot = ctx.manifest._meta?.packageRoot ?? process.env.GRZ_ROOT ?? process.cwd();
+  const dataDir = path.join(packRoot, 'data');
+  const pidFile = path.join(dataDir, 'serve.pid');
+  const childrenFile = path.join(dataDir, 'children.json');
+  if (!fs.existsSync(pidFile)) {
+    return { ok: false, stopped: false, error: 'no serve pidfile', path: pidFile };
+  }
+  let gatewayPid;
+  try {
+    gatewayPid = Number(String(fs.readFileSync(pidFile, 'utf8')).trim());
+  } catch {
+    return { ok: false, stopped: false, error: 'unreadable serve pidfile', path: pidFile };
+  }
+  if (!Number.isFinite(gatewayPid) || gatewayPid <= 0) {
+    return { ok: false, stopped: false, error: 'invalid serve pidfile', path: pidFile };
+  }
+  const childRows = [];
+  if (fs.existsSync(childrenFile)) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(childrenFile, 'utf8'));
+      if (Array.isArray(parsed)) childRows.push(...parsed);
+    } catch {}
+  }
+  // SIGTERM gateway so in-process drain (stopAll) runs when possible.
+  try { process.kill(gatewayPid, 'SIGTERM'); } catch (error) {
+    if (error?.code !== 'ESRCH') {
+      return { ok: false, stopped: false, error: `kill gateway ${gatewayPid}: ${error.message}` };
+    }
+  }
+  // Wait briefly for gateway exit, then reap remaining child PIDs by PID (never by image name).
+  const deadline = Date.now() + 8000;
+  while (Date.now() < deadline) {
+    try { process.kill(gatewayPid, 0); await new Promise((r) => setTimeout(r, 200)); }
+    catch { break; }
+  }
+  const reaped = [];
+  for (const row of childRows) {
+    const pid = Number(row?.pid);
+    if (!Number.isFinite(pid) || pid <= 0 || pid === gatewayPid) continue;
+    try {
+      process.kill(pid, 'SIGTERM');
+      reaped.push(pid);
+    } catch {}
+  }
+  await new Promise((r) => setTimeout(r, 1000));
+  for (const pid of reaped) {
+    try { process.kill(pid, 'SIGKILL'); } catch {}
+  }
+  try { fs.unlinkSync(pidFile); } catch {}
+  try { fs.unlinkSync(childrenFile); } catch {}
+  return { ok: true, stopped: true, gatewayPid, reaped };
+}
+
+async function cmdAgent(args) {
+  const { runDevAgent, gatewayChat } = await import('../src/dev-agent.mjs');
+  const { loadManifest } = await import('../src/config.mjs');
+  const pathMod = await import('node:path');
+  const goal = argValue(args, '--goal');
+  if (!goal) {
+    console.error('agent --goal "write a python function add(a,b) with a test and run it" [--offline] [--lang py] [--max-tokens N] [--timeout-ms N]');
+    process.exitCode = 1;
+    return;
+  }
+  const workspace = argValue(args, '--workspace') || pathMod.join(process.cwd(), 'data', 'agent-ws');
+  const base = process.env.GRZ_BASE_URL || 'http://127.0.0.1:8080';
+  const offline = hasFlag(args, '--offline');
+  const maxSteps = Number(argValue(args, '--max-steps', '12'));
+  const manifest = await loadManifest(argValue(args, '--manifest'));
+  const timeoutFlag = argValue(args, '--timeout-ms');
+  const maxTokensFlag = argValue(args, '--max-tokens');
+  const timeoutMs = timeoutFlag != null ? Number(timeoutFlag) : Number(manifest.gateway.agent_chat_timeout_ms);
+  const maxTokens = maxTokensFlag != null ? Number(maxTokensFlag) : Number(manifest.gateway.agent_max_tokens);
+  if (!Number.isFinite(timeoutMs) || timeoutMs < 1) {
+    console.error('agent: gateway.agent_chat_timeout_ms or --timeout-ms must be a positive integer');
+    process.exitCode = 1;
+    return;
+  }
+  if (!Number.isFinite(maxTokens) || maxTokens < 1) {
+    console.error('agent: gateway.agent_max_tokens or --max-tokens must be a positive integer');
+    process.exitCode = 1;
+    return;
+  }
+  const chat = offline ? undefined : (body) => gatewayChat(base, body, { timeoutMs });
+  const result = await runDevAgent({
+    workspace,
+    goal,
+    chat,
+    model: argValue(args, '--model') || 'general-text-speculator',
+    lang: argValue(args, '--lang'),
+    maxSteps: Number.isFinite(maxSteps) && maxSteps > 0 ? maxSteps : 12,
+    maxTokens,
+  });
+  console.log(JSON.stringify({
+    ok: result.ok,
+    summary: result.summary,
+    stdout: result.stdout,
+    lang: result.lang,
+    learned: result.learned,
+    stats: result.stats,
+    workspace,
+    steps: result.steps.length,
+  }, null, 2));
+  if (!result.ok) process.exitCode = 1;
+}
+
 async function main(argv) {
   const args = argv.slice(2);
   const command = args[0];
   if (!command || command === 'help' || command === '--help' || command === '-h') {
     process.stdout.write(usage());
+    return;
+  }
+  if (command === 'agent') return cmdAgent(args);
+  if (command === 'stop') {
+    // Lightweight: load manifest for packRoot only; do not claim stopAll on an empty ProcessManager.
+    const { loadManifest } = await import('../src/config.mjs');
+    const manifestPath = argValue(args, '--manifest');
+    const manifest = await loadManifest(manifestPath);
+    const result = await cmdStopFromPidfile({ manifest, processes: null });
+    console.log(JSON.stringify(result));
+    if (!result.ok) process.exitCode = 1;
     return;
   }
   const ctx = await bootstrap(args);
@@ -338,11 +501,8 @@ async function main(argv) {
   if (command === 'prime') return cmdPrime(ctx, args);
   if (command === 'serve') return cmdServe(ctx, args);
   if (command === 'deploy') return cmdDeploy(ctx, args);
-  if (command === 'stop') {
-    await ctx.processes.stopAll();
-    console.log(JSON.stringify({ stopped: true }));
-    return;
-  }
+  // stop handled before bootstrap (PF1)
+
   throw new Error(`Unknown command: ${command}`);
 }
 

@@ -1,0 +1,115 @@
+{
+  "schema": "green-roomz.agent-std.v1",
+  "title": "Standardized agent tests (Athlon-safe slice)",
+  "notes": [
+    "Families map to public evals: IFEval (verifiable constraints), MT-Bench turn-1 (constraint persist), OpenAI chat schema, specialist honesty.",
+    "Not MMLU/GAIA/SWE-bench. Those need tools and a frontier model.",
+    "max_tokens stay tiny for qodesh ~3 tok/s."
+  ],
+  "cases": [
+    {
+      "id": "S1",
+      "family": "openai-schema",
+      "name": "chat.completion JSON shape",
+      "gate": "protocol",
+      "lock_alias": true,
+      "max_tokens": 16,
+      "messages": [{ "role": "user", "content": "Reply with the single word hi" }],
+      "expect": { "status": 200, "object": "chat.completion", "role": "assistant", "nonempty": true }
+    },
+    {
+      "id": "S2",
+      "family": "ifeval",
+      "name": "exact single-token instruction",
+      "gate": "quality",
+      "lock_alias": true,
+      "max_tokens": 8,
+      "messages": [{ "role": "user", "content": "Reply with only the word PING and nothing else." }],
+      "expect": { "status": 200, "contentRegex": "(?i)\\bPING\\b" }
+    },
+    {
+      "id": "S3",
+      "family": "ifeval",
+      "name": "exactly three hyphen bullets",
+      "gate": "quality",
+      "lock_alias": true,
+      "max_tokens": 64,
+      "messages": [{ "role": "user", "content": "List exactly three fruits. Use exactly three lines. Each line must start with '- ' then one word. No other text." }],
+      "expect": { "status": 200, "minBulletLines": 3 }
+    },
+    {
+      "id": "S4",
+      "family": "system-follow",
+      "name": "system suffix constraint",
+      "gate": "quality",
+      "lock_alias": true,
+      "max_tokens": 24,
+      "messages": [
+        { "role": "system", "content": "You must end every reply with the exact token -GRZ" },
+        { "role": "user", "content": "Say hello." }
+      ],
+      "expect": { "status": 200, "contentRegex": "-GRZ\\s*$" }
+    },
+    {
+      "id": "S5",
+      "family": "mt-turn",
+      "name": "name persist across two turns",
+      "gate": "quality",
+      "lock_alias": true,
+      "max_tokens": 32,
+      "turns": [
+        { "messages": [{ "role": "user", "content": "My name is Ada. Reply with ok." }] },
+        { "followUp": "What is my name? Reply with only the name." }
+      ],
+      "expect": { "status": 200, "contentRegex": "(?i)\\bAda\\b" }
+    },
+    {
+      "id": "S6",
+      "family": "json-mode",
+      "name": "JSON object only",
+      "gate": "quality",
+      "lock_alias": true,
+      "max_tokens": 32,
+      "messages": [{ "role": "user", "content": "Return only JSON with keys ok (boolean true) and n (number 1). No markdown." }],
+      "expect": { "status": 200, "jsonKeys": ["ok", "n"] }
+    },
+    {
+      "id": "S7",
+      "family": "honesty",
+      "name": "missing image-gen is 503 not fake draw",
+      "gate": "protocol",
+      "model": "image-generation-agent",
+      "max_tokens": 8,
+      "messages": [{ "role": "user", "content": "a red apple" }],
+      "expect": { "status": 503 }
+    },
+    {
+      "id": "S8",
+      "family": "honesty",
+      "name": "/draw slash is 503 when sd missing",
+      "gate": "protocol",
+      "max_tokens": 8,
+      "messages": [{ "role": "user", "content": "/draw a red apple" }],
+      "expect": { "status": 503 }
+    },
+    {
+      "id": "S9",
+      "family": "openai-schema",
+      "name": "models list includes chat + nexus",
+      "gate": "protocol",
+      "method": "GET",
+      "path": "/v1/models",
+      "expect": { "status": 200, "modelsInclude": ["general-text-speculator", "tool-router-agent"] }
+    },
+    {
+      "id": "S10",
+      "family": "ifeval",
+      "name": "all-caps constraint",
+      "gate": "quality",
+      "lock_alias": true,
+      "max_tokens": 8,
+      "messages": [{ "role": "user", "content": "Reply with only YES in all capital letters. No other characters." }],
+      "expect": { "status": 200, "contentRegex": "^\\s*YES\\s*$" }
+    }
+  ]
+}

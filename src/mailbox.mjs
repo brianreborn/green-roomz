@@ -28,6 +28,9 @@ function nextPow2(n) {
   return 1 << Math.ceil(Math.log2(v));
 }
 
+const HOP_KINDS = new Set(['hop', 'success', 'agent_unavailable', 'route_exhausted', 'observe', 'snapshot']);
+const STUB_KINDS = new Set(['lockdown', 'reboot', 'secure_reboot', 'vote']);
+
 function clonePayload(payload) {
   if (payload == null) return {};
   if (typeof payload === 'string') {
@@ -106,6 +109,10 @@ export class Mailbox {
   }
 
   push(partial = {}) {
+    const kind = String(partial.kind ?? '');
+    if (!kind || STUB_KINDS.has(kind) || !HOP_KINDS.has(kind)) {
+      return { ok: false, kind: 'reject', executed: false };
+    }
     const nextSeq = this.seq + 1;
     const event = {
       seq: normalizeMailboxSeq(partial.seq, nextSeq),
@@ -133,15 +140,18 @@ export class Mailbox {
   }
 
   drain(callback) {
+    const n = this.size;
     const out = [];
-    const listeners = typeof callback === 'function' ? [callback, ...this.listeners] : this.listeners;
-    while (this.size > 0) {
+    for (let i = 0; i < n && this.size > 0; i += 1) {
       const event = this.slots[this.tail];
       this.slots[this.tail] = undefined;
       this.tail = (this.tail + 1) & this.mask;
       this.size -= 1;
       this.drained += 1;
       out.push(event);
+    }
+    const listeners = (typeof callback === 'function' ? [callback, ...this.listeners] : this.listeners).slice();
+    for (const event of out) {
       for (const listener of listeners) {
         try { listener(event); } catch {}
       }
@@ -153,8 +163,12 @@ export class Mailbox {
     if (this._drainScheduled) return;
     this._drainScheduled = true;
     setImmediate(() => {
-      this._drainScheduled = false;
-      this.drain();
+      try {
+        this.drain();
+      } finally {
+        this._drainScheduled = false;
+        if (this.autoDrain && this.size > 0) this._scheduleDrain();
+      }
     });
   }
 }

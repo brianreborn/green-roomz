@@ -11,7 +11,7 @@ import {
 import { loadDeclaredKernel } from './config.mjs';
 import { compileStockPrompt } from './compile-prompt.mjs';
 import { planRoute } from './logical-router.mjs';
-import { aliasCanAdmit, availableAliases, detectModalities, isRoutableAlias, latestUserMessageText, stripSlashCommand } from './routing.mjs';
+import { aliasCanAdmit, availableAliases, detectModalities, isRoutableAlias, latestUserMessageText, NATIVE_CHAT, stripSlashCommand } from './routing.mjs';
 import { stripControls } from './util.mjs';
 
 /** In actor runtimes, kernel faith is the `confidence` field. Gateway /faith is a separate knob. */
@@ -111,8 +111,8 @@ const ALIAS_HINTS = {
 };
 
 function fenceUserText(text) {
-  const raw = String(text ?? '').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, '');
-  return raw.split(/\r?\n/).map((line) => `| ${line}`).join('\n');
+  const raw = String(text ?? '').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u2028\u2029]/g, '');
+  return raw.split(/\r\n|\n|\r/).map((line) => `| ${line}`).join('\n');
 }
 
 export function buildNexusPrompt({ userText, aliases, visited, notes, constraint }) {
@@ -185,12 +185,13 @@ export function nexusCandidateAliases(registry, visited, body, processes) {
     if (alias === 'vision-layout-agent' && !mod.image) return false;
     if (alias === 'audio-transcription-agent' && !mod.audio) return false;
     if (alias === MONITOR_ALIAS) return false;
+    if (NATIVE_CHAT[alias] || alias === 'speech-synthesis-agent') return false;
     if (!aliasCanAdmit(registry, alias, processes)) return false;
     return true;
   });
 }
 
-async function postNexus({ processes, registry, fetchImpl, body, visited, notes, constraint, signal }) {
+async function postNexus({ processes, registry, fetchImpl, body, visited, notes, constraint, signal, consultTimeoutMs = NEXUS_CONSULT_TIMEOUT_MS }) {
   const nexus = registry.get(NEXUS_ALIAS);
   const record = await processes.ensure(nexus, { signal });
   if (record?.logical) throw new Error('nexus is logical');
@@ -217,7 +218,7 @@ async function postNexus({ processes, registry, fetchImpl, body, visited, notes,
     },
   }, nexus);
   const target = `http://127.0.0.1:${nexus.port}/v1/chat/completions`;
-  const timed = AbortSignal.timeout(NEXUS_CONSULT_TIMEOUT_MS);
+  const timed = AbortSignal.timeout(consultTimeoutMs);
   const combined = signal ? AbortSignal.any([signal, timed]) : timed;
   const response = await fetchImpl(target, {
     method: 'POST',
@@ -251,7 +252,10 @@ export async function consultNexus({ processes, registry, fetchImpl = fetch, bod
     if (!candidates.length) return { route: null, confidence: 0, reason: 'no_admittable_specialist' };
     if (!live) return offlinePlan(stripped, registry, visited);
     try {
-      return await postNexus({ processes, registry, fetchImpl, body: stripped, visited, notes, constraint, signal });
+      return await postNexus({
+        processes, registry, fetchImpl, body: stripped, visited, notes, constraint, signal,
+        consultTimeoutMs: processes?.manifest?.gateway?.nexus_consult_timeout_ms ?? NEXUS_CONSULT_TIMEOUT_MS,
+      });
     } catch {
       return offlinePlan(stripped, registry, visited);
     }

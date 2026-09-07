@@ -12,8 +12,14 @@
     "validate": "node ./bin/green-roomz.mjs validate",
     "benchmark": "node ./bin/green-roomz.mjs benchmark",
     "test": "node --test",
-    "test:e2e": "node --test ./e2e/gateway.e2e.mjs",
-    "verify": "node ./e2e/verify-models.mjs"
+    "eval:agent": "node ./scripts/agent-std-eval.mjs",
+    "test:agent": "node --test --test-concurrency=1 ./test/dev-agent.test.mjs",
+    "iterate": "node ./scripts/iterate.mjs",
+    "eval:e2e": "node ./scripts/agent-e2e-eval.mjs",
+    "eval:e2e:live": "node ./scripts/agent-e2e-eval.mjs --live-only",
+    "eval:e2e:full": "node ./scripts/agent-e2e-eval.mjs --full --no-fail-fast --offline-only",
+    "agent": "node ./bin/green-roomz.mjs agent",
+    "eval:parity": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/mvp-parity-battery.ps1"
   },
   "engines": {
     "node": ">=22"

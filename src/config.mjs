@@ -12,15 +12,55 @@ import {
   NEXUS_ALIAS,
   MONITOR_ALIAS,
   MICROKERNEL_MAX_CHARS,
+  DEFAULT_MANIFEST,
 } from './constants.mjs';
 import { ValidationError } from './errors.mjs';
-import { digestObject, expandEnvironment, resolveManifestPath } from './util.mjs';
+import { TIMING_PRIVACY_INSTALL_HINT, resolveTimingPrivacy } from './timing-quant.mjs';
+import { digestObject, expandEnvironment, resolveManifestPath, nfcPath } from './util.mjs';
 import { readFileSync, existsSync } from 'node:fs';
 import { assertNexusKernelText, kernelBindingIssues } from './kernel-text.mjs';
 
 export { assertNexusKernelText, kernelBindingIssues };
 
 const SECRET_FIELD = /(api[_-]?key|password|secret|token)$/i;
+
+function requireInt(gateway, key, { min = 1 } = {}) {
+  const n = Number(gateway[key]);
+  if (!Number.isFinite(n) || n < min) return `gateway.${key} is required at install (integer >= ${min})`;
+  return null;
+}
+
+function installGatewayIssues(gateway) {
+  const issues = [];
+  for (const key of [
+    'max_warm_specialists',
+    'session_limit',
+    'session_ttl_ms',
+    'upstream_timeout_ms',
+    'request_timeout_ms',
+    'nexus_consult_timeout_ms',
+    'handoff_peek_timeout_ms',
+    'handoff_peek_chars',
+    'agent_chat_timeout_ms',
+    'agent_max_tokens',
+  ]) {
+    const hit = requireInt(gateway, key, { min: 1 });
+    if (hit) issues.push(hit);
+  }
+  const idle = requireInt(gateway, 'idle_evict_ms', { min: 0 });
+  if (idle) issues.push(idle);
+  if (gateway.admit_when_tight !== 'refuse' && gateway.admit_when_tight !== 'page') {
+    issues.push('gateway.admit_when_tight is required at install (refuse | page)');
+  }
+  if (typeof gateway.apply_store_winners !== 'boolean') {
+    issues.push('gateway.apply_store_winners is required at install (false | true)');
+  }
+  if (!Array.isArray(gateway.health_aliases) || gateway.health_aliases.length < 1
+      || gateway.health_aliases.some((a) => typeof a !== 'string' || !a.trim())) {
+    issues.push('gateway.health_aliases is required at install (non-empty alias array)');
+  }
+  return issues;
+}
 
 function findSecretFields(value, location = '$', found = []) {
   if (!value || typeof value !== 'object') return found;
@@ -52,6 +92,14 @@ export function validateManifest(manifest, env = process.env) {
   if (aliases.includes(TRANSLATION_ALIAS)) issues.push('translation-agent is prohibited; translation is an explicit shared capability');
   if (!POLICIES[manifest.gateway?.policy]) issues.push('gateway.policy must be responsive, balanced, or maximize');
   if (manifest.gateway && typeof manifest.gateway === 'object') {
+    if (!resolveTimingPrivacy(manifest.gateway)) issues.push(TIMING_PRIVACY_INSTALL_HINT);
+    issues.push(...installGatewayIssues(manifest.gateway));
+    const healthAliases = manifest.gateway.health_aliases;
+    if (Array.isArray(healthAliases)) {
+      for (const alias of healthAliases) {
+        if (!aliases.includes(alias)) issues.push(`gateway.health_aliases unknown alias: ${alias}`);
+      }
+    }
     const extra = Object.keys(manifest.gateway).filter((key) => !ORCHESTRATOR_BOUNDED_KEYS.includes(key));
     if (extra.length) issues.push(`gateway has unbounded keys (sysadmin schema bump required): ${extra.join(', ')}`);
   }
@@ -87,20 +135,89 @@ export function loadDeclaredKernel(agent) {
   return text;
 }
 
-export async function loadManifest(input = new URL('../config/agents.windows.json', import.meta.url), env = process.env) {
-  const manifestPath = input instanceof URL ? fileURLToPath(input) : path.resolve(input);
-  const raw = await readFile(manifestPath, 'utf8');
-  const manifest = expandEnvironment(JSON.parse(raw), env);
-  validateManifest(manifest, env);
+function packageRoot() {
+  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+}
+
+/** Default GRZ_ROOT / GRZ_EXE / GRZ_LLAMA for portable manifests (PF2/PF3/PF4). */
+export function withDefaultGrzEnv(env = process.env, root = packageRoot()) {
+  const out = { ...env };
+  if (!out.GRZ_ROOT) out.GRZ_ROOT = root;
+  if (out.GRZ_EXE === undefined || out.GRZ_EXE === null) {
+    out.GRZ_EXE = process.platform === 'win32' ? '.exe' : '';
+  }
+  if (!out.GRZ_LLAMA) {
+    out.GRZ_LLAMA = path.join(out.GRZ_ROOT, 'runtime', `llama-server${out.GRZ_EXE || ''}`);
+  }
+  if (!out.HOME && process.env.HOME) out.HOME = process.env.HOME;
+  return out;
+}
+
+function assertRuntimeCommands(manifest) {
+  const issues = [];
+  for (const [name, runtime] of Object.entries(manifest.runtimes ?? {})) {
+    const cmd = runtime?.command;
+    if (cmd == null || String(cmd).trim() === '') {
+      issues.push(`runtime ${name}: empty command path after expand (fail closed)`);
+      continue;
+    }
+    if (/\$\{/.test(String(cmd))) {
+      issues.push(`runtime ${name}: unresolved \${} in command (fail closed)`);
+    }
+    // Collapsed empty GRZ_ROOT historically produced "/runtime/llama-server"
+    if (String(cmd) === '/runtime/llama-server' || String(cmd).startsWith('/runtime/llama-server')) {
+      issues.push(`runtime ${name}: command collapsed to ${cmd} (unset GRZ_ROOT); fail closed`);
+    }
+  }
+  if (issues.length) throw new ValidationError('Invalid Green-Roomz manifest runtime commands', issues);
+}
+
+function joinExpandedPath(value) {
+  if (value == null || value === '') return value;
+  // Normalize mixed separators after expand (PF2 P4) without breaking UNC / drive paths.
+  if (/^[A-Za-z]:[\\/]/.test(value) || value.startsWith('\\\\')) {
+    return path.normalize(value);
+  }
+  if (path.isAbsolute(value)) return path.normalize(value);
+  return path.normalize(value);
+}
+
+export async function loadManifest(input = DEFAULT_MANIFEST, env = process.env) {
+  const root = packageRoot();
+  const effectiveEnv = withDefaultGrzEnv(env, root);
+  const manifestPath = nfcPath(input instanceof URL ? fileURLToPath(input) : path.resolve(input));
+  let raw = await readFile(manifestPath, 'utf8');
+  if (raw.charCodeAt(0) === 0xFEFF) raw = raw.slice(1); // UTF-8 BOM (PF8)
+  const parsed = JSON.parse(raw);
+  const manifest = expandEnvironment(parsed, effectiveEnv);
+  assertRuntimeCommands(manifest);
+  validateManifest(manifest, effectiveEnv);
   for (const agent of manifest.agents) {
     for (const field of ['model', 'draft_model', 'projector', 'system_policy']) {
-      if (agent[field]) agent[field] = resolveManifestPath(manifestPath, agent[field]);
+      if (agent[field]) {
+        agent[field] = nfcPath(joinExpandedPath(resolveManifestPath(manifestPath, agent[field])));
+      }
+    }
+  }
+  for (const runtime of Object.values(manifest.runtimes ?? {})) {
+    if (runtime.command) {
+      runtime.command = nfcPath(joinExpandedPath(resolveManifestPath(manifestPath, runtime.command)));
+    }
+    if (runtime.env && typeof runtime.env === 'object') {
+      for (const [k, v] of Object.entries(runtime.env)) {
+        if (typeof v === 'string' && (k.includes('PATH') || k.includes('DIR') || /path/i.test(k))) {
+          runtime.env[k] = joinExpandedPath(v);
+        }
+      }
     }
   }
   expandVariants(manifest, manifestPath);
   const nexus = manifest.agents.find((agent) => agent.alias === NEXUS_ALIAS);
   if (nexus?.system_policy) loadDeclaredKernel(nexus);
-  Object.defineProperty(manifest, '_meta', { value: Object.freeze({ path: manifestPath, digest: digestObject(JSON.parse(raw)) }), enumerable: false });
+  Object.defineProperty(manifest, '_meta', {
+    value: Object.freeze({ path: manifestPath, digest: digestObject(parsed), packageRoot: root }),
+    enumerable: false,
+  });
   return deepFreeze(manifest);
 }
 

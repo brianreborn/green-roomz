@@ -1,6 +1,7 @@
 import { Readable } from 'node:stream';
 import { HANDOFF_PEEK_CHARS, HANDOFF_PEEK_TIMEOUT_MS, UPSTREAM_MAX_BUFFER_BYTES } from './constants.mjs';
 import { sanitizeCompletionJson } from './proxy.mjs';
+import { stripControls, stripEscapes } from './util.mjs';
 import { extractJsonObject, stripFence } from './nexus.mjs';
 
 const SUGGEST_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -14,11 +15,11 @@ function safeSuggest(value) {
 }
 
 function safeReason(value, fallback) {
-  return String(value ?? fallback ?? 'handoff').replace(/[\u0000-\u001F\u007F-\u009F]/g, ' ').replace(/[ \t]{2,}/g, ' ').trim().slice(0, 240);
+  return stripControls(value ?? fallback ?? 'handoff').slice(0, 240);
 }
 
 export function parseHandoffContent(text) {
-  const trimmed = String(text ?? '').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, '').trim();
+  const trimmed = stripEscapes(String(text ?? '')).trim();
   if (!trimmed) return null;
   if (/^HANDOFF\b/i.test(trimmed)) {
     const rest = trimmed.replace(/^HANDOFF\s*/i, '').trim();
@@ -322,7 +323,8 @@ function writeSse(response, json) {
   response.write(`data: ${JSON.stringify(json)}\n\n`);
 }
 
-export async function deliverPeek({ peek, request, response, body, headers = {} }) {
+export async function deliverPeek({ peek, request, response, body, headers = {}, beforeClientWrite }) {
+  if (beforeClientWrite) await beforeClientWrite();
   if (peek.error) {
     const data = Buffer.from(JSON.stringify(peek.error));
     response.writeHead(peek.status ?? 502, { 'content-type': 'application/json; charset=utf-8', 'content-length': data.length, ...headers });

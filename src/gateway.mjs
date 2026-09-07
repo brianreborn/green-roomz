@@ -1,8 +1,9 @@
+import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fieldVote, similarityVote, resolveJudgeChoice, judgePrompt } from './council.mjs';
-import { AGENCY_ROLE, DEFAULT_FAITH, DEFAULT_FEAR, FALLBACK_ALIAS, MAX_SPECIALIST_HOPS, MONITOR_ALIAS, NEXUS_ALIAS, REBUKE_OP, UPSTREAM_MAX_BUFFER_BYTES, UPSTREAM_TIMEOUT_MS, YOLO_TOKEN } from './constants.mjs';
+import { AGENCY_ROLE, DEFAULT_FAITH, DEFAULT_FEAR, FALLBACK_ALIAS, HANDOFF_PEEK_CHARS, HANDOFF_PEEK_TIMEOUT_MS, MAX_SPECIALIST_HOPS, MONITOR_ALIAS, NEXUS_ALIAS, NEXUS_MAX_TOKENS, REBUKE_OP, UPSTREAM_MAX_BUFFER_BYTES, UPSTREAM_TIMEOUT_MS, YOLO_TOKEN } from './constants.mjs';
 import { loadDeclaredKernel } from './config.mjs';
 import { compileStockPrompt } from './compile-prompt.mjs';
 import { Mailbox } from './mailbox.mjs';
@@ -13,8 +14,9 @@ import { deliverPeek, peekSpecialist } from './handoff.mjs';
 import { consultNexus } from './nexus.mjs';
 import { planRoute } from './logical-router.mjs';
 import { proxyJson } from './proxy.mjs';
-import { aliasCanAdmit, audioDataFromBody, detectModalities, hardRuleRoute, isRoutableAlias, latestUserMessageText, NATIVE_CHAT, parseSlashCommand, stripSlashCommand } from './routing.mjs';
-import { deadlineSignal, headerSafe, isTimeoutAbort, jsonResponse, readCappedText, redact, secureEquals, stripControls } from './util.mjs';
+import { aliasCanAdmit, audioDataFromBody, detectModalities, hardRuleRoute, isGenericChatRequest, isRoutableAlias, latestUserMessageText, NATIVE_CHAT, parseSlashCommand, stripSlashCommand } from './routing.mjs';
+import { deadlineSignal, headerSafe, isTimeoutAbort, jsonResponse, readCappedText, redact, secureEquals, sleep, stripControls } from './util.mjs';
+import { holdMs, resolveTimingPrivacy } from './timing-quant.mjs';
 
 const EXPLICIT_ROUTES = new Set([
   '/health',
@@ -34,13 +36,29 @@ export const GATEWAY_IPC_RIGHTS = (CAP.POST | CAP.OBSERVE | CAP.SNAPSHOT) >>> 0;
 
 function identityFrom(request, apiKey) {
   const header = request.headers.authorization ?? '';
+  const remote = normalizeAddr(request.socket?.remoteAddress);
+  const loopback = !remote || LOOPBACK.has(remote);
   if (apiKey) {
     const token = header.startsWith('Bearer ') ? header.slice(7) : '';
     if (!secureEquals(token, apiKey)) return null;
     return 'authenticated';
   }
+  if (!loopback) return 'allowlisted-peer';
   return 'loopback-dev';
 }
+
+function hashTicket(ticket) {
+  if (ticket == null || ticket === '') return '';
+  const raw = typeof ticket === 'string' ? ticket : JSON.stringify(ticket);
+  return createHash('sha256').update(raw).digest('hex').slice(0, 16);
+}
+
+function publicEvent(event) {
+  if (!event || typeof event !== 'object') return event;
+  return { ...event, ticket: hashTicket(event.ticket) };
+}
+
+const GET_ONLY = new Set(['/health', '/v1/health', '/v1/models', '/props', '/metrics', '/v1/monitor/recent']);
 
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1', 'localhost']);
 const COUNCIL_JUDGES = new Set(['field-vote', 'judge-model', 'similarity']);
@@ -138,7 +156,7 @@ function readBody(request, limit) {
 }
 
 function corsHeaders(manifest, origin) {
-  const allowed = manifest.gateway?.cors_origins ?? [];
+  const allowed = (manifest.gateway?.cors_origins ?? []).filter((item) => item && item !== '*');
   if (!origin || !allowed.includes(origin)) return {};
   return {
     'access-control-allow-origin': origin,
@@ -184,9 +202,9 @@ export function prepareInferenceBody(body, agent) {
     payload.chat_template_kwargs = { ...(payload.chat_template_kwargs ?? {}), enable_thinking: false };
     return payload;
   }
-  if (agent.alias !== FALLBACK_ALIAS) return payload;
   const explicit = payload.enable_thinking ?? payload.chat_template_kwargs?.enable_thinking;
-  if (explicit !== undefined) return payload;
+  if (explicit === true) return payload;
+  payload.enable_thinking = false;
   payload.chat_template_kwargs = { ...(payload.chat_template_kwargs ?? {}), enable_thinking: false };
   return payload;
 }
@@ -297,6 +315,19 @@ export class Gateway {
     this.logger = logger ?? createLogger();
     this.extraPeers = [];
     this.councilDir = this.manifest.gateway?.council_dir ?? process.env.GREEN_ROOMZ_COUNCIL_DIR ?? null;
+    this.timingPrivacy = resolveTimingPrivacy(this.manifest.gateway) ?? { mode: 'off', q: 0, dither: false, holdBeforeResponse: false };
+  }
+
+  async applyTimingHold(startedAt, beforeResponse) {
+    const p = this.timingPrivacy;
+    if (!p || p.q < 1) return;
+    if (Boolean(beforeResponse) !== Boolean(p.holdBeforeResponse)) return;
+    const wait = holdMs(startedAt, Date.now(), p.q, Math.random, p);
+    if (wait > 0) { try { await sleep(wait); } catch {} }
+  }
+
+  beforeClientWrite(startedAt) {
+    return () => this.applyTimingHold(startedAt, true);
   }
 
   /** Static manifest allow_peers plus any injected at launch (e.g. by the adb harness). */
@@ -313,7 +344,7 @@ export class Gateway {
   bindAddress(host) {
     const requested = host ?? this.manifest.gateway.host ?? '127.0.0.1';
     const loopback = requested === '127.0.0.1' || requested === 'localhost' || requested === '::1';
-    const bindAll = requested === '0.0.0.0' || requested === '::';
+    const bindAll = requested === '0.0.0.0' || requested === '::' || requested === '::0' || requested === '';
     const allowPeers = this.manifest.gateway.allow_peers ?? [];
     if (!loopback) {
       // Binding to a specific LAN address is allowed when an explicit peer
@@ -338,52 +369,76 @@ export class Gateway {
       if (!response.writableFinished) abort.abort();
     });
     request.abortSignal = abort.signal;
-    if (request.method === 'OPTIONS') {
-      response.writeHead(204, cors);
-      return response.end();
-    }
     const url = new URL(request.url, 'http://127.0.0.1');
+    const method = String(request.method ?? 'GET').toUpperCase();
     try {
       const remote = request.socket?.remoteAddress;
       if (!peerAllowed(remote, this.effectivePeers())) {
         return jsonResponse(response, 403, { error: { message: 'Peer not allowed', type: 'forbidden_peer' } }, cors);
+      }
+      if (method === 'OPTIONS') {
+        response.writeHead(204, cors);
+        return response.end();
+      }
+      if (method === 'GET' || method === 'HEAD') {
+        const cl = request.headers['content-length'];
+        const te = request.headers['transfer-encoding'];
+        if ((cl != null && String(cl) !== '' && String(cl) !== '0') || te) {
+          throw new ValidationError('GET-family requests must not include a body');
+        }
       }
       const identity = identityFrom(request, this.apiKey);
       if (!identity) return jsonResponse(response, 401, { error: { message: 'Unauthorized', type: 'auth_error' } }, cors);
       if (!EXPLICIT_ROUTES.has(url.pathname) && !url.pathname.endsWith('/route')) {
         return jsonResponse(response, 404, { error: { message: 'Not found', type: 'not_found' } }, cors);
       }
-      if (url.pathname === '/health' || url.pathname === '/v1/health') {
-        return jsonResponse(response, 200, this.health(), cors);
+      const headJson = (status, body) => {
+        if (method === 'HEAD') {
+          response.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'content-length': 0, ...cors });
+          return response.end();
+        }
+        return jsonResponse(response, status, body, cors);
+      };
+      if (GET_ONLY.has(url.pathname)) {
+        if (method !== 'GET' && method !== 'HEAD') {
+          return jsonResponse(response, 405, { error: { message: 'Method not allowed' } }, { allow: 'GET, HEAD, OPTIONS', ...cors });
+        }
+        if (url.pathname === '/health' || url.pathname === '/v1/health') {
+          return headJson(200, this.health());
+        }
+        if (url.pathname === '/v1/monitor/recent') {
+          return headJson(200, {
+            object: 'list',
+            data: this.mailbox.recent().map(publicEvent),
+            stats: this.mailbox.stats(),
+            ipc: { data: this.ipc.recent().map(publicEvent), stats: this.ipc.stats() },
+          });
+        }
+        if (url.pathname === '/v1/models') {
+          return headJson(200, { object: 'list', data: this.registry.listModels() });
+        }
+        if (url.pathname === '/props') {
+          return headJson(200, {
+            product: 'Green-Roomz',
+            policy: this.policy.policy,
+            capability_reporting: {
+              native_capabilities: 'declared',
+              callable_capabilities: 'runtime_checked',
+              ready_capabilities: 'loaded_now',
+            },
+            models: this.registry.listModels(),
+          });
+        }
+        if (url.pathname === '/metrics') {
+          if (this.apiKey && identity !== 'authenticated') return headJson(401, { error: { message: 'Unauthorized' } });
+          return headJson(200, this.metrics());
+        }
       }
-      if (url.pathname === '/v1/monitor/recent') {
-        return jsonResponse(response, 200, {
-          object: 'list',
-          data: this.mailbox.recent(),
-          stats: this.mailbox.stats(),
-          ipc: { data: this.ipc.recent(), stats: this.ipc.stats() },
-        }, cors);
+      if (method !== 'POST') return jsonResponse(response, 405, { error: { message: 'Method not allowed' } }, { allow: 'POST', ...cors });
+      const ct = String(request.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase();
+      if (ct !== 'application/json') {
+        throw new ValidationError('Content-Type must be application/json');
       }
-      if (url.pathname === '/v1/models') {
-        return jsonResponse(response, 200, { object: 'list', data: this.registry.listModels() }, cors);
-      }
-      if (url.pathname === '/props') {
-        return jsonResponse(response, 200, {
-          product: 'Green-Roomz',
-          policy: this.policy.policy,
-          capability_reporting: {
-            native_capabilities: 'declared',
-            callable_capabilities: 'runtime_checked',
-            ready_capabilities: 'loaded_now',
-          },
-          models: this.registry.listModels(),
-        }, cors);
-      }
-      if (url.pathname === '/metrics') {
-        if (this.apiKey && identity !== 'authenticated') return jsonResponse(response, 401, { error: { message: 'Unauthorized' } }, cors);
-        return jsonResponse(response, 200, this.metrics(), cors);
-      }
-      if (request.method !== 'POST') return jsonResponse(response, 405, { error: { message: 'Method not allowed' } }, { allow: 'POST', ...cors });
       const raw = await readBody(request, this.manifest.gateway.request_body_limit_bytes ?? 16 * 1024 * 1024);
       let body = {};
       if (raw.length) {
@@ -396,6 +451,9 @@ export class Gateway {
       if (body == null || typeof body !== 'object' || Array.isArray(body)) {
         throw new ValidationError('Request body must be a JSON object');
       }
+      if (body.messages != null && !Array.isArray(body.messages)) {
+        throw new ValidationError('messages must be an array');
+      }
       if (url.pathname === '/v1/embeddings') body.model = body.model ?? 'semantic-embedding-agent';
       if (url.pathname === '/v1/rerank') body.model = body.model ?? 'retrieval-rerank-agent';
       return await this.handleInference(request, response, body, identity, cors, url.pathname);
@@ -404,24 +462,35 @@ export class Gateway {
       const retryAfter = (error instanceof UnavailableError || error instanceof UpstreamTimeoutError)
         ? { 'retry-after': '2' }
         : {};
+      const extraHeaders = (error && typeof error === 'object' && error.headers && typeof error.headers === 'object')
+        ? error.headers
+        : {};
       return jsonResponse(response, status, {
         error: {
           message: redact(error.message),
           type: error.code ?? 'internal_error',
           details: error.details,
         },
-      }, { ...cors, ...retryAfter });
+      }, { ...cors, ...retryAfter, ...extraHeaders });
     }
   }
 
   health() {
     const models = this.registry.listModels();
-    const unavailable = models.filter((model) => model.availability === 'unavailable');
+    const need = Array.isArray(this.manifest.gateway.health_aliases)
+      ? this.manifest.gateway.health_aliases
+      : [];
+    const down = need.filter((alias) => {
+      const row = models.find((model) => model.id === alias);
+      return !row || row.availability === 'unavailable';
+    });
     return {
-      status: unavailable.length ? 'degraded' : 'ok',
+      status: down.length ? 'degraded' : 'ok',
       product: 'Green-Roomz',
       uptime_ms: Date.now() - this.startedAt,
       policy: this.policy.policy,
+      health_aliases: need,
+      unavailable_required: down,
       agents: models,
       mailbox: this.mailbox.stats(),
       ipc: this.ipc.stats(),
@@ -446,17 +515,14 @@ export class Gateway {
   }
 
   observeHop(kind, source, extra = {}) {
-    try {
-      this.mailbox.push({
-        kind,
-        source: source ?? '',
-        ticket: extra.ticket ?? '',
-        payload: extra.payload ?? {},
-      });
-    } catch {}
-    try {
-      this.ipc.observeHop(kind, source, extra);
-    } catch {}
+    const posted = this.ipc.observeHop(kind, source, extra);
+    if (!posted || posted.ok !== true) return posted;
+    this.mailbox.push({
+      kind,
+      source: source ?? '',
+      ticket: extra.ticket ?? '',
+      payload: extra.payload ?? {},
+    });
     try {
       const emitted = this.logger.emit({
         kind: kind || 'hop',
@@ -466,6 +532,7 @@ export class Gateway {
       }, { callerRole: 'ipc' });
       if (emitted && typeof emitted.catch === 'function') emitted.catch(() => {});
     } catch {}
+    return posted;
   }
 
   handleMonitorSnapshot(request, response, body, identity, session, cors) {
@@ -488,6 +555,7 @@ export class Gateway {
   }
 
   async completeOnResident(request, response, body, issuedSession, cors, hops, reason) {
+    const startedAt = Date.now();
     const alias = NEXUS_ALIAS;
     const availability = this.registry.status(alias);
     if (!this.registry.agents.has(alias) || availability.state === 'unavailable') {
@@ -497,30 +565,48 @@ export class Gateway {
     const agent = this.registry.get(alias);
     hops.push(alias);
     await this.processes.ensure(agent, { signal: request.abortSignal });
-    const payload = { ...prepareInferenceBody(body, agent), stream: false };
-    const path = '/v1/chat/completions';
-    const target = `http://127.0.0.1:${agent.port}${path}`;
-    this.observeHop('success', alias, { ticket: issuedSession, payload: { reason, hops: hops.slice() } });
-    this.sessions.setAgentAlias(issuedSession, alias);
-    const headers = this.routeHeaders(
-      issuedSession,
-      { requestedAlias: body.model ?? null, effectiveAlias: alias, reason },
-      cors,
-      { hops: hops.join(',') },
-    );
-    for (const [key, value] of Object.entries(headers)) response.setHeader(key, value);
-    return proxyJson({
-      request,
-      response,
-      body: payload,
-      target,
-      config: this.manifest.gateway,
-      signal: request.abortSignal,
-      fetchImpl: this.fetchImpl,
-    });
+    const unpin = this.processes.pin(alias);
+    try {
+      // Honor client stream preference. Forcing stream:false here collapsed
+      // OpenAI-compatible SSE on windows-mvp resident_fallback (tool-router)
+      // into a one-shot application/json chat.completion (parity battery case E).
+      const payload = prepareInferenceBody(body, agent);
+      if (reason === 'resident_fallback') {
+        const n = Number(payload.max_tokens);
+        if (!Number.isFinite(n) || n > NEXUS_MAX_TOKENS) payload.max_tokens = NEXUS_MAX_TOKENS;
+      }
+      const path = '/v1/chat/completions';
+      const target = `http://127.0.0.1:${agent.port}${path}`;
+      this.sessions.setAgentAlias(issuedSession, alias);
+      const headers = this.routeHeaders(
+        issuedSession,
+        { requestedAlias: body.model ?? null, effectiveAlias: alias, reason },
+        cors,
+        { hops: hops.join(',') },
+      );
+      for (const [key, value] of Object.entries(headers)) response.setHeader(key, value);
+      const proxied = await proxyJson({
+        request,
+        response,
+        body: payload,
+        target,
+        config: this.manifest.gateway,
+        signal: request.abortSignal,
+        fetchImpl: this.fetchImpl,
+        beforeClientWrite: this.beforeClientWrite(startedAt),
+      });
+      const okHop = Number(proxied?.status) >= 200 && Number(proxied?.status) < 400;
+      this.observeHop(okHop ? 'success' : 'agent_unavailable', alias, { ticket: issuedSession, payload: { reason, hops: hops.slice() } });
+    } catch (error) {
+      this.observeHop('agent_unavailable', alias, { ticket: issuedSession, payload: { reason: 'upstream_failed', hops: hops.slice() } });
+      throw error;
+    } finally {
+      unpin();
+    }
   }
 
   async completeNativeChat(request, response, body, issuedSession, cors, hops, alias, native, reason) {
+    const startedAt = Date.now();
     const availability = this.registry.status(alias);
     if (!this.registry.agents.has(alias) || availability.state === 'unavailable') {
       throw new UnavailableError(`${alias} is unavailable`, availability.missing);
@@ -553,6 +639,7 @@ export class Gateway {
     this.observeHop('success', alias, { ticket: issuedSession, payload: { reason, hops: hops.slice() } });
     this.sessions.setAgentAlias(issuedSession, alias);
     const wrapped = wrapNativeAsChat(alias, parsed, native.kind);
+    await this.applyTimingHold(startedAt, true);
     return jsonResponse(
       response,
       upstream.status >= 400 ? upstream.status : 200,
@@ -615,6 +702,9 @@ export class Gateway {
    * the consensus + which variant was the outlier, and append a scorecard row.
    */
   async handleCouncil(request, response, body, identity, session, cors, pathname, spec) {
+    const startedAt = Date.now();
+    const release = await this.policy.acquire(request.abortSignal);
+    try {
     const issuedSession = session?.id ?? this.sessions.create({ identity, agentAlias: spec.aliases[0], modality: detectModalities(body) });
     const stripped = stripSlashCommand(body);
     const path = String((pathname ?? request.url.split('?')[0])).replace(/\/route$/, '') || '/v1/chat/completions';
@@ -625,23 +715,29 @@ export class Gateway {
         const agent = this.registry.get(alias);
         if (!agent || this.registry.status(alias).state === 'unavailable') return { alias, ok: false, content: '', status: 503, ms: Date.now() - t0 };
         await this.processes.ensure(agent, { signal: request.abortSignal });
-        const payload = { ...prepareInferenceBody(stripped, agent), stream: false };
-        const res = await this.fetchImpl(`http://127.0.0.1:${agent.port}${path}`, {
-          method: 'POST', headers: { 'content-type': 'application/json', connection: 'close' },
-          body: JSON.stringify(payload), signal: deadlineSignal(request.abortSignal, this.manifest.gateway.upstream_timeout_ms ?? UPSTREAM_TIMEOUT_MS),
-        });
-        const raw = await readCappedText(res, this.manifest.gateway.upstream_max_buffer_bytes ?? UPSTREAM_MAX_BUFFER_BYTES);
-        let content = '';
-        try { content = JSON.parse(raw)?.choices?.[0]?.message?.content ?? ''; } catch { content = raw; }
-        return { alias, ok: res.status < 400 && content.length > 0, content: String(content), status: res.status, ms: Date.now() - t0 };
+        const unpin = this.processes.pin(alias);
+        try {
+          const payload = { ...prepareInferenceBody(stripped, agent), stream: false };
+          const res = await this.fetchImpl(`http://127.0.0.1:${agent.port}${path}`, {
+            method: 'POST', headers: { 'content-type': 'application/json', connection: 'close' },
+            body: JSON.stringify(payload), signal: deadlineSignal(request.abortSignal, this.manifest.gateway.upstream_timeout_ms ?? UPSTREAM_TIMEOUT_MS),
+          });
+          const raw = await readCappedText(res, this.manifest.gateway.upstream_max_buffer_bytes ?? UPSTREAM_MAX_BUFFER_BYTES);
+          let content = '';
+          try { content = JSON.parse(raw)?.choices?.[0]?.message?.content ?? ''; } catch { content = raw; }
+          return { alias, ok: res.status < 400 && content.length > 0, content: String(content), status: res.status, ms: Date.now() - t0 };
+        } finally {
+          unpin();
+        }
       } catch (error) {
         return { alias, ok: false, content: '', status: 0, error: String(error?.message ?? error), ms: Date.now() - t0 };
       }
     };
 
-    // Parallel only if every variant can admit without eviction; else serial
-    // (each run evicts the previous - slow, but the memory-tight path).
-    const canParallel = spec.parallel ?? spec.aliases.every((a) => aliasCanAdmit(this.registry, a, this.processes) && this.registry.status(a).state === 'ready');
+    // Parallel only if every variant can admit without eviction and the
+    // specialist set fits under maxWarmSpecialists; else serial.
+    const requestedParallel = spec.parallel === true;
+    const canParallel = this.processes.canParallelCouncil(spec.aliases, requestedParallel);
     const candidates = canParallel
       ? await Promise.all(spec.aliases.map(runOne))
       : await spec.aliases.reduce(async (acc, a) => [...(await acc), await runOne(a)], Promise.resolve([]));
@@ -658,6 +754,7 @@ export class Gateway {
 
     const headers = this.routeHeaders(issuedSession, { requestedAlias: body.model ?? null, effectiveAlias: winnerAlias, reason: `council_${spec.judge}` }, cors, { hops: spec.aliases.join(',') });
     headers['x-green-roomz-council'] = headerSafe(JSON.stringify({ judge: spec.judge, winner: winnerAlias, outlier: verdict.outlier, agreement: verdict.agreement }));
+    await this.applyTimingHold(startedAt, true);
     return jsonResponse(response, usable.length ? 200 : 502, {
       id: `grz-council-${issuedSession}`,
       object: 'chat.completion',
@@ -673,6 +770,10 @@ export class Gateway {
         ...(spec.judge === 'field-vote' ? { votes: verdict.votes, abstained: verdict.abstained } : {}),
       },
     }, headers);
+    } finally {
+      release();
+      await this.applyTimingHold(startedAt, false);
+    }
   }
 
   /**
@@ -920,22 +1021,35 @@ export class Gateway {
     if (session?.id) this.sessions.setAgentAlias(issuedSession, alias);
     const headers = this.routeHeaders(issuedSession, { requestedAlias: body.model, effectiveAlias: alias, reason: 'requested_alias' }, cors, { hops: alias });
     for (const [key, value] of Object.entries(headers)) response.setHeader(key, value);
+    const startedAt = Date.now();
     const release = await this.policy.acquire(request.abortSignal);
     try {
       await this.processes.ensure(agent, { signal: request.abortSignal });
-      const payload = prepareInferenceBody(body, agent);
-      const path = String(request.url.split('?')[0]).replace(/\/route$/, '') || '/v1/chat/completions';
-      await proxyJson({
-        request,
-        response,
-        body: payload,
-        target: `http://127.0.0.1:${agent.port}${path}`,
-        config: this.manifest.gateway,
-        signal: request.abortSignal,
-        fetchImpl: this.fetchImpl,
-      });
+      const unpin = this.processes.pin(alias);
+      try {
+        const payload = prepareInferenceBody(body, agent);
+        const path = String(request.url.split('?')[0]).replace(/\/route$/, '') || '/v1/chat/completions';
+        const proxied = await proxyJson({
+          request,
+          response,
+          body: payload,
+          target: `http://127.0.0.1:${agent.port}${path}`,
+          config: this.manifest.gateway,
+          signal: request.abortSignal,
+          fetchImpl: this.fetchImpl,
+          beforeClientWrite: this.beforeClientWrite(startedAt),
+        });
+        const okHop = Number(proxied?.status) >= 200 && Number(proxied?.status) < 400;
+        this.observeHop(okHop ? 'success' : 'agent_unavailable', alias, { ticket: issuedSession, payload: { reason: 'requested_alias', hops: [alias] } });
+      } catch (error) {
+        this.observeHop('agent_unavailable', alias, { ticket: issuedSession, payload: { reason: 'upstream_failed', hops: [alias] } });
+        throw error;
+      } finally {
+        unpin();
+      }
     } finally {
       release();
+      await this.applyTimingHold(startedAt, false);
     }
   }
 
@@ -958,6 +1072,7 @@ export class Gateway {
       { hops: hops.join(',') },
     );
 
+    const startedAt = Date.now();
     const release = await this.policy.acquire(request.abortSignal);
     try {
       if (hard.effectiveAlias === NEXUS_ALIAS) {
@@ -978,21 +1093,39 @@ export class Gateway {
             hops.push(alias);
             notes.push(stripControls(`${alias} unavailable (impractical or missing)`));
             this.observeHop('agent_unavailable', alias, { ticket: issuedSession, payload: { reason: hard.reason } });
+            // Slash/lock native (image/embed/rerank/whisper/tts) cannot fall through
+            // to the resident 0.5B; /code impractical still continues to text fallback.
+            if (NATIVE_CHAT[alias] || alias === 'speech-synthesis-agent') {
+              const availability = this.registry.status(alias);
+              const err = new UnavailableError(`${alias} is unavailable`, availability.missing);
+              err.headers = hopHeaders(alias, hard.reason);
+              throw err;
+            }
             continue;
           }
         } else {
-          const picked = await consultNexus({
-            processes: this.processes,
-            registry: this.registry,
-            fetchImpl: this.fetchImpl,
-            body: stripSlashCommand(body),
-            visited,
-            notes,
-            signal: request.abortSignal,
-            ...turnSettings,
-          });
-          alias = picked.route;
-          reason = picked.reason ?? 'nexus';
+          const stripped = stripSlashCommand(body);
+          const chatDefault = isGenericChatRequest(body)
+            && planRoute(stripped)?.route === FALLBACK_ALIAS
+            && isRoutableAlias(this.registry, FALLBACK_ALIAS)
+            && aliasCanAdmit(this.registry, FALLBACK_ALIAS, this.processes);
+          if (chatDefault) {
+            alias = FALLBACK_ALIAS;
+            reason = 'chat_default';
+          } else {
+            const picked = await consultNexus({
+              processes: this.processes,
+              registry: this.registry,
+              fetchImpl: this.fetchImpl,
+              body: stripped,
+              visited,
+              notes,
+              signal: request.abortSignal,
+              ...turnSettings,
+            });
+            alias = picked.route;
+            reason = picked.reason ?? 'nexus';
+          }
         }
 
         if (!alias || visited.has(alias) || alias === NEXUS_ALIAS) break;
@@ -1069,36 +1202,100 @@ export class Gateway {
         const payload = prepareInferenceBody(body, agent);
         const path = String((pathname ?? request.url.split('?')[0])).replace(/\/route$/, '') || '/v1/chat/completions';
         const target = `http://127.0.0.1:${agent.port}${path}`;
+        if (reason === 'chat_default') {
+          const unpinChat = this.processes.pin(alias);
+          try {
+            this.sessions.setAgentAlias(issuedSession, alias);
+            const headers = hopHeaders(alias, reason);
+            for (const [key, value] of Object.entries(headers)) response.setHeader(key, value);
+            const proxied = await proxyJson({
+              request,
+              response,
+              body: payload,
+              target,
+              config: this.manifest.gateway,
+              signal: request.abortSignal,
+              fetchImpl: this.fetchImpl,
+              beforeClientWrite: this.beforeClientWrite(startedAt),
+            });
+            const okHop = Number(proxied?.status) >= 200 && Number(proxied?.status) < 400;
+            this.observeHop(okHop ? 'success' : 'agent_unavailable', alias, { ticket: issuedSession, payload: { reason, hops: hops.slice() } });
+            return;
+          } finally {
+            unpinChat();
+          }
+        }
         peekedSpecialist = true;
-        const peek = await peekSpecialist({
-          fetchImpl: this.fetchImpl,
-          request,
-          target,
-          body: payload,
-          signal: request.abortSignal,
-        });
+        const unpin = this.processes.pin(alias);
+        try {
+          const peek = await peekSpecialist({
+            fetchImpl: this.fetchImpl,
+            request,
+            target,
+            body: payload,
+            signal: request.abortSignal,
+            peekChars: this.manifest.gateway.handoff_peek_chars ?? HANDOFF_PEEK_CHARS,
+            peekTimeoutMs: this.manifest.gateway.handoff_peek_timeout_ms ?? HANDOFF_PEEK_TIMEOUT_MS,
+          });
 
-        if (peek.degraded === 'peek_timeout' && !peek.handoff) {
-          visited.add(alias);
-          hops.push(alias);
-          notes.push(stripControls(`${alias} did not emit within the peek window`));
-          this.observeHop('agent_unavailable', alias, { ticket: issuedSession, payload: { reason: 'peek_timeout' } });
-          continue;
+          if (peek.degraded === 'peek_timeout' && !peek.handoff) {
+            if (alias === FALLBACK_ALIAS) {
+              // Peek aborted the SSE. Finish on Instruct (capped) instead of
+              // resident_fallback ramble on the router.
+              this.sessions.setAgentAlias(issuedSession, alias);
+              const headers = hopHeaders(alias, reason);
+              for (const [key, value] of Object.entries(headers)) response.setHeader(key, value);
+              if (peek.content || peek.events?.length) {
+                await deliverPeek({ peek, request, response, body: payload, headers, beforeClientWrite: this.beforeClientWrite(startedAt) });
+                this.observeHop('success', alias, { ticket: issuedSession, payload: { reason: 'peek_timeout_keep', hops: hops.slice() } });
+                return;
+              }
+              const retryPayload = { ...payload, stream: false };
+              const n = Number(retryPayload.max_tokens);
+              if (!Number.isFinite(n) || n > NEXUS_MAX_TOKENS) retryPayload.max_tokens = NEXUS_MAX_TOKENS;
+              const proxied = await proxyJson({
+                request,
+                response,
+                body: retryPayload,
+                target,
+                config: this.manifest.gateway,
+                signal: request.abortSignal,
+                fetchImpl: this.fetchImpl,
+                beforeClientWrite: this.beforeClientWrite(startedAt),
+              });
+              const okHop = Number(proxied?.status) >= 200 && Number(proxied?.status) < 400;
+              this.observeHop(okHop ? 'success' : 'agent_unavailable', alias, { ticket: issuedSession, payload: { reason: 'peek_timeout_retry', hops: hops.slice() } });
+              return;
+            }
+            visited.add(alias);
+            notes.push(stripControls(`${alias} did not emit within the peek window`));
+            this.observeHop('agent_unavailable', alias, { ticket: issuedSession, payload: { reason: 'peek_timeout' } });
+            await this.processes.waitSlotIdle?.(agent.port);
+            continue;
+          }
+
+          if (Number(peek.status) >= 400) {
+            this.observeHop('agent_unavailable', alias, { ticket: issuedSession, payload: { reason: 'upstream_failed', hops: hops.slice() } });
+            const errBody = peek.error && typeof peek.error === 'object' ? peek.error : { error: { message: 'upstream error', type: 'upstream_error' } };
+            return jsonResponse(response, peek.status, errBody, hopHeaders(alias, reason));
+          }
+
+          if (peek.handoff) {
+            const suggest = peek.handoff.suggest && peek.handoff.suggest !== 'null' ? peek.handoff.suggest : null;
+            notes.push(stripControls(peek.handoff.reason ?? 'handoff'));
+            if (suggest && suggest !== NEXUS_ALIAS && isRoutableAlias(this.registry, suggest)) notes.push(stripControls(`specialist suggested ${suggest}`));
+            continue;
+          }
+
+          this.sessions.setAgentAlias(issuedSession, alias);
+          const headers = hopHeaders(alias, reason);
+          for (const [key, value] of Object.entries(headers)) response.setHeader(key, value);
+          await deliverPeek({ peek, request, response, body: payload, headers, beforeClientWrite: this.beforeClientWrite(startedAt) });
+          this.observeHop('success', alias, { ticket: issuedSession, payload: { reason, hops: hops.slice() } });
+          return;
+        } finally {
+          unpin();
         }
-
-        if (peek.handoff) {
-          const suggest = peek.handoff.suggest && peek.handoff.suggest !== 'null' ? peek.handoff.suggest : null;
-          notes.push(stripControls(peek.handoff.reason ?? 'handoff'));
-          if (suggest && suggest !== NEXUS_ALIAS && isRoutableAlias(this.registry, suggest)) notes.push(stripControls(`specialist suggested ${suggest}`));
-          continue;
-        }
-
-        this.observeHop('success', alias, { ticket: issuedSession, payload: { reason, hops: hops.slice() } });
-        if (session?.id) this.sessions.setAgentAlias(issuedSession, alias);
-        else this.sessions.setAgentAlias(issuedSession, alias);
-        const headers = hopHeaders(alias, reason);
-        for (const [key, value] of Object.entries(headers)) response.setHeader(key, value);
-        return deliverPeek({ peek, request, response, body: payload, headers });
       }
 
       // A request carrying an image or audio part must NOT fall back to the
@@ -1120,13 +1317,23 @@ export class Gateway {
           hops.push(FALLBACK_ALIAS);
           const agent = this.registry.get(FALLBACK_ALIAS);
           await this.processes.ensure(agent, { signal: request.abortSignal });
-          const payload = prepareInferenceBody(body, agent);
-          const path = String((pathname ?? request.url.split('?')[0])).replace(/\/route$/, '') || '/v1/chat/completions';
-          this.observeHop('success', FALLBACK_ALIAS, { ticket: issuedSession, payload: { reason: 'text_fallback', hops: hops.slice() } });
-          this.sessions.setAgentAlias(issuedSession, FALLBACK_ALIAS);
-          const headers = hopHeaders(FALLBACK_ALIAS, 'text_fallback');
-          for (const [key, value] of Object.entries(headers)) response.setHeader(key, value);
-          return await proxyJson({ request, response, body: payload, target: `http://127.0.0.1:${agent.port}${path}`, config: this.manifest.gateway, signal: request.abortSignal, fetchImpl: this.fetchImpl });
+          const unpin = this.processes.pin(FALLBACK_ALIAS);
+          try {
+            const payload = prepareInferenceBody(body, agent);
+            const path = String((pathname ?? request.url.split('?')[0])).replace(/\/route$/, '') || '/v1/chat/completions';
+            this.sessions.setAgentAlias(issuedSession, FALLBACK_ALIAS);
+            const headers = hopHeaders(FALLBACK_ALIAS, 'text_fallback');
+            for (const [key, value] of Object.entries(headers)) response.setHeader(key, value);
+            const proxied = await proxyJson({ request, response, body: payload, target: `http://127.0.0.1:${agent.port}${path}`, config: this.manifest.gateway, signal: request.abortSignal, fetchImpl: this.fetchImpl, beforeClientWrite: this.beforeClientWrite(startedAt) });
+            const okHop = Number(proxied?.status) >= 200 && Number(proxied?.status) < 400;
+            this.observeHop(okHop ? 'success' : 'agent_unavailable', FALLBACK_ALIAS, { ticket: issuedSession, payload: { reason: 'text_fallback', hops: hops.slice() } });
+            return;
+          } catch (error) {
+            this.observeHop('agent_unavailable', FALLBACK_ALIAS, { ticket: issuedSession, payload: { reason: 'text_fallback_failed', hops: hops.slice() } });
+            throw error;
+          } finally {
+            unpin();
+          }
         } catch (error) {
           if (response.writableEnded || response.headersSent) throw error;
           notes.push(stripControls(`text fallback failed: ${error?.message ?? error}`));
@@ -1138,6 +1345,7 @@ export class Gateway {
         return await this.completeOnResident(request, response, body, issuedSession, cors, hops, 'resident_fallback');
       }
       this.observeHop('route_exhausted', hops[hops.length - 1] ?? '', { ticket: issuedSession, payload: { hops: hops.slice(), visited: [...visited] } });
+      await this.applyTimingHold(startedAt, true);
       return jsonResponse(response, 422, {
         error: {
           type: 'route_exhausted',
@@ -1147,6 +1355,7 @@ export class Gateway {
       }, hopHeaders(null, 'route_exhausted'));
     } finally {
       release();
+      await this.applyTimingHold(startedAt, false);
     }
   }
 
@@ -1172,8 +1381,8 @@ export class Gateway {
       if (socket.writable) socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n');
       else socket.destroy();
     });
-    server.headersTimeout = this.manifest.gateway.headers_timeout_ms ?? 30_000;
-    server.requestTimeout = this.manifest.gateway.request_timeout_ms ?? 0;
+    server.headersTimeout = this.manifest.gateway.headers_timeout_ms ?? this.manifest.gateway.request_timeout_ms ?? 30_000;
+    server.requestTimeout = this.manifest.gateway.request_timeout_ms;
     return new Promise((resolve, reject) => {
       server.once('error', reject);
       server.listen(listenPort, address, () => resolve(server));

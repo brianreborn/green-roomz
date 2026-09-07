@@ -19,7 +19,7 @@ export const POLICIES = Object.freeze({
 });
 
 export const TRANSLATION_ALIAS = 'translation-agent';
-export const DEFAULT_MANIFEST = new URL('../config/agents.windows.json', import.meta.url);
+export const DEFAULT_MANIFEST = new URL('../config/agents.windows-mvp.json', import.meta.url);
 
 export const NEXUS_ALIAS = 'tool-router-agent';
 /** High-level role of green-roomz / green-agentz agency: switch specialist registers. */
@@ -86,6 +86,17 @@ export const ORCHESTRATOR_BOUNDED_KEYS = Object.freeze([
   'session_limit',
   'cors_origins',
   'allow_peers',
+  'timing_privacy',
+  'timing_privacy_quantum_ms',
+  'timing_privacy_dither',
+  'admit_when_tight',
+  'apply_store_winners',
+  'nexus_consult_timeout_ms',
+  'handoff_peek_timeout_ms',
+  'handoff_peek_chars',
+  'agent_chat_timeout_ms',
+  'agent_max_tokens',
+  'health_aliases',
 ]);
 
 export const SYSADMIN_SCHEMA_ENV = 'GREEN_ROOMZ_SYSADMIN_SCHEMA';

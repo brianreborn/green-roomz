@@ -1,0 +1,129 @@
+{
+  "schema": "green-roomz.agent-e2e.v1",
+  "title": "End-to-end coding tasks (write / run / test / languages)",
+  "notes": [
+    "Not SWE-bench. Frozen coding tasks the jail can actually execute on qodesh (Node, Python, PowerShell).",
+    "Default runner is SMOKE + FAIL-FAST + OFFLINE (seconds). Halt on first FAIL. Health 'degraded' is expected (do not halt); gateway DOWN is a halt. --full is the long set. --live is one gateway hit (liveSmoke), not 16×270s.",
+    "smoke cases are orthogonal failure modes: print loop, python TDD, CLI argv, missing toolchain.",
+    "Go/Rust/C missing is an expected 127, not a skip-as-pass."
+  ],
+  "cases": [
+    {
+      "id": "E1",
+      "kind": "print",
+      "smoke": true,
+      "liveSmoke": true,
+      "lang": "node",
+      "goal": "create a file that prints hello-grz and run it",
+      "expect": { "ok": true, "stdoutRegex": "hello-grz", "files": ["hello.mjs"] }
+    },
+    {
+      "id": "E2",
+      "kind": "print",
+      "lang": "python",
+      "goal": "write python that prints hello-grz and run it",
+      "expect": { "ok": true, "stdoutRegex": "hello-grz", "files": ["hello.py"] }
+    },
+    {
+      "id": "E3",
+      "kind": "print",
+      "lang": "powershell",
+      "goal": "powershell script that prints hello-grz and run it",
+      "expect": { "ok": true, "stdoutRegex": "hello-grz", "files": ["hello.ps1"] }
+    },
+    {
+      "id": "E4",
+      "kind": "tdd",
+      "smoke": true,
+      "lang": "python",
+      "goal": "write a python function add(a,b) with a test that checks 2+3=5 and run the test",
+      "expect": { "ok": true, "stdoutRegex": "ok", "files": ["add.py", "test_add.py"] }
+    },
+    {
+      "id": "E5",
+      "kind": "tdd",
+      "lang": "node",
+      "goal": "write a node fizzbuzz function with a test",
+      "expect": { "ok": true, "stdoutRegex": "ok", "files": ["fizzbuzz.mjs", "fizzbuzz.test.mjs"] }
+    },
+    {
+      "id": "E6",
+      "kind": "tdd",
+      "lang": "python",
+      "goal": "write python factorial with a test and run it",
+      "expect": { "ok": true, "stdoutRegex": "ok", "files": ["factorial.py", "test_factorial.py"] }
+    },
+    {
+      "id": "E7",
+      "kind": "tdd",
+      "lang": "node",
+      "goal": "write a node palindrome function with a test",
+      "expect": { "ok": true, "stdoutRegex": "ok", "files": ["palindrome.mjs", "palindrome.test.mjs"] }
+    },
+    {
+      "id": "E8",
+      "kind": "tdd",
+      "lang": "python",
+      "goal": "write a python reverse function with a test",
+      "expect": { "ok": true, "stdoutRegex": "ok", "files": ["reverse.py", "test_reverse.py"] }
+    },
+    {
+      "id": "E9",
+      "kind": "tdd",
+      "lang": "node",
+      "goal": "write a node unique function with a test",
+      "expect": { "ok": true, "stdoutRegex": "ok", "files": ["unique.mjs", "unique.test.mjs"] }
+    },
+    {
+      "id": "E10",
+      "kind": "tdd",
+      "lang": "python",
+      "goal": "write a python wordcount function with a test",
+      "expect": { "ok": true, "stdoutRegex": "ok", "files": ["wordcount.py", "test_wordcount.py"] }
+    },
+    {
+      "id": "E11",
+      "kind": "tdd",
+      "lang": "node",
+      "goal": "write a node fibonacci function with a test",
+      "expect": { "ok": true, "stdoutRegex": "ok", "files": ["fibonacci.mjs", "fibonacci.test.mjs"] }
+    },
+    {
+      "id": "E12",
+      "kind": "tdd",
+      "lang": "python",
+      "goal": "write a python gcd function with a test",
+      "expect": { "ok": true, "stdoutRegex": "ok", "files": ["gcd.py", "test_gcd.py"] }
+    },
+    {
+      "id": "E13",
+      "kind": "tdd",
+      "lang": "node",
+      "goal": "write a node iseven function with a test",
+      "expect": { "ok": true, "stdoutRegex": "ok", "files": ["iseven.mjs", "iseven.test.mjs"] }
+    },
+    {
+      "id": "E14",
+      "kind": "tdd",
+      "lang": "python",
+      "goal": "write python jsonpick that parses a json key with a test",
+      "expect": { "ok": true, "stdoutRegex": "ok", "files": ["jsonpick.py", "test_jsonpick.py"] }
+    },
+    {
+      "id": "E15",
+      "kind": "cli",
+      "smoke": true,
+      "lang": "python",
+      "goal": "write a python cli that add two numbers from argv and run it",
+      "expect": { "ok": true, "stdoutRegex": "^\\s*5\\s*$", "files": ["add.py"] }
+    },
+    {
+      "id": "E16",
+      "kind": "missing-toolchain",
+      "smoke": true,
+      "lang": "go",
+      "goal": "go program that prints hello-grz and run it",
+      "expect": { "ok": false, "code": 127, "stderrRegex": "no runtime for \\.go" }
+    }
+  ]
+}

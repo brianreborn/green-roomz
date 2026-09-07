@@ -13,7 +13,20 @@
     "retry_deadline_ms": 180000,
     "session_ttl_ms": 3600000,
     "session_limit": 64,
-    "cors_origins": ["http://localhost", "http://127.0.0.1"]
+    "cors_origins": ["http://localhost", "http://127.0.0.1"],
+    "timing_privacy": "off",
+    "max_warm_specialists": 1,
+    "idle_evict_ms": 120000,
+    "upstream_timeout_ms": 180000,
+    "request_timeout_ms": 180000,
+    "agent_chat_timeout_ms": 90000,
+    "agent_max_tokens": 96,
+    "nexus_consult_timeout_ms": 12000,
+    "handoff_peek_timeout_ms": 8000,
+    "handoff_peek_chars": 48,
+    "admit_when_tight": "refuse",
+    "apply_store_winners": false,
+    "health_aliases": ["tool-router-agent", "general-text-speculator"]
   },
   "runtimes": {
     "llama_server": {

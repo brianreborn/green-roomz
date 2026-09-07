@@ -9,7 +9,7 @@ Live on shalom `green-roomz serve` unless noted. Bounce serve after this landing
 - **llama.app last-alias pin.** Client `model=` is ignored unless `lock_alias: true`. A plain follow-up after `/code` consults nexus (tested). `/auto` also unlocks. `lock_alias: true` only when you mean lock.
 - **`/vision` / `/audio` without that part** → **400** (`/vision requires an attached image part`).
 - **`/embed` `/rerank` on chat** rewrite to `/v1/embeddings` and `/v1/rerank`, wrap the native JSON as a chat.completion. `/rerank` body: query line, then one document per line.
-- **`/tts` `/speak`** → **400**; piper has no persistent server.
+- **Missing native slash** (`/draw` `/imagine` `/image` `/tts` `/speak` `/embed` `/rerank`, and `model:` of those aliases) → **503** when the specialist cannot admit. Empty `/tts` text is still **400**. `/code` on an impractical specialist still **200** resident 0.5B.
 - **`/router`** pins the resident 0.5B (`slash_router`), does not hop as a user-visible specialist.
 - **Mixed image + audio** no longer `ValidationError`; both stay in nexus AVAILABLE unless `/vision` or `/audio` is explicit.
 - **qodesh specialists.** 7B code is `impractical` on 16GB. `/code` no longer 503s: skip to an admittable alias or the resident 0.5B. Whisper/Piper/sd-server binaries may still be missing.

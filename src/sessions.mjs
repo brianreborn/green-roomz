@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 export class SessionLedger {
-  constructor({ ttlMs = 3_600_000, limit = 2048, clock = Date.now } = {}) {
+  constructor({ ttlMs = 3_600_000, limit = 64, clock = Date.now } = {}) {
     this.ttlMs = ttlMs;
     this.limit = limit;
     this.clock = clock;
@@ -39,7 +39,10 @@ export class SessionLedger {
   patch(id, fields) {
     const entry = this.entries.get(id);
     if (!entry) return false;
-    Object.assign(entry, fields);
+    const allow = new Set(['faith', 'fear', 'confidenceMood', 'yolo', 'councilDefault', 'op', 'rebuke', 'agentAlias', 'lastAccess']);
+    for (const [key, value] of Object.entries(fields ?? {})) {
+      if (allow.has(key)) entry[key] = value;
+    }
     const now = this.clock();
     entry.lastAccess = now;
     entry.expiresAt = now + this.ttlMs;
