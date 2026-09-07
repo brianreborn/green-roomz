@@ -56,6 +56,17 @@ if (wantLive) {
   } catch (error) {
     halt(`GET / failed: ${error.message}`);
   }
+  try {
+    const uni = await fetch(`${base}/unicorn`, { signal: AbortSignal.timeout(3_000) });
+    const type = uni.headers.get('content-type') ?? '';
+    const body = await uni.text();
+    if (uni.status !== 200 || !/text\/html/i.test(type) || !/Green Unicorn/.test(body)) {
+      halt(`GET /unicorn was ${uni.status} ${type} (want 200 text/html Unicorn; bounce serve onto main)`);
+    }
+    console.error('GET /unicorn = 200 text/html');
+  } catch (error) {
+    halt(`GET /unicorn failed: ${error.message}`);
+  }
 }
 
 run('unit', [

@@ -33,6 +33,12 @@ The default manifest is `config/agents.windows.json`. It points at the llama.cpp
 
 The gateway listens on `127.0.0.1:8080` by default. Set `GREEN_ROOMZ_API_KEY` to require bearer authentication. Public binding is rejected unless an API key is configured and `GREEN_ROOMZ_ALLOW_PUBLIC=1` is explicitly set.
 
+Easy local clients (all at once is fine):
+
+- Web / file-drop: `scripts\unicorn.cmd` → http://127.0.0.1:8080/unicorn
+- Console: `scripts\chat-mvp.cmd`
+- Desktop GUI: llama.app pointed at the same origin
+
 ## Commands
 
 ```text

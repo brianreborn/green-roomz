@@ -55,6 +55,18 @@ test('GET / is an HTML operator page, not a JSON 404', async (t) => {
   assert.match(page.type, /text\/html/);
   assert.match(page.body, /OpenAI-compatible HTTP API/);
   assert.match(page.body, /chat-mvp/);
+  assert.match(page.body, /unicorn/i);
   assert.match(page.body, /not https/);
   assert.match(page.body, /\/health/);
+});
+
+test('GET /unicorn is the file-drop chat UI', async (t) => {
+  const server = await withServer(t);
+  const page = await rawGet(server, '/unicorn');
+  assert.equal(page.status, 200);
+  assert.match(page.type, /text\/html/);
+  assert.match(page.body, /Green Unicorn/);
+  assert.match(page.body, /chat-mvp/);
+  assert.match(page.body, /\/v1\/chat\/completions/);
+  assert.match(page.body, /Drop files here/);
 });

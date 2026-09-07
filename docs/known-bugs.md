@@ -38,10 +38,9 @@ Still open:
 
 - **Gateway does not require an explicit agent switch** to accept a drop that arrives as a real multimodal part. `hardRuleRoute`: audio part -> `audio-transcription-agent`; image part -> `vision-layout-agent`. Those beat slash and the llama.app pin.
 - **You do need `/image` (or `/imagine` `/draw`)** for *generating* a picture from text. Dropping an image is look-at-this (vision), not image-gen.
-- **llama.app / unicorn UI was not verified.** Many clients hide the attach/drop control unless the selected model is vision or audio. If drop is greyed or rejects types, switch with `/vision` or `/audio` first, then drop. That is a client limitation, not a gateway one.
-- Drop UI accept-list / disable-during-generate was **not patched** this session. If almost every file type still will not drop, it is still the client.
-- Mixed image+audio in one request goes to nexus (both parts in AVAILABLE) unless `/vision` or `/audio` is explicit.
-- Unicorn script on shalom HTTP listing: `C:\LocalAI\green-unicorn.py` (unread this wrap).
+- **Unicorn is in-repo now:** `GET /unicorn` and `scripts\unicorn.cmd`. Drop accepts any type at any time (not greyed during generate). llama.app may still hide attach unless the selected model looks multimodal — switch `/vision` or `/audio` first there; that is a llama.app limitation.
+- Mixed image+audio in one request goes to nexus (both parts in AVAILABLE) unless `/vision` or `/audio` is explicit. Gateway may still 400 that mix.
+- Historical shalom path `C:\LocalAI\green-unicorn.py` is a launcher that opens `/unicorn`; the UI lives in `web/unicorn.html`.
 
 ## Working around routing today
 

@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Green Unicorn</title>
+<style>
+  :root { --bg:#10140f; --panel:#1b2318; --ink:#e8f0e4; --muted:#9aab93; --acc:#7dcf6a; --warn:#e0b45a; --err:#e07a6a; --line:#2c3a28; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font: 15px/1.45 system-ui, Segoe UI, sans-serif; }
+  body { display: flex; flex-direction: column; }
+  header { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { font-size: 1.05rem; margin: 0; font-weight: 650; }
+  header .hint { color: var(--muted); font-size: 0.85rem; }
+  header a { color: var(--acc); }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  select, button, input[type=checkbox] { font: inherit; }
+  select, button { background: #12190f; color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; }
+  button { cursor: pointer; }
+  button.primary { background: #23401c; border-color: #3d6a32; color: #d8ffce; }
+  button:disabled { opacity: 0.55; cursor: default; }
+  #health { font-size: 0.8rem; color: var(--muted); }
+  #health.ok { color: var(--acc); }
+  #health.bad { color: var(--err); }
+  #log { flex: 1; overflow: auto; padding: 12px 14px 8px; display: flex; flex-direction: column; gap: 10px; }
+  .msg { max-width: 52rem; white-space: pre-wrap; word-break: break-word; }
+  .msg.user { align-self: flex-end; background: #24331f; border-radius: 10px 10px 2px 10px; padding: 8px 12px; }
+  .msg.assistant { align-self: flex-start; background: #182016; border: 1px solid var(--line); border-radius: 10px 10px 10px 2px; padding: 8px 12px; }
+  .msg.sys { align-self: center; color: var(--muted); font-size: 0.85rem; }
+  .msg.error { color: var(--err); }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; padding: 0 14px 8px; }
+  .chip { font-size: 0.8rem; background: #2a3824; border-radius: 999px; padding: 3px 8px; }
+  .chip button { border: 0; background: transparent; color: var(--muted); padding: 0 0 0 6px; cursor: pointer; }
+  #drop { margin: 0 14px 10px; border: 1.5px dashed #3d5340; border-radius: 10px; padding: 10px 12px; color: var(--muted); text-align: center; background: #141b12; }
+  #drop.hot { border-color: var(--acc); color: var(--acc); background: #1a2818; }
+  #composer { display: flex; gap: 8px; padding: 0 14px 14px; align-items: flex-end; }
+  #composer textarea { flex: 1; min-height: 52px; max-height: 180px; resize: vertical; background: #12190f; color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font: inherit; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Green Unicorn</h1>
+  <span class="hint">Web / file-drop client for the same Roomz gateway as <code>scripts\chat-mvp.cmd</code>. HTTP only — <code>http://127.0.0.1:8080/unicorn</code>, not https.</span>
+  <div class="row">
+    <label>model
+      <select id="model"></select>
+    </label>
+    <label><input type="checkbox" id="lock" checked> lock alias</label>
+    <span id="health">checking…</span>
+    <a href="/">operator</a>
+    <a href="/health">health</a>
+    <a href="/v1/models">models</a>
+  </div>
+</header>
+<div id="log"></div>
+<div class="chips" id="chips"></div>
+<div id="drop">Drop files here any time (png jpg webp wav mp3 txt md json py gguf…). Drop stays enabled while generating. Mixed image+audio may 400 from the gateway.</div>
+<div id="composer">
+  <textarea id="prompt" placeholder="Type a message. Slash commands work: /text /code /auto /vision …"></textarea>
+  <button class="primary" id="send">Send</button>
+  <button id="stop" disabled>Stop</button>
+  <button id="clear" type="button">Clear</button>
+</div>
+<input id="file" type="file" multiple hidden>
+<script>
+(() => {
+  const logEl = document.getElementById('log');
+  const chipsEl = document.getElementById('chips');
+  const dropEl = document.getElementById('drop');
+  const modelEl = document.getElementById('model');
+  const lockEl = document.getElementById('lock');
+  const promptEl = document.getElementById('prompt');
+  const sendEl = document.getElementById('send');
+  const stopEl = document.getElementById('stop');
+  const healthEl = document.getElementById('health');
+  const fileEl = document.getElementById('file');
+  const messages = [];
+  const pending = [];
+  let abort = null;
+  let sessionId = null;
+
+  function addLog(role, text, extra) {
+    const div = document.createElement('div');
+    div.className = 'msg ' + role + (extra ? ' ' + extra : '');
+    div.textContent = text;
+    logEl.appendChild(div);
+    logEl.scrollTop = logEl.scrollHeight;
+    return div;
+  }
+
+  function renderChips() {
+    chipsEl.innerHTML = '';
+    pending.forEach((item, i) => {
+      const chip = document.createElement('span');
+      chip.className = 'chip';
+      chip.textContent = item.name + ' (' + item.kind + ')';
+      const x = document.createElement('button');
+      x.type = 'button';
+      x.textContent = '×';
+      x.onclick = () => { pending.splice(i, 1); renderChips(); };
+      chip.appendChild(x);
+      chipsEl.appendChild(chip);
+    });
+  }
+
+  function kindOf(file) {
+    const t = (file.type || '').toLowerCase();
+    const n = file.name.toLowerCase();
+    if (t.startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp|svg)$/.test(n)) return 'image';
+    if (t.startsWith('audio/') || /\.(wav|mp3|m4a|ogg|flac|webm)$/.test(n)) return 'audio';
+    if (n.endsWith('.gguf')) return 'gguf';
+    if (t.startsWith('text/') || /\.(txt|md|json|csv|py|js|mjs|ts|html|css|xml|yml|yaml|toml|log)$/.test(n)) return 'text';
+    return 'file';
+  }
+
+  function readAsDataURL(file) {
+    return new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result);
+      r.onerror = reject;
+      r.readAsDataURL(file);
+    });
+  }
+
+  function readAsText(file) {
+    return new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result);
+      r.onerror = reject;
+      r.readAsText(file);
+    });
+  }
+
+  async function addFiles(list) {
+    for (const file of list) {
+      const kind = kindOf(file);
+      pending.push({ file, name: file.name, kind, size: file.size });
+    }
+    renderChips();
+  }
+
+  dropEl.addEventListener('click', () => fileEl.click());
+  fileEl.addEventListener('change', () => { addFiles(fileEl.files); fileEl.value = ''; });
+  ['dragenter', 'dragover'].forEach((ev) => dropEl.addEventListener(ev, (e) => {
+    e.preventDefault(); dropEl.classList.add('hot');
+  }));
+  ['dragleave', 'drop'].forEach((ev) => dropEl.addEventListener(ev, (e) => {
+    e.preventDefault(); dropEl.classList.remove('hot');
+  }));
+  dropEl.addEventListener('drop', (e) => addFiles(e.dataTransfer.files));
+  document.addEventListener('paste', (e) => {
+    if (e.clipboardData?.files?.length) addFiles(e.clipboardData.files);
+  });
+
+  async function refreshHealth() {
+    try {
+      const r = await fetch('/health', { signal: AbortSignal.timeout(4000) });
+      const j = await r.json();
+      healthEl.textContent = 'health: ' + (j.status || r.status);
+      healthEl.className = r.ok ? 'ok' : 'bad';
+    } catch (err) {
+      healthEl.textContent = 'gateway down — start serve first';
+      healthEl.className = 'bad';
+    }
+    try {
+      const r = await fetch('/v1/models', { signal: AbortSignal.timeout(4000) });
+      const j = await r.json();
+      const ids = (j.data || []).map((m) => m.id);
+      const keep = modelEl.value;
+      modelEl.innerHTML = '';
+      ids.forEach((id) => {
+        const o = document.createElement('option');
+        o.value = id; o.textContent = id;
+        modelEl.appendChild(o);
+      });
+      if (ids.includes(keep)) modelEl.value = keep;
+      else if (ids.includes('general-text-speculator')) modelEl.value = 'general-text-speculator';
+    } catch { /* health already shown */ }
+  }
+
+  async function buildUserContent(text) {
+    const parts = [];
+    let preface = text || '';
+    for (const item of pending) {
+      if (item.kind === 'image') {
+        parts.push({ type: 'image_url', image_url: { url: await readAsDataURL(item.file) } });
+      } else if (item.kind === 'audio') {
+        const url = await readAsDataURL(item.file);
+        const fmt = (item.name.split('.').pop() || 'wav').toLowerCase();
+        parts.push({ type: 'input_audio', input_audio: { data: url, format: fmt } });
+      } else if (item.kind === 'text') {
+        const body = await readAsText(item.file);
+        preface += (preface ? '\n\n' : '') + '--- file: ' + item.name + ' ---\n' + body;
+      } else if (item.kind === 'gguf') {
+        preface += (preface ? '\n\n' : '') + '(dropped GGUF ' + item.name + ', ' + item.size + ' bytes — chat cannot load models; copy into models/ and bounce serve)';
+      } else {
+        preface += (preface ? '\n\n' : '') + '(dropped file ' + item.name + ', ' + item.size + ' bytes, type ' + (item.file.type || 'unknown') + ')';
+      }
+    }
+    if (!parts.length) return preface || '(empty)';
+    const content = [];
+    if (preface) content.push({ type: 'text', text: preface });
+    return content.concat(parts);
+  }
+
+  async function send() {
+    const text = promptEl.value.trim();
+    if (!text && !pending.length) return;
+    if (abort) return;
+    const content = await buildUserContent(text);
+    const shown = text || pending.map((p) => p.name).join(', ');
+    promptEl.value = '';
+    pending.length = 0;
+    renderChips();
+    messages.push({ role: 'user', content });
+    addLog('user', shown);
+    const box = addLog('assistant', '');
+    abort = new AbortController();
+    sendEl.disabled = true;
+    stopEl.disabled = false;
+    const headers = { 'content-type': 'application/json' };
+    if (sessionId) headers['x-session-id'] = sessionId;
+    try {
+      const res = await fetch('/v1/chat/completions', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          model: modelEl.value || 'general-text-speculator',
+          stream: true,
+          lock_alias: lockEl.checked,
+          messages,
+        }),
+        signal: abort.signal,
+      });
+      const sid = res.headers.get('x-green-roomz-session') || res.headers.get('x-session-id');
+      if (sid) sessionId = sid;
+      if (!res.ok) {
+        const err = await res.text();
+        throw new Error('HTTP ' + res.status + ' ' + err.slice(0, 400));
+      }
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let buf = '';
+      let out = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split(/\n/);
+        buf = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith('data:')) continue;
+          const payload = line.slice(5).trim();
+          if (!payload || payload === '[DONE]') continue;
+          try {
+            const chunk = JSON.parse(payload);
+            const delta = chunk.choices?.[0]?.delta?.content || chunk.choices?.[0]?.message?.content || '';
+            if (delta) { out += delta; box.textContent = out; logEl.scrollTop = logEl.scrollHeight; }
+          } catch { /* skip malformed SSE */ }
+        }
+      }
+      if (out) messages.push({ role: 'assistant', content: out });
+      else box.textContent = box.textContent || '(empty)';
+    } catch (err) {
+      if (err.name === 'AbortError') {
+        box.textContent = (box.textContent || '') + '\n[stopped]';
+      } else {
+        box.classList.add('error');
+        box.textContent = String(err.message || err);
+        if (messages.length && messages[messages.length - 1].role === 'user') messages.pop();
+      }
+    } finally {
+      abort = null;
+      sendEl.disabled = false;
+      stopEl.disabled = true;
+      promptEl.focus();
+    }
+  }
+
+  sendEl.onclick = send;
+  stopEl.onclick = () => { if (abort) abort.abort(); };
+  document.getElementById('clear').onclick = () => {
+    messages.length = 0;
+    pending.length = 0;
+    sessionId = null;
+    renderChips();
+    logEl.innerHTML = '';
+    addLog('sys', 'history cleared');
+  };
+  promptEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+  });
+
+  addLog('sys', 'Unicorn and chat-mvp can both talk to this gateway at once. Drop stays on during generate.');
+  refreshHealth();
+  setInterval(refreshHealth, 15000);
+})();
+</script>
+</body>
+</html>

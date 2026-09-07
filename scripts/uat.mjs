@@ -58,8 +58,14 @@ async function check(id, fn) {
 
 await check('GET / operator HTML', async () => {
   const root = await http('/');
-  record('GET / operator HTML', root.status === 200 && /text\/html/.test(root.type) && /OpenAI-compatible/.test(root.text),
+  record('GET / operator HTML', root.status === 200 && /text\/html/.test(root.type) && /OpenAI-compatible/.test(root.text) && /unicorn/i.test(root.text),
     `${root.status} ${root.type.split(';')[0]}`);
+});
+
+await check('GET /unicorn HTML', async () => {
+  const page = await http('/unicorn');
+  record('GET /unicorn HTML', page.status === 200 && /text\/html/.test(page.type) && /Green Unicorn/.test(page.text),
+    `${page.status} ${page.type.split(';')[0]}`);
 });
 
 await check('GET /health', async () => {

@@ -11,7 +11,16 @@ OpenAI-compatible gateway on `http://127.0.0.1:8080`:
 - Model list: `GET /v1/models`
 - Clear aliases (see `config/agents.windows-mvp.json`)
 
-No API-key product. No chat SPA — `GET http://127.0.0.1:8080/` is an operator page (health/models links). Do not use `https://localhost:8080` (there is no TLS; Firefox HTTPS-Only will fail). Prefer `127.0.0.1` over `localhost`. Chat is curl or any OpenAI-compatible client.
+No API-key product. `GET http://127.0.0.1:8080/` is an operator page (not the chat UI). Do not use `https://localhost:8080` (there is no TLS; Firefox HTTPS-Only will fail). Prefer `127.0.0.1` over `localhost`.
+
+Clients (use any mix; they share the same gateway):
+
+| Client | How | What |
+|---|---|---|
+| **Unicorn** | `scripts\unicorn.cmd` or [http://127.0.0.1:8080/unicorn](http://127.0.0.1:8080/unicorn) | Browser chat + file drop |
+| **chat-mvp** | `scripts\chat-mvp.cmd` | Multi-turn console (stream / Ctrl-C) |
+| **llama.app** | OpenAI-compat GUI at `http://127.0.0.1:8080` | Desktop JSON/REST client |
+| curl / SDK | `POST /v1/chat/completions` | Anything OpenAI-shaped |
 
 ## One-time on qodesh
 
@@ -59,6 +68,14 @@ Multi-turn console (model pick / stream / Ctrl-C stop):
 ```bat
 scripts\chat-mvp.cmd
 ```
+
+Web / file-drop (same gateway, can run at the same time):
+
+```bat
+scripts\unicorn.cmd
+```
+
+That opens `http://127.0.0.1:8080/unicorn`. Drop stays enabled during generate. Vision/audio/image-gen aliases are still unavailable on this MVP, so those drops get an honest 400/503.
 
 `start.cmd` defaults to `config\agents.windows-mvp.json` (override with `GRZ_MANIFEST`).
 

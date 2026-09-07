@@ -17,7 +17,7 @@ node scripts/uat.mjs
 # or: npm run uat
 ```
 
-Checks: `GET /` HTML (not JSON 404), `/health`, `/v1/models`, a real **streaming** chat (`lock_alias` Instruct, 10 min client deadline matching `chat-mvp`), `/vision` without an image is 400, session follow-up, **https:// to :8080 fails** (no TLS — Firefox HTTPS-First).
+Checks: `GET /` HTML (not JSON 404; names Unicorn + chat-mvp), `GET /unicorn` HTML, `/health`, `/v1/models`, a real **streaming** chat (`lock_alias` Instruct, 10 min client deadline matching `chat-mvp`), `/vision` without an image is 400, session follow-up, **https:// to :8080 fails** (no TLS — Firefox HTTPS-First).
 
 Gateway `request_timeout_ms` **and** `upstream_timeout_ms` on the Windows MVP are **600000** so Node and llama proxy do not kill SSE at 180s (that 504 is what UAT used to hit). Override the client with `GRZ_UAT_CHAT_MS`. `chat-mvp` is 10 minutes.
 

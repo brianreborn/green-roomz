@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
-import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { fieldVote, similarityVote, resolveJudgeChoice, judgePrompt } from './council.mjs';
 import { AGENCY_ROLE, DEFAULT_FAITH, DEFAULT_FEAR, FALLBACK_ALIAS, HANDOFF_PEEK_CHARS, HANDOFF_PEEK_TIMEOUT_MS, MAX_SPECIALIST_HOPS, MONITOR_ALIAS, NEXUS_ALIAS, NEXUS_MAX_TOKENS, REBUKE_OP, UPSTREAM_MAX_BUFFER_BYTES, UPSTREAM_TIMEOUT_MS, YOLO_TOKEN } from './constants.mjs';
 import { loadDeclaredKernel } from './config.mjs';
@@ -21,6 +22,7 @@ import { holdMs, resolveTimingPrivacy } from './timing-quant.mjs';
 
 const EXPLICIT_ROUTES = new Set([
   '/',
+  '/unicorn',
   '/health',
   '/v1/health',
   '/v1/models',
@@ -32,6 +34,8 @@ const EXPLICIT_ROUTES = new Set([
   '/v1/embeddings',
   '/v1/rerank',
 ]);
+
+const UNICORN_PAGE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'web', 'unicorn.html');
 
 /** 8080 may post/observe hops. No vote / lockdown / reboot / respond rights. */
 export const GATEWAY_IPC_RIGHTS = (CAP.POST | CAP.OBSERVE | CAP.SNAPSHOT) >>> 0;
@@ -60,7 +64,7 @@ function publicEvent(event) {
   return { ...event, ticket: hashTicket(event.ticket) };
 }
 
-const GET_ONLY = new Set(['/', '/health', '/v1/health', '/v1/models', '/props', '/metrics', '/v1/monitor/recent']);
+const GET_ONLY = new Set(['/', '/unicorn', '/health', '/v1/health', '/v1/models', '/props', '/metrics', '/v1/monitor/recent']);
 
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1', 'localhost']);
 const COUNCIL_JUDGES = new Set(['field-vote', 'judge-model', 'similarity']);
@@ -327,23 +331,7 @@ export class Gateway {
     this.brainz = brainz ?? null;
   }
 
-  serveOperatorIndex(response, cors, method = 'GET') {
-    const html = `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>Green-Roomz</title></head>
-<body>
-<h1>Green-Roomz</h1>
-<p>Interactive chat is <strong>chat-mvp</strong> (not this page):</p>
-<pre>scripts\\chat-mvp.cmd</pre>
-<p>Coding agent jail: <code>node bin\\green-roomz.mjs agent --goal "..."</code></p>
-<p>This URL is an OpenAI-compatible HTTP API. No TLS on :8080 &mdash; use <code>http://127.0.0.1:8080</code>, not https.</p>
-<ul>
-<li><a href="/health"><code>GET /health</code></a></li>
-<li><a href="/v1/models"><code>GET /v1/models</code></a></li>
-<li><code>POST /v1/chat/completions</code></li>
-</ul>
-<p>Other clients: curl, llama.app, any OpenAI SDK at this origin.</p>
-</body></html>
-`;
+  serveHtml(response, cors, method, html) {
     const data = Buffer.from(html);
     response.writeHead(200, {
       'content-type': 'text/html; charset=utf-8',
@@ -351,6 +339,41 @@ export class Gateway {
       ...cors,
     });
     return response.end(method === 'HEAD' ? undefined : data);
+  }
+
+  serveOperatorIndex(response, cors, method = 'GET') {
+    const html = `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Green-Roomz</title></head>
+<body>
+<h1>Green-Roomz</h1>
+<p>Use <strong>both</strong> clients against this same gateway. They do not conflict.</p>
+<ul>
+<li>Web / file-drop: <a href="/unicorn">Unicorn</a> &mdash; <code>scripts\\unicorn.cmd</code></li>
+<li>Console chat: <strong>chat-mvp</strong> &mdash; <code>scripts\\chat-mvp.cmd</code></li>
+<li>Desktop GUI: llama.app pointed at <code>http://127.0.0.1:8080</code></li>
+</ul>
+<p>This landing page is not a chat UI. Coding agent jail: <code>node bin\\green-roomz.mjs agent --goal "..."</code></p>
+<p>This URL is an OpenAI-compatible HTTP API. No TLS on :8080 &mdash; use <code>http://127.0.0.1:8080</code>, not https.</p>
+<ul>
+<li><a href="/health"><code>GET /health</code></a></li>
+<li><a href="/v1/models"><code>GET /v1/models</code></a></li>
+<li><code>POST /v1/chat/completions</code></li>
+</ul>
+<p>Other clients: curl, any OpenAI SDK at this origin.</p>
+</body></html>
+`;
+    return this.serveHtml(response, cors, method, html);
+  }
+
+  serveUnicorn(response, cors, method = 'GET') {
+    let html;
+    if (existsSync(UNICORN_PAGE)) {
+      html = readFileSync(UNICORN_PAGE, 'utf8');
+    } else {
+      html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Green Unicorn</title></head>
+<body><h1>Green Unicorn</h1><p>Missing <code>web/unicorn.html</code> next to the gateway. Use <code>scripts\\chat-mvp.cmd</code> until that file is restored.</p></body></html>`;
+    }
+    return this.serveHtml(response, cors, method, html);
   }
 
   async attachCognitiveTurn(request, issuedSession, identity, body) {
@@ -496,6 +519,9 @@ export class Gateway {
         }
         if (url.pathname === '/') {
           return this.serveOperatorIndex(response, cors, method);
+        }
+        if (url.pathname === '/unicorn') {
+          return this.serveUnicorn(response, cors, method);
         }
         if (url.pathname === '/health' || url.pathname === '/v1/health') {
           return headJson(200, this.health());
