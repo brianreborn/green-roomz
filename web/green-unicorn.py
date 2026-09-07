@@ -23,7 +23,7 @@ def main() -> int:
         return 1
     except Exception as err:
         print(f"Gateway not reachable at {BASE} ({err}).", file=sys.stderr)
-        print("Start Roomz first: scripts\\start-windows-mvp.cmd", file=sys.stderr)
+        print(r"Start Roomz first: scripts\start-windows-mvp.cmd", file=sys.stderr)
         return 1
     print(f"Opening {UNICORN}")
     print("Console sibling: scripts\\chat-mvp.cmd")
