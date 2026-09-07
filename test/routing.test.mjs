@@ -7,6 +7,7 @@ import {
   latestUserMessageText,
   hardRuleRoute,
   isGenericChatRequest,
+  parseCouncilArgs,
   parseSlashCommand,
   stripSlashCommand,
   aliasCanAdmit,
@@ -240,4 +241,56 @@ test('stripSlashCommand replaces array text parts', () => {
   });
   assert.equal(stripped.messages[1].content[0].text, 'hello');
   assert.equal(stripped.messages[1].content[1].text, 'keep');
+});
+
+test('/council on|off toggles a session default; on + prompt also runs this turn', () => {
+  const on = parseSlashCommand({ messages: [{ role: 'user', content: '/council on vision-layout-agent similarity' }] });
+  assert.equal(on.setting, 'council');
+  assert.deepEqual(on.councilDefault, { targets: ['vision-layout-agent'], judge: 'similarity', parallel: undefined });
+  assert.equal(on.settingOnly, true);
+  assert.equal(on.council, undefined);
+
+  const onRun = parseSlashCommand({ messages: [{ role: 'user', content: '/council on code refactor it' }] });
+  assert.equal(onRun.councilDefault.targets[0], 'qwenstral-code-speculator');
+  assert.deepEqual(onRun.council.targets, ['qwenstral-code-speculator']);
+  assert.equal(onRun.rest, 'refactor it');
+
+  const off = parseSlashCommand({ messages: [{ role: 'user', content: '/council off' }] });
+  assert.equal(off.setting, 'council');
+  assert.equal(off.councilDefault, null);
+  assert.equal(off.council, undefined);
+});
+
+test('parseCouncilArgs: pulls targets / judge / parallelism off the front, leaves the prompt', () => {
+  assert.deepEqual(parseCouncilArgs('vision-layout-agent similarity what brand is this'),
+    { targets: ['vision-layout-agent'], judge: 'similarity', parallel: undefined, rest: 'what brand is this' });
+  assert.deepEqual(parseCouncilArgs('code,general-text-speculator serial refactor it'),
+    { targets: ['qwenstral-code-speculator', 'general-text-speculator'], judge: null, parallel: false, rest: 'refactor it' });
+  assert.deepEqual(parseCouncilArgs('extract the label fields as JSON'),
+    { targets: null, judge: null, parallel: undefined, rest: 'extract the label fields as JSON' });
+  assert.deepEqual(parseCouncilArgs('field-vote read this'),
+    { targets: null, judge: 'field-vote', parallel: undefined, rest: 'read this' });
+});
+
+test('parseSlashCommand: /council carries a council spec and strips to the prompt', () => {
+  const p = parseSlashCommand({ messages: [{ role: 'user', content: '/council vision-layout-agent similarity what is this' }] });
+  assert.equal(p.token, 'council');
+  assert.deepEqual(p.council, { targets: ['vision-layout-agent'], judge: 'similarity', parallel: undefined });
+  assert.equal(p.rest, 'what is this');
+  const stripped = stripSlashCommand({ messages: [{ role: 'user', content: '/council code refactor this' }] });
+  assert.equal(stripped.messages[0].content, 'refactor this');
+});
+
+test('model "auto" / OpenAI ids route via the nexus instead of pinning', () => {
+  for (const model of ['auto', 'green-roomz', 'gpt-4o', 'default']) {
+    const r = routeRequest({ model, messages: [{ role: 'user', content: 'hi' }] }, registry());
+    assert.equal(r.reason, 'nexus', `${model} should be nexus-routed`);
+  }
+});
+
+test('model "tool-router-agent" without lock_alias is nexus-routed, not pinned to the 0.5B', () => {
+  const r = routeRequest({ model: 'tool-router-agent', messages: [{ role: 'user', content: 'hi' }] }, registry());
+  assert.equal(r.reason, 'nexus');
+  const pinned = routeRequest({ model: 'tool-router-agent', lock_alias: true, messages: [{ role: 'user', content: 'hi' }] }, registry());
+  assert.equal(pinned.effectiveAlias, 'tool-router-agent');
 });

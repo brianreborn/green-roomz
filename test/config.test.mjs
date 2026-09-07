@@ -18,6 +18,8 @@ test('windows manifest has exactly eleven required aliases and no translation ag
   assert.equal(manifest.gateway.nexus_consult_timeout_ms, 10000);
   assert.equal(manifest.gateway.agent_chat_timeout_ms, 60000);
   assert.equal(manifest.gateway.agent_max_tokens, 96);
+  assert.equal(manifest.gateway.memory_transcript_chars, 2048);
+  assert.equal(manifest.gateway.memory_facts_limit, 8);
   assert.deepEqual(manifest.gateway.health_aliases, ['tool-router-agent', 'general-text-speculator']);
   const monitor = manifest.agents.find((agent) => agent.alias === 'security-monitor-agent');
   assert.equal(monitor.runtime, 'logical');
@@ -48,6 +50,22 @@ test('agent_chat_timeout_ms and agent_max_tokens are required at install', () =>
   try { validateManifest(missingTokens); } catch (error) { caughtTokens = error; }
   assert.ok(caughtTokens instanceof ValidationError);
   assert.match(String(caughtTokens.details), /agent_max_tokens/);
+});
+
+test('memory_transcript_chars and memory_facts_limit are required at install', () => {
+  const missingChars = sampleManifest();
+  delete missingChars.gateway.memory_transcript_chars;
+  let caughtChars;
+  try { validateManifest(missingChars); } catch (error) { caughtChars = error; }
+  assert.ok(caughtChars instanceof ValidationError);
+  assert.match(String(caughtChars.details), /memory_transcript_chars/);
+
+  const missingFacts = sampleManifest();
+  delete missingFacts.gateway.memory_facts_limit;
+  let caughtFacts;
+  try { validateManifest(missingFacts); } catch (error) { caughtFacts = error; }
+  assert.ok(caughtFacts instanceof ValidationError);
+  assert.match(String(caughtFacts.details), /memory_facts_limit/);
 });
 
 test('health_aliases is required at install', () => {

@@ -15,10 +15,12 @@ import { consultNexus } from './nexus.mjs';
 import { planRoute } from './logical-router.mjs';
 import { proxyJson } from './proxy.mjs';
 import { aliasCanAdmit, audioDataFromBody, detectModalities, hardRuleRoute, isGenericChatRequest, isRoutableAlias, latestUserMessageText, NATIVE_CHAT, parseSlashCommand, stripSlashCommand } from './routing.mjs';
+import { contentChars, contextCharBudget, formatMemoryHeader, injectWorkingSet, memoryBounds } from './session-memory.mjs';
 import { deadlineSignal, headerSafe, isTimeoutAbort, jsonResponse, readCappedText, redact, secureEquals, sleep, stripControls } from './util.mjs';
 import { holdMs, resolveTimingPrivacy } from './timing-quant.mjs';
 
 const EXPLICIT_ROUTES = new Set([
+  '/',
   '/health',
   '/v1/health',
   '/v1/models',
@@ -58,7 +60,7 @@ function publicEvent(event) {
   return { ...event, ticket: hashTicket(event.ticket) };
 }
 
-const GET_ONLY = new Set(['/health', '/v1/health', '/v1/models', '/props', '/metrics', '/v1/monitor/recent']);
+const GET_ONLY = new Set(['/', '/health', '/v1/health', '/v1/models', '/props', '/metrics', '/v1/monitor/recent']);
 
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1', 'localhost']);
 const COUNCIL_JUDGES = new Set(['field-vote', 'judge-model', 'similarity']);
@@ -191,12 +193,17 @@ export function injectSystemPolicy(body, agent) {
   return payload;
 }
 
-export function prepareInferenceBody(body, agent) {
+export function prepareInferenceBody(body, agent, extras = {}) {
   const stripped = stripSlashCommand(body);
   const payload = injectSystemPolicy({ ...stripped, model: agent.alias }, agent);
   delete payload.route_plan_only;
   delete payload.lock_alias;
   delete payload.session_id;
+  if (agent.alias !== NEXUS_ALIAS) {
+    const systemChars = contentChars(payload.messages?.[0]);
+    const maxChars = contextCharBudget(agent, { maxTokens: payload.max_tokens, systemChars });
+    payload.messages = injectWorkingSet(payload.messages ?? [], extras.session, { maxChars });
+  }
   if (agent.alias === NEXUS_ALIAS) {
     payload.enable_thinking = false;
     payload.chat_template_kwargs = { ...(payload.chat_template_kwargs ?? {}), enable_thinking: false };
@@ -297,7 +304,7 @@ function nativeRequestInit(kind, payload, signal) {
 }
 
 export class Gateway {
-  constructor({ manifest, registry, processes, sessions, policy, hostAdapter, fetchImpl, mailbox, ipc, logger }) {
+  constructor({ manifest, registry, processes, sessions, policy, hostAdapter, fetchImpl, mailbox, ipc, logger, interrupts, brainz }) {
     this.manifest = manifest;
     this.registry = registry;
     this.processes = processes;
@@ -316,6 +323,81 @@ export class Gateway {
     this.extraPeers = [];
     this.councilDir = this.manifest.gateway?.council_dir ?? process.env.GREEN_ROOMZ_COUNCIL_DIR ?? null;
     this.timingPrivacy = resolveTimingPrivacy(this.manifest.gateway) ?? { mode: 'off', q: 0, dither: false, holdBeforeResponse: false };
+    this.interrupts = interrupts ?? null;
+    this.brainz = brainz ?? null;
+  }
+
+  serveOperatorIndex(response, cors, method = 'GET') {
+    const html = `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Green-Roomz</title></head>
+<body>
+<h1>Green-Roomz</h1>
+<p>This is an OpenAI-compatible HTTP API, not a website. There is no TLS on :8080 &mdash; use <code>http://127.0.0.1:8080</code>, not https, and prefer <code>127.0.0.1</code> over <code>localhost</code> if Firefox HTTPS-Only mode upgrades the name.</p>
+<ul>
+<li><a href="/health"><code>GET /health</code></a></li>
+<li><a href="/v1/models"><code>GET /v1/models</code></a></li>
+<li><code>POST /v1/chat/completions</code></li>
+</ul>
+<p>Clients: curl, llama.app, or any OpenAI SDK pointed at this origin.</p>
+</body></html>
+`;
+    const data = Buffer.from(html);
+    response.writeHead(200, {
+      'content-type': 'text/html; charset=utf-8',
+      'content-length': method === 'HEAD' ? 0 : data.length,
+      ...cors,
+    });
+    return response.end(method === 'HEAD' ? undefined : data);
+  }
+
+  async attachCognitiveTurn(request, issuedSession, identity, body) {
+    let payload = body;
+    if (this.interrupts) {
+      const lease = this.interrupts.begin(issuedSession, { signal: request.abortSignal });
+      request.abortSignal = lease.signal;
+      request._irqLease = lease;
+      const applied = this.interrupts.applyPending(issuedSession, payload);
+      payload = applied.body;
+    }
+    if (this.brainz) {
+      const recalled = await this.brainz.injectBoundedRecall(payload, {
+        readerAgentId: identity ?? 'green-roomz',
+      });
+      payload = recalled.body;
+      await this.brainz.observeTurn({
+        sessionId: issuedSession,
+        text: latestUserMessageText(payload),
+        action: { kind: 'chat' },
+        actorAgentId: identity ?? 'green-roomz',
+      });
+    }
+    return payload;
+  }
+
+  releaseCognitiveTurn(request) {
+    request._irqLease?.end();
+    request._irqLease = null;
+  }
+
+  memoryBounds() {
+    return memoryBounds(this.manifest.gateway);
+  }
+
+  prepareTurn(body, agent, issuedSession) {
+    const session = issuedSession ? this.sessions.workingSet(issuedSession) : null;
+    const payload = prepareInferenceBody(body, agent, { session });
+    if (issuedSession) {
+      this.sessions.rememberTurn(issuedSession, {
+        userText: latestUserMessageText(body),
+        agentAlias: agent.alias,
+      }, this.memoryBounds());
+    }
+    return payload;
+  }
+
+  noteAssistant(issuedSession, text) {
+    if (!issuedSession || text == null || text === '') return false;
+    return this.sessions.rememberTurn(issuedSession, { assistantText: String(text) }, this.memoryBounds());
   }
 
   async applyTimingHold(startedAt, beforeResponse) {
@@ -402,6 +484,9 @@ export class Gateway {
       if (GET_ONLY.has(url.pathname)) {
         if (method !== 'GET' && method !== 'HEAD') {
           return jsonResponse(response, 405, { error: { message: 'Method not allowed' } }, { allow: 'GET, HEAD, OPTIONS', ...cors });
+        }
+        if (url.pathname === '/') {
+          return this.serveOperatorIndex(response, cors, method);
         }
         if (url.pathname === '/health' || url.pathname === '/v1/health') {
           return headJson(200, this.health());
@@ -570,7 +655,7 @@ export class Gateway {
       // Honor client stream preference. Forcing stream:false here collapsed
       // OpenAI-compatible SSE on windows-mvp resident_fallback (tool-router)
       // into a one-shot application/json chat.completion (parity battery case E).
-      const payload = prepareInferenceBody(body, agent);
+      const payload = this.prepareTurn(body, agent, issuedSession);
       if (reason === 'resident_fallback') {
         const n = Number(payload.max_tokens);
         if (!Number.isFinite(n) || n > NEXUS_MAX_TOKENS) payload.max_tokens = NEXUS_MAX_TOKENS;
@@ -717,7 +802,7 @@ export class Gateway {
         await this.processes.ensure(agent, { signal: request.abortSignal });
         const unpin = this.processes.pin(alias);
         try {
-          const payload = { ...prepareInferenceBody(stripped, agent), stream: false };
+          const payload = { ...this.prepareTurn(stripped, agent, issuedSession), stream: false };
           const res = await this.fetchImpl(`http://127.0.0.1:${agent.port}${path}`, {
             method: 'POST', headers: { 'content-type': 'application/json', connection: 'close' },
             body: JSON.stringify(payload), signal: deadlineSignal(request.abortSignal, this.manifest.gateway.upstream_timeout_ms ?? UPSTREAM_TIMEOUT_MS),
@@ -751,6 +836,8 @@ export class Gateway {
 
     this.recordCouncil({ task: detectModalities(body).image ? 'vision' : 'text', spec, candidates, verdict, userText: latestUserMessageText(stripped) });
     this.sessions.setAgentAlias(issuedSession, winnerAlias);
+    this.sessions.patch(issuedSession, { lastSpecialist: winnerAlias });
+    this.noteAssistant(issuedSession, winnerText);
 
     const headers = this.routeHeaders(issuedSession, { requestedAlias: body.model ?? null, effectiveAlias: winnerAlias, reason: `council_${spec.judge}` }, cors, { hops: spec.aliases.join(',') });
     headers['x-green-roomz-council'] = headerSafe(JSON.stringify({ judge: spec.judge, winner: winnerAlias, outlier: verdict.outlier, agreement: verdict.agreement }));
@@ -872,6 +959,7 @@ export class Gateway {
       'x-green-roomz-effective-alias': headerSafe(routed.effectiveAlias ?? ''),
       'x-green-roomz-route-reason': headerSafe(routed.reason ?? ''),
       'x-green-roomz-hops': headerSafe(extra.hops ?? ''),
+      'x-green-roomz-memory': headerSafe(formatMemoryHeader(this.sessions.workingSet(issuedSession))),
       'x-green-roomz-nexus': NEXUS_ALIAS,
       'x-green-roomz-agency': AGENCY_ROLE,
       ...cors,
@@ -1019,6 +1107,7 @@ export class Gateway {
       modality: detectModalities(body),
     });
     if (session?.id) this.sessions.setAgentAlias(issuedSession, alias);
+    body = await this.attachCognitiveTurn(request, issuedSession, identity, body);
     const headers = this.routeHeaders(issuedSession, { requestedAlias: body.model, effectiveAlias: alias, reason: 'requested_alias' }, cors, { hops: alias });
     for (const [key, value] of Object.entries(headers)) response.setHeader(key, value);
     const startedAt = Date.now();
@@ -1027,7 +1116,7 @@ export class Gateway {
       await this.processes.ensure(agent, { signal: request.abortSignal });
       const unpin = this.processes.pin(alias);
       try {
-        const payload = prepareInferenceBody(body, agent);
+        const payload = this.prepareTurn(body, agent, issuedSession);
         const path = String(request.url.split('?')[0]).replace(/\/route$/, '') || '/v1/chat/completions';
         const proxied = await proxyJson({
           request,
@@ -1048,6 +1137,7 @@ export class Gateway {
         unpin();
       }
     } finally {
+      this.releaseCognitiveTurn(request);
       release();
       await this.applyTimingHold(startedAt, false);
     }
@@ -1063,6 +1153,7 @@ export class Gateway {
       agentAlias: hard.effectiveAlias ?? FALLBACK_ALIAS,
       modality: hard.modality,
     });
+    body = await this.attachCognitiveTurn(request, issuedSession, identity, body);
     const turnSettings = this.applyTurnSettings(issuedSession, identity, body);
 
     const hopHeaders = (alias, reason) => this.routeHeaders(
@@ -1199,7 +1290,7 @@ export class Gateway {
           }, hopHeaders(alias, reason));
         }
 
-        const payload = prepareInferenceBody(body, agent);
+        const payload = this.prepareTurn(body, agent, issuedSession);
         const path = String((pathname ?? request.url.split('?')[0])).replace(/\/route$/, '') || '/v1/chat/completions';
         const target = `http://127.0.0.1:${agent.port}${path}`;
         if (reason === 'chat_default') {
@@ -1246,6 +1337,7 @@ export class Gateway {
               const headers = hopHeaders(alias, reason);
               for (const [key, value] of Object.entries(headers)) response.setHeader(key, value);
               if (peek.content || peek.events?.length) {
+                this.noteAssistant(issuedSession, peek.content);
                 await deliverPeek({ peek, request, response, body: payload, headers, beforeClientWrite: this.beforeClientWrite(startedAt) });
                 this.observeHop('success', alias, { ticket: issuedSession, payload: { reason: 'peek_timeout_keep', hops: hops.slice() } });
                 return;
@@ -1288,6 +1380,7 @@ export class Gateway {
           }
 
           this.sessions.setAgentAlias(issuedSession, alias);
+          this.noteAssistant(issuedSession, peek.content);
           const headers = hopHeaders(alias, reason);
           for (const [key, value] of Object.entries(headers)) response.setHeader(key, value);
           await deliverPeek({ peek, request, response, body: payload, headers, beforeClientWrite: this.beforeClientWrite(startedAt) });
@@ -1319,7 +1412,7 @@ export class Gateway {
           await this.processes.ensure(agent, { signal: request.abortSignal });
           const unpin = this.processes.pin(FALLBACK_ALIAS);
           try {
-            const payload = prepareInferenceBody(body, agent);
+            const payload = this.prepareTurn(body, agent, issuedSession);
             const path = String((pathname ?? request.url.split('?')[0])).replace(/\/route$/, '') || '/v1/chat/completions';
             this.sessions.setAgentAlias(issuedSession, FALLBACK_ALIAS);
             const headers = hopHeaders(FALLBACK_ALIAS, 'text_fallback');
@@ -1354,6 +1447,7 @@ export class Gateway {
         },
       }, hopHeaders(null, 'route_exhausted'));
     } finally {
+      this.releaseCognitiveTurn(request);
       release();
       await this.applyTimingHold(startedAt, false);
     }
@@ -1376,10 +1470,17 @@ export class Gateway {
         } catch { /* socket already gone */ }
       });
     });
-    // Malformed HTTP from a client is a 400, never a crash.
-    server.on('clientError', (_error, socket) => {
-      if (socket.writable) socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n');
-      else socket.destroy();
+    // Malformed HTTP is a 400, never a crash. TLS ClientHello (Firefox https://
+    // to this plaintext port) is HPE_INVALID_METHOD — do not reply with HTTP 400;
+    // that is what NSS reports as SSL_ERROR_RX_RECORD_TOO_LONG and it blocks
+    // HTTPS-First fallback to http://.
+    server.on('clientError', (error, socket) => {
+      const tlsOrBinary = error?.code === 'HPE_INVALID_METHOD' || error?.bytesParsed === 0;
+      if (!socket.writable || tlsOrBinary) {
+        socket.destroy();
+        return;
+      }
+      socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n');
     });
     server.headersTimeout = this.manifest.gateway.headers_timeout_ms ?? this.manifest.gateway.request_timeout_ms ?? 30_000;
     server.requestTimeout = this.manifest.gateway.request_timeout_ms;

@@ -17,6 +17,8 @@ export function sampleManifest(overrides = {}) {
       retry_deadline_ms: 200,
       session_ttl_ms: 60_000,
       session_limit: 8,
+      memory_transcript_chars: 2048,
+      memory_facts_limit: 8,
       cors_origins: ['http://127.0.0.1'],
       timing_privacy: 'off',
       max_warm_specialists: 8,

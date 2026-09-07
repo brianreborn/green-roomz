@@ -9,6 +9,7 @@ import { WindowsHostAdapter } from '../src/hosts/windows.mjs';
 import { AndroidSidecarAdapter } from '../src/hosts/android.mjs';
 import { applyStoreWinners, BenchmarkRunner, qualifyMissingAgents } from '../src/benchmark.mjs';
 import { Gateway } from '../src/gateway.mjs';
+import { loadOptionalBrainz } from '../src/brainz.mjs';
 import { attachServeConsole } from '../src/serve-console.mjs';
 import { POLICIES, REQUIRED_ALIASES } from '../src/constants.mjs';
 
@@ -131,6 +132,14 @@ async function cmdServe(ctx, args) {
     try {
       await applyStoreWinners(ctx.processes, { objective });
     } catch {}
+  }
+  const brainz = await loadOptionalBrainz();
+  if (brainz.enabled) {
+    ctx.interrupts = brainz.interrupts;
+    ctx.brainz = brainz.host;
+    console.error(`brainz: GREEN_BRAINZ_ROOT=${brainz.root} store=${brainz.storeDir}`);
+  } else {
+    console.error(`brainz: skipped (${brainz.reason})`);
   }
   const gateway = new Gateway(ctx);
   // A cold start restores its `default` prime snapshot when it still matches the

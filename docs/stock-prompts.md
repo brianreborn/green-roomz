@@ -22,10 +22,9 @@ Two things are often conflated (see the architecture plates,
 |---|---|---|
 | **Plate 5** — the six-state loop | the cognitive model itself | **in place** once `compile` runs and a cognitive agent serves it — it is prose the model executes |
 | **Plate 6** — the copy-on-write record store, append-only phase-event log | durability infrastructure for records that must outlive a context or a process | not built; staged in `green-agentz/systems/green-brainz/memory/` |
-| Agentz → gateway "bounded context" | the injection seam (MFL-17) | not built |
+| Agentz → gateway "bounded context" | the injection seam (MFL-17) | **in place** — `SessionLedger` + `src/session-memory.mjs` clip/inject a compact working set on the next turn |
 
-Only Plate 6 and the injection seam are "ahead of progress." Plate 5 is not
-ahead of anything.
+Plate 6 remains ahead of progress. Plate 5 and MFL-17 are not.
 
 ## Layers
 

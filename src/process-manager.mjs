@@ -878,7 +878,7 @@ export class ProcessManager {
   }
 
   startIdleSweeper(intervalMs = 30_000) {
-    if (this.idleSweeper) return;
+    if (this.idleSweeper || this.idleEvictMs <= 0) return;
     this.idleSweeper = setInterval(() => { this.sweepIdle().catch(() => {}); }, intervalMs);
     this.idleSweeper.unref?.();
   }

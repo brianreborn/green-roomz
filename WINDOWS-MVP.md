@@ -11,7 +11,7 @@ OpenAI-compatible gateway on `http://127.0.0.1:8080`:
 - Model list: `GET /v1/models`
 - Clear aliases (see `config/agents.windows-mvp.json`)
 
-No API-key product. No chat SPA in this cut — use curl or any OpenAI-compatible client pointed at localhost.
+No API-key product. No chat SPA — `GET http://127.0.0.1:8080/` is an operator page (health/models links). Do not use `https://localhost:8080` (there is no TLS; Firefox HTTPS-Only will fail). Prefer `127.0.0.1` over `localhost`. Chat is curl or any OpenAI-compatible client.
 
 ## One-time on qodesh
 

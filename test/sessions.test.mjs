@@ -29,3 +29,38 @@ test('setAgentAlias updates the stored session', () => {
   assert.equal(ledger.setAgentAlias(id, 'qwenstral-code-speculator'), true);
   assert.equal(ledger.get(id, 'a').agentAlias, 'qwenstral-code-speculator');
 });
+
+test('session memory survives a second turn and keeps the last specialist', () => {
+  const ledger = new SessionLedger();
+  const bounds = { transcriptChars: 256, factsLimit: 8 };
+  const id = ledger.create({ identity: 'a', agentAlias: 'general-text-speculator', modality: {} });
+  assert.equal(ledger.rememberTurn(id, {
+    userText: 'My name is Ada',
+    assistantText: 'Hello Ada.',
+    agentAlias: 'general-text-speculator',
+  }, bounds), true);
+  const first = ledger.get(id, 'a');
+  assert.equal(first.facts.find((fact) => fact.key === 'user_name')?.value, 'Ada');
+  assert.equal(first.lastSpecialist, 'general-text-speculator');
+
+  ledger.rememberTurn(id, {
+    userText: 'what did I call myself?',
+    agentAlias: 'general-text-speculator',
+  }, bounds);
+  const second = ledger.get(id, 'a');
+  assert.equal(second.facts.find((fact) => fact.key === 'user_name')?.value, 'Ada');
+  assert.match(second.transcript.map((turn) => turn.text).join('\n'), /My name is Ada/);
+  assert.match(second.transcript.map((turn) => turn.text).join('\n'), /what did I call myself/);
+});
+
+test('session transcript is clipped to the declared char bound', () => {
+  const ledger = new SessionLedger();
+  const bounds = { transcriptChars: 40, factsLimit: 2 };
+  const id = ledger.create({ identity: 'a', agentAlias: 'general-text-speculator' });
+  ledger.rememberTurn(id, { userText: 'AAAAAAAAAA', assistantText: 'BBBBBBBBBB' }, bounds);
+  ledger.rememberTurn(id, { userText: 'keep-me-newest', assistantText: 'tail' }, bounds);
+  const text = ledger.get(id, 'a').transcript.map((turn) => `${turn.role}:${turn.text}`).join('|');
+  assert.match(text, /keep-me-newest|tail/);
+  const chars = ledger.get(id, 'a').transcript.reduce((n, turn) => n + turn.role.length + turn.text.length + 2, 0);
+  assert.ok(chars <= 40, `transcript ${chars} exceeded bound`);
+});

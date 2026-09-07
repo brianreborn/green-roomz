@@ -43,6 +43,8 @@ function installGatewayIssues(gateway) {
     'handoff_peek_chars',
     'agent_chat_timeout_ms',
     'agent_max_tokens',
+    'memory_transcript_chars',
+    'memory_facts_limit',
   ]) {
     const hit = requireInt(gateway, key, { min: 1 });
     if (hit) issues.push(hit);

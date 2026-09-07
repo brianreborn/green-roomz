@@ -97,6 +97,8 @@ export const ORCHESTRATOR_BOUNDED_KEYS = Object.freeze([
   'agent_chat_timeout_ms',
   'agent_max_tokens',
   'health_aliases',
+  'memory_transcript_chars',
+  'memory_facts_limit',
 ]);
 
 export const SYSADMIN_SCHEMA_ENV = 'GREEN_ROOMZ_SYSADMIN_SCHEMA';

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, rmSync, truncateSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, truncateSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { ProcessManager, orderProfiles, vulkanAllThreadCount, withVulkanAllThreads } from '../src/process-manager.mjs';
@@ -338,4 +338,169 @@ test('L3 exited first profile is dropped before the next profile starts', async 
   assert.equal(manager.processes.get(agent.alias)?.state, 'ready');
   await manager.stop(agent.alias);
   assert.equal(manager.processes.has(agent.alias), false);
+});
+
+test('checkpoint/restore: save the slot KV to a named file, restore it, checkpoint on stop', async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'grz-ckpt-'));
+  const manifest = sampleManifest();
+  manifest.gateway.checkpoint_dir = dir;
+  const calls = [];
+  const manager = new ProcessManager({
+    manifest, registry: new AgentRegistry(manifest), spawnImpl() { throw new Error('no'); },
+    fetchImpl: async (url, init) => { calls.push({ url: String(url), body: init?.body && JSON.parse(init.body) }); return { ok: true, status: 200 }; },
+  });
+  const agent = manifest.agents.find((a) => a.alias === 'general-text-speculator');
+  const child = new FakeChild();
+  manager.processes.set(agent.alias, { alias: agent.alias, owned: true, resident: false, state: 'ready', child, createdAt: Date.now() });
+
+  const launch = manager.buildLaunch(agent, { id: 'x', args: ['--device', 'none'] });
+  assert.ok(launch.args.includes('--slot-save-path'));
+  assert.ok(launch.args.includes('--cache-idle-slots'));
+  assert.ok(existsSync(launch.args[launch.args.indexOf('--slot-save-path') + 1]), 'slot-save-path dir must exist before spawn');
+
+  const cp = await manager.checkpointModel(agent.alias, 'snap1');
+  assert.equal(cp.filename, 'snap1.bin');
+  assert.match(calls.at(-1).url, /\/slots\/0\?action=save/);
+  assert.equal(calls.at(-1).body.filename, 'snap1.bin');
+
+  assert.equal(await manager.restoreModel(agent.alias), true);
+  assert.match(calls.at(-1).url, /\/slots\/0\?action=restore/);
+  assert.equal(calls.at(-1).body.filename, 'snap1.bin');
+
+  await manager.stop(agent.alias);
+  assert.ok(calls.some((c) => /action=save/.test(c.url) && c.body.filename === 'on-stop.bin'));
+
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('maybeRestoreDefault: restores the default KV only when the prime snapshot still matches', async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'grz-prime-'));
+  const manifest = sampleManifest();
+  manifest.gateway.checkpoint_dir = dir;
+  const restoreCalls = [];
+  const manager = new ProcessManager({
+    manifest, registry: new AgentRegistry(manifest), spawnImpl() { throw new Error('no'); },
+    fetchImpl: async (url) => { if (/action=restore/.test(String(url))) restoreCalls.push(String(url)); return { ok: true, status: 200 }; },
+  });
+  const agent = manifest.agents.find((a) => a.alias === 'general-text-speculator');
+  const record = { alias: agent.alias, owned: true, resident: false, state: 'ready', child: new FakeChild(), command: '/opt/llama-server', logs: '' };
+  manager.processes.set(agent.alias, record);
+
+  assert.equal(await manager.maybeRestoreDefault(agent, record), false);
+
+  const descDir = path.join(dir, agent.alias.replace(/[^a-z0-9-]/gi, '_'));
+  mkdirSync(descDir, { recursive: true });
+  const writeDesc = (obj) => writeFileSync(path.join(descDir, 'default.snapshot.json'), JSON.stringify(obj));
+
+  writeDesc({ state: 'default.bin', data: { model: agent.model }, code: { command: '/opt/llama-server' }, prime: { promptSha: 'MATCH' } });
+  manager.stockPromptSha = () => 'MATCH';
+  assert.equal(await manager.maybeRestoreDefault(agent, record), true);
+  assert.equal(restoreCalls.length, 1);
+  assert.equal(record.primed, true);
+
+  manager.stockPromptSha = () => 'DIFFERENT';
+  assert.equal(await manager.maybeRestoreDefault(agent, record), false);
+  assert.equal(restoreCalls.length, 1);
+
+  manager.stockPromptSha = () => 'MATCH';
+  writeDesc({ state: 'default.bin', data: { model: agent.model }, code: { command: '/other/llama-server' }, prime: { promptSha: 'MATCH' } });
+  assert.equal(await manager.maybeRestoreDefault(agent, record), false);
+
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('snapshotModel writes a code+data+config+state descriptor; the .bin is the only real payload', async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'grz-snap-'));
+  const manifest = sampleManifest();
+  manifest.gateway.checkpoint_dir = dir;
+  const manager = new ProcessManager({
+    manifest, registry: new AgentRegistry(manifest), spawnImpl() { throw new Error('no'); },
+    fetchImpl: async () => ({ ok: true, status: 200 }),
+  });
+  const alias = 'qwenstral-code-speculator';
+  manager.processes.set(alias, {
+    alias, owned: true, resident: false, state: 'ready', child: new FakeChild(),
+    command: '/opt/llama-server', args: ['--port', '18183', '--model', '/m/code.gguf', '--no-warmup'],
+    profileId: 'cpu-4', createdAt: Date.now(),
+  });
+  const snap = await manager.snapshotModel(alias, 'snapA', { prime: { promptSha: 'abc123' } });
+  assert.equal(snap.code.command, '/opt/llama-server');
+  assert.ok(snap.code.args.includes('--no-warmup'));
+  assert.equal(snap.state, 'snapA.bin');
+  assert.equal(snap.profileId, 'cpu-4');
+  assert.equal(snap.prime.promptSha, 'abc123');
+  assert.ok(existsSync(snap.descriptor));
+  const d = JSON.parse(readFileSync(snap.descriptor, 'utf8'));
+  assert.equal(d.alias, alias);
+  assert.ok('model' in d.data);
+  assert.equal(d.prime.promptSha, 'abc123');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('startIdleSweeper is a no-op when idle eviction is disabled', () => {
+  const manager = new ProcessManager({ manifest: sampleManifest(), registry: new AgentRegistry(sampleManifest()) });
+  manager.idleEvictMs = 0;
+  manager.startIdleSweeper();
+  assert.equal(manager.idleSweeper, null);
+});
+
+test('sweepIdle evicts over-cap and stale specialists, keeps the resident nexus', async () => {
+  const manifest = sampleManifest();
+  const registry = new AgentRegistry(manifest);
+  const manager = new ProcessManager({
+    manifest,
+    registry,
+    hostAdapter: { applyPriority() {} },
+    spawnImpl: () => new FakeChild(),
+    fetchImpl: async () => ({ ok: true }),
+  });
+  manager.maxWarmSpecialists = 1;
+  manager.idleEvictMs = 10_000;
+  const now = Date.now();
+  const put = (alias, resident, lastUsedAt) => manager.processes.set(alias, {
+    alias, resident, owned: true, state: 'ready', createdAt: now, lastUsedAt,
+    child: new FakeChild(),
+  });
+  put('tool-router-agent', true, now);
+  put('general-text-speculator', false, now - 1_000);
+  put('qwenstral-code-speculator', false, now - 2_000);
+  put('vision-layout-agent', false, now - 60_000);
+
+  const evicted = await manager.sweepIdle(now);
+  assert.ok(evicted.includes('qwenstral-code-speculator'));
+  assert.ok(evicted.includes('vision-layout-agent'));
+  assert.ok(!evicted.includes('tool-router-agent'), 'resident nexus survives');
+  assert.ok(!evicted.includes('general-text-speculator'), 'most-recent specialist stays warm');
+  assert.ok(manager.processes.has('tool-router-agent'));
+  assert.ok(!manager.processes.has('vision-layout-agent'));
+});
+
+test('evictForNewSpecialist drops the LRU warm specialist to make room (maxWarm 1)', async () => {
+  const manager = new ProcessManager({ manifest: sampleManifest(), registry: new AgentRegistry(sampleManifest()), spawnImpl() { throw new Error('no'); } });
+  manager.maxWarmSpecialists = 2;
+  const now = Date.now();
+  manager.processes.set('vision-layout-agent', { alias: 'vision-layout-agent', owned: true, resident: false, state: 'ready', child: new FakeChild(), lastUsedAt: now - 5000 });
+  manager.processes.set('general-text-speculator', { alias: 'general-text-speculator', owned: true, resident: false, state: 'ready', child: new FakeChild(), lastUsedAt: now - 1000 });
+  manager.canSuspend = false;
+  const { terminated } = await manager.evictForNewSpecialist('qwenstral-code-speculator');
+  assert.deepEqual(terminated, ['vision-layout-agent']);
+  assert.ok(!manager.processes.has('vision-layout-agent'));
+  assert.ok(manager.processes.has('general-text-speculator'));
+});
+
+test('waitForReady tolerates whisper/sd-server which have no /health (404 on it)', async () => {
+  const manifest = sampleManifest();
+  manifest.runtimes.stable_diffusion.command = process.execPath;
+  const registry = new AgentRegistry(manifest);
+  const agent = manifest.agents.find((a) => a.alias === 'image-generation-agent');
+  registry.setStatus(agent.alias, 'cold');
+  const child = new FakeChild();
+  const manager = new ProcessManager({
+    manifest, registry, hostAdapter: { applyPriority() {} },
+    spawnImpl: () => child,
+    fetchImpl: async (url) => ({ status: url.endsWith('/health') ? 404 : 200, ok: !url.endsWith('/health') && true, async arrayBuffer() { return new ArrayBuffer(0); } }),
+  });
+  const rec = await manager.start(agent);
+  assert.equal(rec.state, 'ready');
+  await manager.stop(agent.alias);
 });

@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import net from 'node:net';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -267,6 +268,46 @@ test('unknown paths are 404 rather than proxied', async (t) => {
   assert.equal(result.status, 404);
 });
 
+test('GET / is an operator HTML index, not JSON 404', async (t) => {
+  const { server } = await withServer(t);
+  const { port } = server.address();
+  const res = await new Promise((resolve, reject) => {
+    http.get({ hostname: '127.0.0.1', port, path: '/', family: 4, timeout: 5000 }, (r) => {
+      const chunks = [];
+      r.on('data', (chunk) => chunks.push(chunk));
+      r.on('end', () => resolve({
+        status: r.statusCode,
+        type: r.headers['content-type'],
+        body: Buffer.concat(chunks).toString(),
+      }));
+    }).on('error', reject);
+  });
+  assert.equal(res.status, 200);
+  assert.match(String(res.type), /text\/html/);
+  assert.match(res.body, /OpenAI-compatible/);
+  assert.match(res.body, /127\.0\.0\.1/);
+});
+
+test('TLS ClientHello is dropped instead of HTTP 400', async (t) => {
+  const { server } = await withServer(t);
+  const { port } = server.address();
+  const data = await new Promise((resolve, reject) => {
+    const socket = net.connect({ host: '127.0.0.1', port, family: 4 }, () => {
+      socket.write(Buffer.from('160301000100', 'hex'));
+    });
+    const chunks = [];
+    socket.on('data', (chunk) => chunks.push(chunk));
+    socket.on('close', () => resolve(Buffer.concat(chunks)));
+    socket.on('error', () => resolve(Buffer.concat(chunks)));
+    socket.setTimeout(2000, () => {
+      socket.destroy();
+      resolve(Buffer.concat(chunks));
+    });
+    t.after(() => socket.destroy());
+  });
+  assert.equal(data.length, 0, `expected RST/close, got ${data.toString('utf8')}`);
+});
+
 test('general-text thinking is off by default including max_tokens 256; explicit true is preserved', () => {
   const agent = { alias: 'general-text-speculator' };
   const short = prepareInferenceBody({ max_tokens: 24, messages: [] }, agent);
@@ -289,6 +330,48 @@ test('nexus thinking is always off even if the client asked', () => {
   assert.equal(forced.chat_template_kwargs.enable_thinking, false);
 });
 
+test('second turn with only the latest user message still injects session facts', async (t) => {
+  const seen = [];
+  const { server } = await withServer(t, {}, {
+    ready: ['general-text-speculator'],
+    stubEnsure: true,
+    fetchImpl: async (_url, init) => {
+      const body = JSON.parse(Buffer.from(init.body).toString());
+      seen.push(body);
+      return jsonFetch({ choices: [{ message: { role: 'assistant', content: 'ok' } }] });
+    },
+  });
+  const first = await request(server, {
+    path: '/v1/chat/completions',
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: {
+      model: 'general-text-speculator',
+      lock_alias: true,
+      messages: [{ role: 'user', content: 'My name is Ada' }],
+    },
+  });
+  assert.equal(first.status, 200);
+  const sid = first.headers['x-session-id'];
+  assert.ok(sid);
+  const second = await request(server, {
+    path: '/v1/chat/completions',
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-session-id': sid },
+    body: {
+      model: 'general-text-speculator',
+      lock_alias: true,
+      messages: [{ role: 'user', content: 'what did I call myself?' }],
+    },
+  });
+  assert.equal(second.status, 200);
+  assert.ok(seen.length >= 2, `expected two specialist bodies, got ${seen.length}`);
+  const blob = JSON.stringify(seen.at(-1).messages);
+  assert.match(blob, /Ada/);
+  assert.match(blob, /what did I call myself/);
+  assert.match(String(second.headers['x-green-roomz-memory'] ?? ''), /facts=1/);
+});
+
 test('system policy is prepended even when the client already sent a system message', () => {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'grz-policy-'));
   const policyPath = path.join(dir, 'general-text.md');
@@ -296,12 +379,13 @@ test('system policy is prepended even when the client already sent a system mess
   const agent = { alias: 'general-text-speculator', system_policy: policyPath };
   const added = prepareInferenceBody({ messages: [{ role: 'user', content: 'hi' }] }, agent);
   assert.equal(added.messages[0].role, 'system');
-  assert.equal(added.messages[0].content, 'Be concise.\n');
+  assert.match(added.messages[0].content, /Be concise\./);
+  assert.match(added.messages[0].content, /# Memory/);
   assert.equal(added.messages[1].content, 'hi');
   const kept = prepareInferenceBody({
     messages: [{ role: 'system', content: 'already' }, { role: 'user', content: 'hi' }],
   }, agent);
-  assert.equal(kept.messages[0].content, 'Be concise.\n');
+  assert.match(kept.messages[0].content, /Be concise\./);
   assert.equal(kept.messages[1].content, 'already');
   assert.equal(kept.messages.length, 3);
 });
@@ -931,4 +1015,263 @@ test('H3 council parallel:true serializes when specialists exceed maxWarmSpecial
   });
   assert.equal(result.status, 200);
   assert.equal(maxInflight, 1);
+});
+
+test('/props distinguishes declared, callable, and loaded capabilities', async (t) => {
+  const { server } = await withServer(t);
+  const result = await request(server, { path: '/props' });
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.body.capability_reporting, {
+    native_capabilities: 'declared',
+    callable_capabilities: 'runtime_checked',
+    ready_capabilities: 'loaded_now',
+  });
+  assert.equal('native_capabilities_are_truthful' in result.body, false);
+  const vision = result.body.models.find((model) => model.id === 'vision-layout-agent');
+  assert.ok(vision.native_capabilities.includes('image'));
+  assert.deepEqual(vision.callable_capabilities, []);
+});
+
+test('a request from a disallowed peer is 403', async (t) => {
+  const { server, gateway } = await withServer(t);
+  gateway.manifest.gateway.allow_peers = ['203.0.113.7'];
+  const orig = gateway.handle.bind(gateway);
+  gateway.handle = (req, res) => { Object.defineProperty(req.socket, 'remoteAddress', { value: '198.51.100.9', configurable: true }); return orig(req, res); };
+  const res = await request(server, { path: '/v1/health' });
+  assert.equal(res.status, 403);
+});
+
+test('bind-all needs the override; a specific LAN host needs allow_peers or a key', async () => {
+  const mk = (gw = {}) => {
+    const manifest = sampleManifest({ gateway: gw });
+    const registry = new AgentRegistry(manifest);
+    return new Gateway({ manifest, registry, processes: new ProcessManager({ manifest, registry }), sessions: new SessionLedger(), policy: new PolicyGate('maximize') });
+  };
+  delete process.env.GREEN_ROOMZ_API_KEY;
+  delete process.env.GREEN_ROOMZ_ALLOW_PUBLIC;
+
+  assert.throws(() => mk().bindAddress('0.0.0.0'), /all interfaces/);
+  assert.throws(() => mk().bindAddress('192.168.1.5'), /allow_peers/);
+  assert.equal(mk({ allow_peers: ['192.168.1.42'] }).bindAddress('192.168.1.5'), '192.168.1.5');
+  assert.equal(mk().bindAddress('127.0.0.1'), '127.0.0.1');
+});
+
+test('peerAllowed gates non-loopback clients against the allowlist', async () => {
+  const { peerAllowed, normalizeAddr } = await import('../src/gateway.mjs');
+  assert.equal(peerAllowed('127.0.0.1', []), true);
+  assert.equal(peerAllowed('::1', []), true);
+  assert.equal(peerAllowed('::ffff:127.0.0.1', []), true);
+  assert.equal(normalizeAddr('::ffff:192.168.1.42'), '192.168.1.42');
+  assert.equal(peerAllowed('192.168.1.42', ['192.168.1.42']), true);
+  assert.equal(peerAllowed('::ffff:192.168.1.42', ['192.168.1.42']), true);
+  assert.equal(peerAllowed('192.168.1.43', ['192.168.1.42']), false);
+  assert.equal(peerAllowed('192.168.1.99', ['192.168.1.0/24']), true);
+  assert.equal(peerAllowed('10.0.0.1', ['192.168.1.0/24']), false);
+});
+
+test('council: /council on sets a session default that fans out later turns', async (t) => {
+  const manifest = sampleManifest();
+  const vl = manifest.agents.find((a) => a.alias === 'vision-layout-agent');
+  manifest.agents.push({ ...vl, alias: 'vision-layout-agent@b', variant_of: 'vision-layout-agent', port: 18281, model: '/tmp/b.gguf' });
+  const registry = await new AgentRegistry(manifest).inspect();
+  for (const a of ['vision-layout-agent', 'vision-layout-agent@b', 'tool-router-agent']) registry.setStatus(a, 'ready');
+  const processes = new ProcessManager({ manifest, registry, spawnImpl() { throw new Error('no'); } });
+  processes.ensure = async (agent) => ({ alias: agent.alias, state: 'ready' });
+  const gateway = new Gateway({
+    manifest, registry, processes, sessions: new SessionLedger(), policy: new PolicyGate('maximize'),
+    fetchImpl: async () => jsonFetch({ choices: [{ message: { role: 'assistant', content: '{"brand":"Acme"}' } }] }),
+  });
+  const server = await gateway.listen('127.0.0.1', 0);
+  t.after(() => server.close());
+
+  const on = await request(server, {
+    path: '/v1/chat/completions', method: 'POST', headers: { 'content-type': 'application/json' },
+    body: { messages: [{ role: 'user', content: '/council on vision-layout-agent field-vote' }] },
+  });
+  const sid = on.headers['x-session-id'];
+  assert.ok(sid);
+
+  const later = await request(server, {
+    path: '/v1/chat/completions', method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-session-id': sid },
+    body: { messages: [{ role: 'user', content: 'extract the brand' }] },
+  });
+  assert.equal(later.status, 200);
+  assert.equal(later.body.council.variants.length, 2);
+
+  const off = await request(server, {
+    path: '/v1/chat/completions', method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-session-id': sid },
+    body: { messages: [{ role: 'user', content: '/council off' }] },
+  });
+  assert.equal(off.status, 200);
+  const afterOff = await request(server, {
+    path: '/v1/chat/completions', method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-session-id': sid },
+    body: { messages: [{ role: 'user', content: 'hello again' }] },
+  });
+  assert.equal(afterOff.body.council, undefined, 'council default cleared');
+});
+
+test('council: a /council slash message triggers the fan-out (same as the JSON form)', async (t) => {
+  const manifest = sampleManifest();
+  const vl = manifest.agents.find((a) => a.alias === 'vision-layout-agent');
+  manifest.agents.push({ ...vl, alias: 'vision-layout-agent@b', variant_of: 'vision-layout-agent', port: 18281, model: '/tmp/b.gguf' });
+
+  const registry = await new AgentRegistry(manifest).inspect();
+  for (const a of ['vision-layout-agent', 'vision-layout-agent@b', 'tool-router-agent']) registry.setStatus(a, 'ready');
+  const processes = new ProcessManager({ manifest, registry, spawnImpl() { throw new Error('no'); } });
+  processes.ensure = async (agent) => ({ alias: agent.alias, state: 'ready' });
+
+  const seen = [];
+  const gateway = new Gateway({
+    manifest, registry, processes, sessions: new SessionLedger(), policy: new PolicyGate('maximize'),
+    fetchImpl: async (url, init) => {
+      seen.push(JSON.parse(init.body).messages.at(-1).content);
+      return jsonFetch({ choices: [{ message: { role: 'assistant', content: '{"brand":"Acme"}' } }] });
+    },
+  });
+  const server = await gateway.listen('127.0.0.1', 0);
+  t.after(() => server.close());
+
+  const res = await request(server, {
+    path: '/v1/chat/completions', method: 'POST', headers: { 'content-type': 'application/json' },
+    body: { messages: [{ role: 'user', content: '/council vision-layout-agent field-vote extract the brand' }] },
+  });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.council.variants.length, 2);
+  assert.match(res.headers['x-green-roomz-council'], /"judge":"field-vote"/);
+  assert.ok(seen.every((c) => c === 'extract the brand'), JSON.stringify(seen));
+});
+
+test('council: a split turn (agreement < 0.6) is logged to disagreements.jsonl', async (t) => {
+  const { mkdtempSync, readFileSync, existsSync } = await import('node:fs');
+  const os = await import('node:os');
+  const nodePath = await import('node:path');
+  const dir = mkdtempSync(nodePath.join(os.tmpdir(), 'grz-disagree-'));
+
+  const manifest = sampleManifest();
+  manifest.gateway.council_dir = dir;
+  const vl = manifest.agents.find((a) => a.alias === 'vision-layout-agent');
+  manifest.agents.push({ ...vl, alias: 'vision-layout-agent@b', variant_of: 'vision-layout-agent', port: 18281, model: '/tmp/b.gguf' });
+  manifest.agents.push({ ...vl, alias: 'vision-layout-agent@c', variant_of: 'vision-layout-agent', port: 18282, model: '/tmp/c.gguf' });
+  const registry = await new AgentRegistry(manifest).inspect();
+  for (const a of ['vision-layout-agent', 'vision-layout-agent@b', 'vision-layout-agent@c', 'tool-router-agent']) registry.setStatus(a, 'ready');
+  const processes = new ProcessManager({ manifest, registry, spawnImpl() { throw new Error('no'); } });
+  processes.ensure = async (agent) => ({ alias: agent.alias, state: 'ready' });
+
+  const answers = { 18181: '{"brand":"Acme"}', 18281: '{"brand":"Beta"}', 18282: '{"brand":"Gamma"}' };
+  const gateway = new Gateway({
+    manifest, registry, processes, sessions: new SessionLedger(), policy: new PolicyGate('maximize'),
+    fetchImpl: async (url) => jsonFetch({ choices: [{ message: { role: 'assistant', content: answers[Number(String(url).match(/:(\d+)\//)[1])] } }] }),
+  });
+  const server = await gateway.listen('127.0.0.1', 0);
+  t.after(() => server.close());
+
+  await request(server, {
+    path: '/v1/chat/completions', method: 'POST', headers: { 'content-type': 'application/json' },
+    body: { council: { of: 'vision-layout-agent' }, messages: [{ role: 'user', content: 'what brand is on the label' }] },
+  });
+
+  const file = nodePath.join(dir, 'disagreements.jsonl');
+  assert.ok(existsSync(file), 'disagreements.jsonl written');
+  const entry = JSON.parse(readFileSync(file, 'utf8').trim());
+  assert.ok(entry.agreement < 0.6);
+  assert.equal(entry.prompt, 'what brand is on the label');
+  assert.equal(entry.answers.length, 3);
+});
+
+test('council: councilWeights derives 0.5 + agree_rate from the scorecard (>= 5 runs)', async (t) => {
+  const { mkdtempSync, writeFileSync } = await import('node:fs');
+  const os = await import('node:os');
+  const nodePath = await import('node:path');
+  const dir = mkdtempSync(nodePath.join(os.tmpdir(), 'grz-weights-'));
+  const row = (results) => JSON.stringify({ task: 'vision', results });
+  const lines = [];
+  for (let i = 0; i < 6; i += 1) {
+    lines.push(row([
+      { alias: 'v', verdict: i < 5 ? 'winner' : 'outlier' },
+      { alias: 'w', verdict: 'outlier' },
+      { alias: 'rare', verdict: 'winner' },
+    ].slice(0, i === 0 ? 3 : 2)));
+  }
+  writeFileSync(nodePath.join(dir, 'scores.jsonl'), lines.join('\n'));
+
+  const manifest = sampleManifest();
+  manifest.gateway.council_dir = dir;
+  const gateway = new Gateway({
+    manifest, registry: await new AgentRegistry(manifest).inspect(),
+    processes: new ProcessManager({ manifest, registry: new AgentRegistry(manifest), spawnImpl() { throw new Error('no'); } }),
+    sessions: new SessionLedger(), policy: new PolicyGate('maximize'),
+  });
+  const wts = gateway.councilWeights();
+  assert.ok(Math.abs(wts.v - (0.5 + 5 / 6)) < 1e-9);
+  assert.ok(Math.abs(wts.w - 0.5) < 1e-9);
+  assert.equal('rare' in wts, false);
+});
+
+test('council: fan out to variants, field-vote the JSON, flag the outlier, write a scorecard', async (t) => {
+  const { mkdtempSync, readFileSync } = await import('node:fs');
+  const os = await import('node:os');
+  const nodePath = await import('node:path');
+  const dir = mkdtempSync(nodePath.join(os.tmpdir(), 'grz-council-'));
+
+  const manifest = sampleManifest();
+  manifest.gateway.council_dir = dir;
+  const vl = manifest.agents.find((a) => a.alias === 'vision-layout-agent');
+  manifest.agents.push({ ...vl, alias: 'vision-layout-agent@b', variant_of: 'vision-layout-agent', port: 18281, model: '/tmp/b.gguf' });
+  manifest.agents.push({ ...vl, alias: 'vision-layout-agent@c', variant_of: 'vision-layout-agent', port: 18282, model: '/tmp/c.gguf' });
+
+  const registry = await new AgentRegistry(manifest).inspect();
+  for (const a of ['vision-layout-agent', 'vision-layout-agent@b', 'vision-layout-agent@c', 'tool-router-agent']) registry.setStatus(a, 'ready');
+  const processes = new ProcessManager({ manifest, registry, spawnImpl() { throw new Error('no'); } });
+  processes.ensure = async (agent) => ({ alias: agent.alias, state: 'ready' });
+
+  const answers = {
+    18181: '{"brand":"Acme","abv":"13.5%"}',
+    18281: '{"brand":"Acme","abv":"13.5%"}',
+    18282: '{"brand":"Acme","abv":"12%"}',
+  };
+  const gateway = new Gateway({
+    manifest, registry, processes, sessions: new SessionLedger(), policy: new PolicyGate('maximize'),
+    fetchImpl: async (url) => {
+      const port = Number(String(url).match(/:(\d+)\//)[1]);
+      return jsonFetch({ choices: [{ message: { role: 'assistant', content: answers[port] } }] });
+    },
+  });
+  const server = await gateway.listen('127.0.0.1', 0);
+  t.after(() => server.close());
+
+  const res = await request(server, {
+    path: '/v1/chat/completions', method: 'POST', headers: { 'content-type': 'application/json' },
+    body: { council: { of: 'vision-layout-agent', judge: 'field-vote' }, messages: [{ role: 'user', content: 'extract fields' }] },
+  });
+  assert.equal(res.status, 200);
+  assert.equal(JSON.parse(res.body.choices[0].message.content).abv, '13.5%');
+  assert.equal(res.body.council.outlier, 'vision-layout-agent@c');
+  assert.equal(res.body.council.votes.abv.count, 2);
+  assert.equal(res.body.council.variants.length, 3);
+  assert.match(res.headers['x-green-roomz-council'], /"winner"/);
+
+  const scores = readFileSync(nodePath.join(dir, 'scores.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+  assert.equal(scores.length, 1);
+  assert.equal(scores[0].outlier, 'vision-layout-agent@c');
+  assert.ok(scores[0].results.some((r) => r.verdict === 'outlier'));
+});
+
+test('an image request whose vision backend will not start is a 503, never a text-model 500', async (t) => {
+  const { server } = await withServer(t, {}, {
+    ready: ['tool-router-agent', 'general-text-speculator'],
+    stubEnsure: false,
+    fetchImpl: async () => jsonFetch({ choices: [{ message: { content: 'x' } }] }),
+  });
+  const res = await request(server, {
+    path: '/v1/chat/completions', method: 'POST', headers: { 'content-type': 'application/json' },
+    body: { model: 'vision-layout-agent', messages: [{ role: 'user', content: [
+      { type: 'text', text: 'what is this' },
+      { type: 'image_url', image_url: { url: 'data:image/png;base64,iVBORw0KGgo=' } },
+    ] }] },
+  });
+  assert.equal(res.status, 503);
+  assert.notEqual(res.headers['x-green-roomz-effective-alias'], 'general-text-speculator');
 });
