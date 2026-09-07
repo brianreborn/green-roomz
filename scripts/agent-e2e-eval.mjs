@@ -8,12 +8,12 @@
  *   node scripts/agent-e2e-eval.mjs --live
  *   node scripts/agent-e2e-eval.mjs --full --no-fail-fast --offline-only
  *
- * Env: GRZ_BASE_URL, GRZ_MODEL, GRZ_CHAT_TIMEOUT_MS
+ * Env: GRZ_BASE_URL, GRZ_MODEL (defaults to qwenstral-code-speculator), GRZ_CHAT_TIMEOUT_MS
  * Flags: --smoke (default) --full --id E1,E4 --fail-fast (default) --no-fail-fast
  *        --offline-only (default) --live --live-only
  */
 import { readFile, writeFile, mkdir, rm } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runDevAgent } from '../src/dev-agent.mjs';
@@ -24,7 +24,7 @@ const root = path.resolve(here, '..');
 const suitePath = path.join(root, 'eval', 'agent-e2e.json');
 const outPath = process.env.GRZ_E2E_OUT || path.join(root, 'data', 'agent-e2e-last.json');
 const base = (process.env.GRZ_BASE_URL || 'http://127.0.0.1:8080').replace(/\/$/, '');
-const defaultModel = process.env.GRZ_MODEL || 'general-text-speculator';
+const defaultModel = process.env.GRZ_MODEL || 'qwenstral-code-speculator';
 const argv = process.argv.slice(2);
 function flagValue(flag) {
   const i = argv.indexOf(flag);
@@ -64,6 +64,17 @@ function scoreCase(c, result, workspace) {
   if (exp.files) {
     for (const f of exp.files) {
       if (!existsSync(path.join(workspace, f))) fail.push(`missing ${f}`);
+    }
+  }
+  if (exp.fileContentRegex) {
+    for (const [file, pattern] of Object.entries(exp.fileContentRegex)) {
+      const filePath = path.join(workspace, file);
+      if (!existsSync(filePath)) {
+        fail.push(`missing ${file} for content check`);
+        continue;
+      }
+      const content = readFileSync(filePath, 'utf8');
+      if (!new RegExp(pattern, 'm').test(content)) fail.push(`${file} !~ ${pattern}`);
     }
   }
   const exec = lastExec(result);

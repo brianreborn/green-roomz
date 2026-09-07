@@ -29,16 +29,20 @@ export const FALLBACK_ALIAS = 'general-text-speculator';
 export const MAX_SPECIALIST_HOPS = 3;
 export const HANDOFF_PEEK_CHARS = 48;
 export const NEXUS_MAX_TOKENS = 96;
-/** Consult abort; slow boxes fall back to the offline plan rather than hang the chat. */
-export const NEXUS_CONSULT_TIMEOUT_MS = 25_000;
+/**
+ * Default consult abort is intentionally very generous.
+ * If the model stack is slow to warm or the box is loaded, we prefer a slow but
+ * successful answer over a premature timeout caused by bad tuning.
+ */
+export const NEXUS_CONSULT_TIMEOUT_MS = 600_000;
 /**
  * Hard ceiling on any single upstream backend request (proxy + native paths).
- * A stalled llama.cpp must not pin a policy slot forever. Override per-manifest
- * with gateway.upstream_timeout_ms.
+ * Default is deliberately conservative to avoid flapping due to slow cold starts.
+ * Override per-manifest with gateway.upstream_timeout_ms when needed.
  */
-export const UPSTREAM_TIMEOUT_MS = 180_000;
-/** Peek/handoff hop ceiling — a stalled specialist stream must not wedge routing. */
-export const HANDOFF_PEEK_TIMEOUT_MS = 20_000;
+export const UPSTREAM_TIMEOUT_MS = 600_000;
+/** Peek/handoff hop ceiling — intentionally generous to avoid false timeouts during slow specialist warmups. */
+export const HANDOFF_PEEK_TIMEOUT_MS = 600_000;
 /** Cap on a buffered (non-streaming) upstream response we will read into memory. */
 export const UPSTREAM_MAX_BUFFER_BYTES = 8 * 1024 * 1024;
 

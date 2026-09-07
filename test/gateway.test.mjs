@@ -137,7 +137,7 @@ test('health is ok when health_aliases are ready even if vision is missing', asy
 });
 
 test('logical router returns a plan only when route_plan_only is set', async (t) => {
-  const { server } = await withServer(t);
+  const { server } = await withServer(t, {}, { ready: ['general-text-speculator'] });
   const result = await request(server, {
     path: '/v1/chat/completions',
     method: 'POST',
@@ -151,7 +151,7 @@ test('logical router returns a plan only when route_plan_only is set', async (t)
 });
 
 test('path ending in /route returns the plan JSON', async (t) => {
-  const { server } = await withServer(t);
+  const { server } = await withServer(t, {}, { ready: ['qwenstral-code-speculator'] });
   const result = await request(server, {
     path: '/v1/chat/completions/route',
     method: 'POST',

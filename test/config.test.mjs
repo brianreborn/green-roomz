@@ -15,8 +15,10 @@ test('windows manifest has exactly eleven required aliases and no translation ag
   assert.equal(manifest.gateway.max_warm_specialists, 1);
   assert.equal(manifest.gateway.admit_when_tight, 'refuse');
   assert.equal(manifest.gateway.apply_store_winners, false);
-  assert.equal(manifest.gateway.nexus_consult_timeout_ms, 10000);
-  assert.equal(manifest.gateway.agent_chat_timeout_ms, 60000);
+  assert.equal(manifest.gateway.nexus_consult_timeout_ms, 600000);
+  assert.equal(manifest.gateway.handoff_peek_timeout_ms, 600000);
+  assert.equal(manifest.gateway.headers_timeout_ms, 600000);
+  assert.equal(manifest.gateway.agent_chat_timeout_ms, 600000);
   assert.equal(manifest.gateway.agent_max_tokens, 96);
   assert.equal(manifest.gateway.memory_transcript_chars, 2048);
   assert.equal(manifest.gateway.memory_facts_limit, 8);

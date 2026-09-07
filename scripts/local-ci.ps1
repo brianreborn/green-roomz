@@ -1,9 +1,8 @@
-# Local CI loop for qodesh green-roomz. Totally offline. Append-only log.
+# Local CI watcher for qodesh green-roomz. Totally offline. Append-only log.
 $ErrorActionPreference = 'Continue'
 $Root = 'C:\Users\brian\Documents\green-roomz'
 $Node = 'C:\Program Files\nodejs\node.exe'
 $Log = Join-Path $Root 'data\local-ci.log'
-$IntervalSec = 900
 New-Item -ItemType Directory -Force -Path (Join-Path $Root 'data') | Out-Null
 
 function Stamp { Get-Date -Format 'yyyy-MM-ddTHH:mm:ssK' }
@@ -14,15 +13,10 @@ function Write-Log([string]$msg) {
   Write-Output $line
 }
 
-trap {
-  Write-Log ("TRAP: " + $_.Exception.Message)
-  continue
-}
-
-Write-Log "local-ci start pid=$PID interval=${IntervalSec}s ppid=$($PID)"
+Write-Log "local-ci watcher start pid=$PID ppid=$($PID)"
 Set-Location $Root
 
-while ($true) {
+function Invoke-CiCycle {
   $t0 = Get-Date
   $outFile = Join-Path $Root 'data\local-ci-last.txt'
   $code = -1
@@ -59,7 +53,37 @@ while ($true) {
     Write-Log 'health down'
   }
 
-  Write-Log "sleep ${IntervalSec}s"
-  Start-Sleep -Seconds $IntervalSec
-  Write-Log 'wake'
+}
+
+$watcher = New-Object IO.FileSystemWatcher $Root
+$watcher.IncludeSubdirectories = $true
+$watcher.EnableRaisingEvents = $true
+$watcher.NotifyFilter = [IO.NotifyFilters]::LastWrite -bor [IO.NotifyFilters]::FileName
+$watcher.Filter = '*.*'
+$subscriptions = @(
+  Register-ObjectEvent $watcher Changed -SourceIdentifier 'GreenRoomzCiChanged'
+  Register-ObjectEvent $watcher Created -SourceIdentifier 'GreenRoomzCiCreated'
+  Register-ObjectEvent $watcher Deleted -SourceIdentifier 'GreenRoomzCiDeleted'
+  Register-ObjectEvent $watcher Renamed -SourceIdentifier 'GreenRoomzCiRenamed'
+)
+
+try {
+  Invoke-CiCycle
+  while ($true) {
+    $event = Wait-Event
+    if (-not $event) { continue }
+    Remove-Event -EventIdentifier $event.EventIdentifier -ErrorAction SilentlyContinue
+    $path = [string]$event.SourceEventArgs.FullPath
+    if ($path -match '\\data\\|\\node_modules\\|\\\.git\\') { continue }
+    Start-Sleep -Milliseconds 750
+    while ($pending = Get-Event -SourceIdentifier 'GreenRoomzCiChanged' -ErrorAction SilentlyContinue) {
+      Remove-Event -EventIdentifier $pending.EventIdentifier -ErrorAction SilentlyContinue
+    }
+    Write-Log "change detected path=$path"
+    Invoke-CiCycle
+  }
+} finally {
+  $subscriptions | Unregister-Event -Force -ErrorAction SilentlyContinue
+  $watcher.Dispose()
+  Write-Log 'local-ci watcher stopped'
 }

@@ -135,7 +135,7 @@ export async function execTool(workspace, action, state = {}) {
   return { ok: false, error: `unknown tool ${tool}` };
 }
 
-const SYSTEM = `Coding agent. Jail workspace. One JSON object only:
+export const AGENT_DEV_SYSTEM = `Coding agent. Jail workspace. One JSON object only:
 {"tool":"write","path":"rel/file.ext","content":"..."}
 {"tool":"read","path":"rel/file.ext"}
 {"tool":"run","path":"rel/file.ext"}
@@ -144,7 +144,8 @@ const SYSTEM = `Coding agent. Jail workspace. One JSON object only:
 {"tool":"probe"}
 {"tool":"runtime","ext":".lua","bin":"lua","args":[]}
 {"done":true,"summary":"..."}
-Fix compile/runtime errors then run/test. No prose.`;
+
+Work from the complete user goal, not a generic example. For design tasks, preserve the requested architecture, names, invariants, and edge cases. Use one tool action per turn. Write implementation and tests, run the tests, repair failures, and emit done only after the requested behavior is actually verified. Never replace an unrecognized design task with a hello-world sample. No prose.`;
 
 async function loadLearn(workspace, state) {
   try {
@@ -207,7 +208,7 @@ export async function runDevAgent({
   await loadLearn(workspace, state);
   const steps = [];
   const history = [
-    { role: 'system', content: SYSTEM },
+    { role: 'system', content: AGENT_DEV_SYSTEM },
     { role: 'user', content: String(goal) },
   ];
   const fallback = fallbackPlan(goal, spec);
@@ -244,7 +245,7 @@ export async function runDevAgent({
         steps.push({ error: String(error.message ?? error) });
       }
     }
-    if (!action && useFallback && fallbackI < fallback.length) {
+    if (!action && useFallback && !spec.requiresModel && fallbackI < fallback.length) {
       action = fallback[fallbackI];
       fallbackI += 1;
       fromModel = false;

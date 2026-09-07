@@ -792,9 +792,10 @@ export class Gateway {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'grz-tts-'));
     const out = path.join(dir, 'speech.wav');
     try {
+      const timeout = this.manifest.gateway.agent_chat_timeout_ms ?? 600_000;
       await new Promise((resolve, reject) => {
         const child = execFile(runtime.command, ['--model', agent.model, '--output_file', out],
-          { timeout: 30_000, windowsHide: true }, (err) => (err ? reject(err) : resolve()));
+          { timeout, windowsHide: true }, (err) => (err ? reject(err) : resolve()));
         child.stdin.end(text);
       });
       const wav = await readFile(out);
@@ -936,7 +937,7 @@ export class Gateway {
           for (const c of usable) {
             const r = await this.fetchImpl(`http://127.0.0.1:${embedAgent.port}/v1/embeddings`, {
               method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: 'semantic-embedding-agent', input: c.content.slice(0, 4000) }),
-              signal: deadlineSignal(request.abortSignal, 20_000),
+              signal: deadlineSignal(request.abortSignal, this.manifest.gateway.handoff_peek_timeout_ms ?? HANDOFF_PEEK_TIMEOUT_MS),
             });
             const emb = JSON.parse(await readCappedText(r, 4 * 1024 * 1024))?.data?.[0]?.embedding;
             if (Array.isArray(emb)) vectors.push({ alias: c.alias, embedding: emb });
@@ -953,7 +954,7 @@ export class Gateway {
       const res = await this.fetchImpl(`http://127.0.0.1:${jAgent.port}/v1/chat/completions`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ messages: [{ role: 'user', content: judgePrompt(userText, usable) }], max_tokens: 8, stream: false }),
-        signal: deadlineSignal(request.abortSignal, 25_000),
+        signal: deadlineSignal(request.abortSignal, this.manifest.gateway.nexus_consult_timeout_ms ?? NEXUS_CONSULT_TIMEOUT_MS),
       });
       const reply = JSON.parse(await readCappedText(res, 1024 * 1024))?.choices?.[0]?.message?.content ?? '';
       return resolveJudgeChoice(reply, usable);
@@ -1107,7 +1108,7 @@ export class Gateway {
         }
       } catch {}
     }
-    const alias = plan.route
+    const alias = (isRoutableAlias(this.registry, plan.route) ? plan.route : null)
       ?? (isRoutableAlias(this.registry, FALLBACK_ALIAS) ? FALLBACK_ALIAS : NEXUS_ALIAS);
     plan = { ...plan, route: alias };
     const routed = {

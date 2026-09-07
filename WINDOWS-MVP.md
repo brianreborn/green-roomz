@@ -39,6 +39,39 @@ Default: `bartowski/Qwen2.5-0.5B-Instruct-GGUF` → `models\Qwen2.5-0.5B-Instruc
 node bin\green-roomz.mjs serve --manifest config\agents.windows-mvp.json --host 127.0.0.1 --port 8080
 ```
 
+The Windows launcher runs `scripts\prepare-windows-media.ps1` first. It reuses
+the local Qwen2.5-VL model/projector when present and reports missing image
+generation artifacts before the server starts. To download a missing artifact,
+provide its URL and use the matching switch, for example:
+
+```powershell
+$env:GRZ_VISION_MODEL_URL = 'https://...'
+$env:GRZ_VISION_PROJECTOR_URL = 'https://...'
+powershell -ExecutionPolicy Bypass -File .\scripts\prepare-windows-media.ps1 -DownloadVision
+```
+
+The current host already has the vision model and projector under `C:\LocalAI`.
+Image generation still needs `stable-diffusion.cpp\bin\sd-server.exe`; its
+model is present, but the runtime binary is not.
+
+To install dependencies automatically:
+
+```powershell
+# The wrapper opens UAC automatically when Windows requires elevation.
+npm run media:install:admin -- -InstallWsl
+
+# After WSL finishes installing (and after reboot if requested):
+npm run media:install:admin -- -InstallFestival
+
+# Optional: use a trusted stable-diffusion.cpp Windows zip URL.
+$env:GRZ_IMAGE_RUNTIME_URL = 'https://.../stable-diffusion-windows.zip'
+npm run media:install -- -DownloadImageRuntime
+```
+
+The installer is idempotent and verifies `festival` and `sd-server.exe` after
+installation. It never invents a runtime download URL or silently installs an
+incompatible GPU build.
+
 ## Aliases (MVP)
 
 | Alias | GGUF | Role |

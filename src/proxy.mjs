@@ -282,7 +282,9 @@ export async function proxyJson({ request, response, body, target, config, signa
   let attempt = 0;
   const keepReasoning = clientAskedForReasoning(body);
   while (true) {
-    const attemptSignal = deadlineSignal(signal, upstreamTimeout);
+    const remaining = Math.max(1, deadline - Date.now());
+    const attemptTimeout = Math.min(upstreamTimeout, remaining);
+    const attemptSignal = deadlineSignal(signal, attemptTimeout);
     try {
       const upstream = await fetchImpl(target, { method: request.method, headers: upstreamHeaders(request), body: payload, signal: attemptSignal });
       if (upstream.status === 503 && idempotencyKey && Date.now() < deadline) {
@@ -348,7 +350,7 @@ export async function proxyJson({ request, response, body, target, config, signa
       return { status: upstream.status, content: '' };
     } catch (error) {
       if (isTimeoutAbort(error, signal)) {
-        throw new UpstreamTimeoutError('upstream backend timed out', { target: redactTarget(target), timeout_ms: upstreamTimeout });
+        throw new UpstreamTimeoutError('upstream backend timed out', { target: redactTarget(target), timeout_ms: attemptTimeout });
       }
       if (signal?.aborted) throw error;
       const code = error.cause?.code ?? error.code;

@@ -22,7 +22,9 @@
     "eval:e2e:live": "node ./scripts/agent-e2e-eval.mjs --live-only",
     "eval:e2e:full": "node ./scripts/agent-e2e-eval.mjs --full --no-fail-fast --offline-only",
     "agent": "node ./bin/green-roomz.mjs agent",
-    "eval:parity": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/mvp-parity-battery.ps1"
+    "eval:parity": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/mvp-parity-battery.ps1",
+    "media:install": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/install-windows-media.ps1",
+    "media:install:admin": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/install-windows-media-admin.ps1"
   },
   "engines": {
     "node": ">=22"

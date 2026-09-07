@@ -81,6 +81,11 @@ test('parseGoal picks TDD shape for add+test', () => {
   assert.equal(spec.shape, 'fn-test');
 });
 
+test('complex design goals require a model instead of generic fallback', () => {
+  const spec = parseGoal('design an LRU cache with a hash map and doubly linked list');
+  assert.equal(spec.requiresModel, true);
+});
+
 test('offline python add+test is end-to-end', async () => {
   const workspace = tmp('grz-add-');
   try {

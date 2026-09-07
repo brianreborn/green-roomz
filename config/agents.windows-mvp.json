@@ -23,10 +23,11 @@
                     "timing_privacy":  "off",
                     "upstream_timeout_ms":  600000,
                     "request_timeout_ms":  600000,
-                    "agent_chat_timeout_ms":  60000,
+                    "headers_timeout_ms":  600000,
+                    "agent_chat_timeout_ms":  600000,
                     "agent_max_tokens":  96,
-                    "nexus_consult_timeout_ms":  10000,
-                    "handoff_peek_timeout_ms":  8000,
+                    "nexus_consult_timeout_ms":  600000,
+                    "handoff_peek_timeout_ms":  600000,
                     "handoff_peek_chars":  48,
                     "admit_when_tight":  "refuse",
                     "apply_store_winners":  false,
@@ -93,7 +94,7 @@
     "agents":  [
                    {
                        "alias":  "vision-layout-agent",
-                       "description":  "Document OCR, tables, and structural visual extraction",
+                       "description":  "Document OCR, tables, and structural visual extraction — Qwen2.5-VL 3B on CPU",
                        "runtime":  "llama_server",
                        "port":  8181,
                        "native_capabilities":  [
@@ -105,14 +106,33 @@
                                                              "image",
                                                              "file"
                                                          ],
-                       "model":  "${GRZ_ROOT}/models/missing-vision.gguf",
+                              "model":  "C:\\LocalAI\\qwen2.5-vl-3b-instruct-q4_k_m.gguf",
+                              "projector":  "C:\\LocalAI\\qwen2.5-vl-3b-mmproj-f16.gguf",
                        "required_artifacts":  [
-                                                  "model"
+                                                                  "model",
+                                                                  "projector"
                                               ],
                        "system_policy":  "policies/vision-layout.md",
-                       "context_size":  4096,
+                       "context_size":  8192,
                        "profiles":  [
-
+                                        {
+                                            "id":  "cpu-vision",
+                                            "args":  [
+                                                         "--load-mode",
+                                                         "mmap",
+                                                         "--fit",
+                                                         "off",
+                                                         "--device",
+                                                         "none",
+                                                         "--no-op-offload",
+                                                         "--threads",
+                                                         "1",
+                                                         "--threads-batch",
+                                                         "1",
+                                                         "--n-gpu-layers",
+                                                         "0"
+                                                     ]
+                                        }
                                     ]
                    },
                    {
@@ -138,7 +158,8 @@
                    },
                    {
                        "alias":  "qwenstral-code-speculator",
-                       "description":  "Code specialist — COLD on Windows MVP until RAM allows (placeholder path)",
+                       "pinned":  true,
+                       "description":  "Code specialist — Qwenstral Small 3.1 0.5B on CPU (Windows MVP)",
                        "runtime":  "llama_server",
                        "port":  8183,
                        "native_capabilities":  [
@@ -150,7 +171,7 @@
                                                              "text",
                                                              "file"
                                                          ],
-                       "model":  "${GRZ_ROOT}/models/missing-qwen-instruct.gguf",
+                       "model":  "${GRZ_ROOT}/models/Qwenstral-Small-3.1-0.5B.Q4_K_M.gguf",
                        "required_artifacts":  [
                                                   "model"
                                               ],

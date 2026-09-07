@@ -106,8 +106,9 @@ export function parseGoal(goal, filePath = '') {
     /* keep base */
   }
   const cliArgs = shape === 'cli' ? (SHAPES[fn || 'add']?.cliArgs || ['2', '3']) : null;
+  const requiresModel = /\b(design|architecture|algorithm|cache|concurren|protocol|parser|scheduler|database|api|refactor|integrat|multiple\s+modules?)\b/i.test(g);
 
-  return { ext, printToken, wantsTest, fn: fn || (shape === 'cli' ? 'add' : null), shape, base: shape === 'cli' ? (fn || 'add') : base, fileFromGoal: fileMatch?.[1] ?? null, cliArgs, wantsCli };
+  return { ext, printToken, wantsTest, fn: fn || (shape === 'cli' ? 'add' : null), shape, base: shape === 'cli' ? (fn || 'add') : base, fileFromGoal: fileMatch?.[1] ?? null, cliArgs, wantsCli, requiresModel };
 }
 
 export function namesFor(spec) {

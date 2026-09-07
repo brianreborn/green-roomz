@@ -486,7 +486,7 @@ async function cmdAgent(args) {
     workspace,
     goal,
     chat,
-    model: argValue(args, '--model') || 'general-text-speculator',
+    model: argValue(args, '--model') || 'qwenstral-code-speculator',
     lang: argValue(args, '--lang'),
     maxSteps: Number.isFinite(maxSteps) && maxSteps > 0 ? maxSteps : 12,
     maxTokens,

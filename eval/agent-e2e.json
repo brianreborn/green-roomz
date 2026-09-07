@@ -124,6 +124,22 @@
       "lang": "go",
       "goal": "go program that prints hello-grz and run it",
       "expect": { "ok": false, "code": 127, "stderrRegex": "no runtime for \\.go" }
+    },
+    {
+      "id": "E17",
+      "kind": "design",
+      "smoke": true,
+      "lang": "python",
+      "goal": "design and implement an LRU cache with fixed capacity and O(1) get and put using a hash map plus doubly linked list; test eviction, overwrite, recency updates, missing keys, and invalid capacity",
+      "expect": {
+        "ok": true,
+        "stdoutRegex": "ok",
+        "files": ["lru_cache.py", "test_lru_cache.py"],
+        "fileContentRegex": {
+          "lru_cache.py": "(?=[\\s\\S]*(?:dict|HashMap|map|_nodes|_cache))(?=[\\s\\S]*(?:prev|next|Node|linked))",
+          "test_lru_cache.py": "evict|capacity|overwrite|recency|missing"
+        }
+      }
     }
   ]
 }
