@@ -64,7 +64,11 @@ scripts\chat-mvp.cmd
 
 Health: `curl.exe -sS http://127.0.0.1:8080/health`
 
-Help page (not a chat UI): open `docs\help\index.html` in a browser.
+**UAT (live, required if you claim serve works):** `node scripts\uat.mjs`  
+**Automated e2e (own llama):** `set GRZ_E2E=1` then `npm run test:e2e`  
+See [docs/UAT.md](docs/UAT.md). Domain `npm test` is not a ship bar.
+
+Operator page: `http://127.0.0.1:8080/` (HTTP). Not a chat UI.
 
 ## Hard rules
 

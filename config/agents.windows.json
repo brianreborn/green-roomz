@@ -13,6 +13,10 @@
                     "retry_deadline_ms":  120000,
                     "session_ttl_ms":  3600000,
                     "session_limit":  2048,
+                    "memory_transcript_chars":  2048,
+                    "memory_facts_limit":  8,
+                    "memory_transcript_chars":  2048,
+                    "memory_facts_limit":  8,
                     "cors_origins":  [
                                          "http://localhost",
                                          "http://127.0.0.1"

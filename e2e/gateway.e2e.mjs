@@ -44,6 +44,15 @@ describe('green-roomz end-to-end', { skip: pre.ok ? false : `e2e prereqs not met
     body: JSON.stringify(body),
   });
 
+  it('GET / is operator HTML, not a JSON 404', async () => {
+    const res = await fetch(base + '/');
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get('content-type') ?? '', /text\/html/);
+    const text = await res.text();
+    assert.match(text, /OpenAI-compatible HTTP API/);
+    assert.match(text, /not https/);
+  });
+
   it('GET /health reports the product and an ok/degraded status', async () => {
     const res = await fetch(base + '/health');
     assert.equal(res.status, 200);

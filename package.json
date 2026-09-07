@@ -12,6 +12,7 @@
     "validate": "node ./bin/green-roomz.mjs validate",
     "benchmark": "node ./bin/green-roomz.mjs benchmark",
     "test": "node --test",
+    "uat": "node ./scripts/uat.mjs",
     "test:e2e": "node --test ./e2e/gateway.e2e.mjs",
     "verify": "node ./e2e/verify-models.mjs",
     "eval:agent": "node ./scripts/agent-std-eval.mjs",
