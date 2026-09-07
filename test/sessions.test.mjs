@@ -1,5 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { SessionLedger } from '../src/sessions.mjs';
 
 test('sessions are isolated by identity and expire', () => {
@@ -51,6 +54,54 @@ test('session memory survives a second turn and keeps the last specialist', () =
   assert.equal(second.facts.find((fact) => fact.key === 'user_name')?.value, 'Ada');
   assert.match(second.transcript.map((turn) => turn.text).join('\n'), /My name is Ada/);
   assert.match(second.transcript.map((turn) => turn.text).join('\n'), /what did I call myself/);
+});
+
+test('session working set persists to jsonl and reloads in a new ledger', () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'grz-sess-'));
+  try {
+    const bounds = { transcriptChars: 2048, factsLimit: 8 };
+    const first = new SessionLedger({ persistDir: dir });
+    const id = first.create({ identity: 'a', agentAlias: 'general-text-speculator' });
+    first.rememberTurn(id, {
+      userText: 'My name is Ada',
+      assistantText: 'Hello Ada.',
+      agentAlias: 'general-text-speculator',
+    }, bounds);
+    const second = new SessionLedger({ persistDir: dir });
+    const restored = second.get(id, 'a');
+    assert.equal(restored.facts.find((fact) => fact.key === 'user_name')?.value, 'Ada');
+    assert.match(restored.transcript.map((turn) => turn.text).join('\n'), /Hello Ada/);
+    assert.equal(restored.lastSpecialist, 'general-text-speculator');
+    assert.equal(second.get(id, 'b'), undefined);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('persisted sessions that have expired are not reloaded', () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'grz-sess-exp-'));
+  try {
+    let now = 1_000;
+    const first = new SessionLedger({ ttlMs: 50, persistDir: dir, clock: () => now });
+    const id = first.create({ identity: 'a', agentAlias: 'general-text-speculator' });
+    now += 51;
+    const second = new SessionLedger({ ttlMs: 50, persistDir: dir, clock: () => now });
+    assert.equal(second.get(id, 'a'), undefined);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('persistDir ignores non-uuid filenames', () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'grz-sess-jail-'));
+  try {
+    writeFileSync(path.join(dir, '..jsonl'), '{}\n');
+    writeFileSync(path.join(dir, 'not-a-uuid.jsonl'), '{"id":"nope"}\n');
+    const ledger = new SessionLedger({ persistDir: dir });
+    assert.equal(ledger.entries.size, 0);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('session transcript is clipped to the declared char bound', () => {

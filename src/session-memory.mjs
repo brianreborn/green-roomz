@@ -2,9 +2,17 @@
  * MFL-17 bounded-context injection seam.
  * Session working set: facts + last specialist + compact transcript.
  * Clip is a character budget from agent.context_size (Athlon 4096); no tokenizer.
+ * Fact phase: attention (inject) | partition (authorized lookup) | containment (stored, no recall).
  */
 export const CHARS_PER_TOKEN = 4;
 export const MEMORY_BLOCK_MARKER = 'MEMORY (inherited; origin=session; bounded):';
+export const MEMORY_PHASES = Object.freeze(['attention', 'partition', 'containment']);
+
+const PHASE_MOVES = Object.freeze({
+  attention: Object.freeze(['partition']),
+  partition: Object.freeze(['attention', 'containment']),
+  containment: Object.freeze(['partition']),
+});
 
 const NAME_CUE = /\b(?:my name is|call me|i['’]m|i am)\s+([A-Za-z][A-Za-z0-9_-]{1,31})\b/gi;
 const NAME_STOP = new Set([
@@ -91,11 +99,57 @@ export function extractFacts(text) {
   return facts;
 }
 
+export function normalizePhase(phase) {
+  return MEMORY_PHASES.includes(phase) ? phase : 'attention';
+}
+
+function matchFact(fact, pred) {
+  if (typeof pred === 'function') return Boolean(pred(fact));
+  if (typeof pred === 'string') return fact?.key === pred;
+  return false;
+}
+
+function phaseVisible(fact, includePartitioned) {
+  const phase = normalizePhase(fact?.phase);
+  if (phase === 'containment') return false;
+  if (phase === 'partition') return Boolean(includePartitioned);
+  return true;
+}
+
+export function lookupWorkingSet(state, { includePartitioned = false } = {}) {
+  if (!state) return emptyWorkingSet();
+  return {
+    facts: (state.facts ?? [])
+      .filter((fact) => phaseVisible(fact, includePartitioned))
+      .map((fact) => ({ ...fact, phase: normalizePhase(fact.phase) })),
+    transcript: (state.transcript ?? []).map((turn) => ({ ...turn })),
+    lastSpecialist: state.lastSpecialist ?? null,
+  };
+}
+
+export function setFactPhase(facts, pred, phase) {
+  const target = String(phase ?? '');
+  if (!MEMORY_PHASES.includes(target)) return 0;
+  const list = Array.isArray(facts) ? facts : [];
+  let n = 0;
+  for (const fact of list) {
+    if (!matchFact(fact, pred)) continue;
+    const from = normalizePhase(fact.phase);
+    if (from === target) continue;
+    if (!PHASE_MOVES[from].includes(target)) continue;
+    fact.phase = target;
+    n += 1;
+  }
+  return n;
+}
+
 function upsertFact(facts, fact, limit) {
   const cap = Number.isFinite(Number(limit)) && Number(limit) > 0 ? Number(limit) : 1;
   const i = facts.findIndex((row) => row.key === fact.key);
-  if (i >= 0) facts[i] = { key: fact.key, value: fact.value, origin: fact.origin ?? 'user' };
-  else facts.push({ key: fact.key, value: fact.value, origin: fact.origin ?? 'user' });
+  const phase = i >= 0 ? normalizePhase(facts[i].phase) : normalizePhase(fact.phase);
+  const row = { key: fact.key, value: fact.value, origin: fact.origin ?? 'user', phase };
+  if (i >= 0) facts[i] = row;
+  else facts.push(row);
   while (facts.length > cap) facts.shift();
 }
 
@@ -131,22 +185,21 @@ export function applyTurn(state, turn = {}, bounds = {}) {
 }
 
 export function formatWorkingSet(state) {
-  if (!state) return '';
-  const facts = state.facts ?? [];
-  const transcript = state.transcript ?? [];
-  if (!facts.length && !transcript.length && !state.lastSpecialist) return '';
+  const visible = lookupWorkingSet(state);
+  if (!visible.facts.length && !visible.transcript.length && !visible.lastSpecialist) return '';
   const lines = [MEMORY_BLOCK_MARKER];
-  if (state.lastSpecialist) lines.push(`last specialist: ${state.lastSpecialist}`);
-  for (const fact of facts) lines.push(`${fact.key}: ${fact.value}`);
-  for (const turn of transcript) lines.push(turnLine(turn));
+  if (visible.lastSpecialist) lines.push(`last specialist: ${visible.lastSpecialist}`);
+  for (const fact of visible.facts) lines.push(`${fact.key}: ${fact.value}`);
+  for (const turn of visible.transcript) lines.push(turnLine(turn));
   return lines.join('\n');
 }
 
 export function formatMemoryHeader(state) {
   if (!state) return 'facts=0;chars=0';
-  const facts = state.facts?.length ?? 0;
-  const chars = (state.transcript ?? []).reduce((n, turn) => n + turnLine(turn).length + 1, 0);
-  const specialist = state.lastSpecialist ? `;specialist=${state.lastSpecialist}` : '';
+  const visible = lookupWorkingSet(state);
+  const facts = visible.facts.length;
+  const chars = visible.transcript.reduce((n, turn) => n + turnLine(turn).length + 1, 0);
+  const specialist = visible.lastSpecialist ? `;specialist=${visible.lastSpecialist}` : '';
   return `facts=${facts};chars=${chars}${specialist}`;
 }
 

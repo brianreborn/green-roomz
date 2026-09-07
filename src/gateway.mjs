@@ -400,6 +400,12 @@ export class Gateway {
     return this.sessions.rememberTurn(issuedSession, { assistantText: String(text) }, this.memoryBounds());
   }
 
+  recordProxy(issuedSession, proxied) {
+    const ok = Number(proxied?.status) >= 200 && Number(proxied?.status) < 400;
+    if (ok) this.noteAssistant(issuedSession, proxied?.content);
+    return ok;
+  }
+
   async applyTimingHold(startedAt, beforeResponse) {
     const p = this.timingPrivacy;
     if (!p || p.q < 1) return;
@@ -680,7 +686,7 @@ export class Gateway {
         fetchImpl: this.fetchImpl,
         beforeClientWrite: this.beforeClientWrite(startedAt),
       });
-      const okHop = Number(proxied?.status) >= 200 && Number(proxied?.status) < 400;
+      const okHop = this.recordProxy(issuedSession, proxied);
       this.observeHop(okHop ? 'success' : 'agent_unavailable', alias, { ticket: issuedSession, payload: { reason, hops: hops.slice() } });
     } catch (error) {
       this.observeHop('agent_unavailable', alias, { ticket: issuedSession, payload: { reason: 'upstream_failed', hops: hops.slice() } });
@@ -1128,7 +1134,7 @@ export class Gateway {
           fetchImpl: this.fetchImpl,
           beforeClientWrite: this.beforeClientWrite(startedAt),
         });
-        const okHop = Number(proxied?.status) >= 200 && Number(proxied?.status) < 400;
+        const okHop = this.recordProxy(issuedSession, proxied);
         this.observeHop(okHop ? 'success' : 'agent_unavailable', alias, { ticket: issuedSession, payload: { reason: 'requested_alias', hops: [alias] } });
       } catch (error) {
         this.observeHop('agent_unavailable', alias, { ticket: issuedSession, payload: { reason: 'upstream_failed', hops: [alias] } });
@@ -1309,7 +1315,7 @@ export class Gateway {
               fetchImpl: this.fetchImpl,
               beforeClientWrite: this.beforeClientWrite(startedAt),
             });
-            const okHop = Number(proxied?.status) >= 200 && Number(proxied?.status) < 400;
+            const okHop = this.recordProxy(issuedSession, proxied);
             this.observeHop(okHop ? 'success' : 'agent_unavailable', alias, { ticket: issuedSession, payload: { reason, hops: hops.slice() } });
             return;
           } finally {
@@ -1355,7 +1361,7 @@ export class Gateway {
                 fetchImpl: this.fetchImpl,
                 beforeClientWrite: this.beforeClientWrite(startedAt),
               });
-              const okHop = Number(proxied?.status) >= 200 && Number(proxied?.status) < 400;
+              const okHop = this.recordProxy(issuedSession, proxied);
               this.observeHop(okHop ? 'success' : 'agent_unavailable', alias, { ticket: issuedSession, payload: { reason: 'peek_timeout_retry', hops: hops.slice() } });
               return;
             }
@@ -1418,7 +1424,7 @@ export class Gateway {
             const headers = hopHeaders(FALLBACK_ALIAS, 'text_fallback');
             for (const [key, value] of Object.entries(headers)) response.setHeader(key, value);
             const proxied = await proxyJson({ request, response, body: payload, target: `http://127.0.0.1:${agent.port}${path}`, config: this.manifest.gateway, signal: request.abortSignal, fetchImpl: this.fetchImpl, beforeClientWrite: this.beforeClientWrite(startedAt) });
-            const okHop = Number(proxied?.status) >= 200 && Number(proxied?.status) < 400;
+            const okHop = this.recordProxy(issuedSession, proxied);
             this.observeHop(okHop ? 'success' : 'agent_unavailable', FALLBACK_ALIAS, { ticket: issuedSession, payload: { reason: 'text_fallback', hops: hops.slice() } });
             return;
           } catch (error) {

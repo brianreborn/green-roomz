@@ -71,6 +71,50 @@ function jsonFetch(payload, status = 200) {
   };
 }
 
+function sseFetch(parts) {
+  const frames = (Array.isArray(parts) ? parts : [parts]).map((part) => (
+    `data: ${JSON.stringify({ choices: [{ delta: { content: part } }] })}\n\n`
+  ));
+  frames.push('data: [DONE]\n\n');
+  const buf = new TextEncoder().encode(frames.join(''));
+  return {
+    status: 200,
+    headers: new Headers({ 'content-type': 'text/event-stream' }),
+    body: {
+      getReader() {
+        let sent = false;
+        return {
+          async read() {
+            if (sent) return { done: true, value: undefined };
+            sent = true;
+            return { done: false, value: buf };
+          },
+          releaseLock() {},
+          async cancel() {},
+        };
+      },
+    },
+  };
+}
+
+function rawRequest(server, { path, method = 'POST', headers = {}, body } = {}) {
+  const { port } = server.address();
+  return new Promise((resolve, reject) => {
+    const req = http.request({ hostname: '127.0.0.1', port, path, method, headers, family: 4, timeout: 5000 }, (res) => {
+      const chunks = [];
+      res.on('data', (chunk) => chunks.push(chunk));
+      res.on('end', () => resolve({
+        status: res.statusCode,
+        headers: res.headers,
+        raw: Buffer.concat(chunks).toString(),
+      }));
+    });
+    req.on('error', reject); req.on('timeout', () => { req.destroy(new Error('request timeout')); });
+    if (body) req.write(JSON.stringify(body));
+    req.end();
+  });
+}
+
 test('health is degraded when artifacts are missing and models stay truthful', async (t) => {
   const { server } = await withServer(t);
   const health = await request(server, { path: '/v1/health' });
@@ -328,6 +372,48 @@ test('nexus thinking is always off even if the client asked', () => {
   const forced = prepareInferenceBody({ max_tokens: 64, enable_thinking: true, messages: [] }, { alias: 'tool-router-agent' });
   assert.equal(forced.enable_thinking, false);
   assert.equal(forced.chat_template_kwargs.enable_thinking, false);
+});
+
+test('streamed chat_default records assistant text into session memory', async (t) => {
+  const sessions = new SessionLedger();
+  const seen = [];
+  const { server } = await withServer(t, {}, {
+    sessions,
+    ready: ['general-text-speculator'],
+    stubEnsure: true,
+    fetchImpl: async (_url, init) => {
+      const body = JSON.parse(Buffer.from(init.body).toString());
+      seen.push(body);
+      if (body.stream) return sseFetch(['Hello ', 'Ada']);
+      return jsonFetch({ choices: [{ message: { role: 'assistant', content: 'ok' } }] });
+    },
+  });
+  const first = await rawRequest(server, {
+    path: '/v1/chat/completions',
+    headers: { 'content-type': 'application/json' },
+    body: {
+      model: 'general-text-speculator',
+      stream: true,
+      messages: [{ role: 'user', content: 'My name is Ada' }],
+    },
+  });
+  assert.equal(first.status, 200);
+  assert.equal(first.headers['x-green-roomz-route-reason'], 'chat_default');
+  const sid = first.headers['x-session-id'];
+  const stored = sessions.get(sid, 'loopback-dev');
+  assert.match(stored.transcript.map((turn) => turn.text).join('\n'), /Hello Ada/);
+  const second = await request(server, {
+    path: '/v1/chat/completions',
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-session-id': sid },
+    body: {
+      model: 'general-text-speculator',
+      messages: [{ role: 'user', content: 'what did I call myself?' }],
+    },
+  });
+  assert.equal(second.status, 200);
+  assert.ok(seen.length >= 2);
+  assert.match(JSON.stringify(seen.at(-1).messages), /Hello Ada/);
 });
 
 test('second turn with only the latest user message still injects session facts', async (t) => {

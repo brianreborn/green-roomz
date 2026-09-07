@@ -12,6 +12,7 @@ import { Gateway } from '../src/gateway.mjs';
 import { loadOptionalBrainz } from '../src/brainz.mjs';
 import { attachServeConsole } from '../src/serve-console.mjs';
 import { POLICIES, REQUIRED_ALIASES } from '../src/constants.mjs';
+import path from 'node:path';
 
 function argValue(args, flag, fallback) {
   const index = args.indexOf(flag);
@@ -59,6 +60,7 @@ async function bootstrap(args) {
   const sessions = new SessionLedger({
     ttlMs: manifest.gateway.session_ttl_ms,
     limit: manifest.gateway.session_limit,
+    persistDir: path.join(manifest._meta?.packageRoot ?? process.cwd(), 'data', 'sessions'),
   });
   const objective = POLICIES[manifest.gateway.policy]?.objective ?? 'interactive';
   if (manifest.gateway.apply_store_winners === true) {

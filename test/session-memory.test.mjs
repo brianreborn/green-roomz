@@ -18,15 +18,21 @@ test('extractFacts captures a user name and ignores filler', () => {
   assert.equal(extractFacts('I am going to the store').length, 0);
 });
 
-test('clipTranscript keeps the newest turns under the bound', () => {
+test('clipTranscript drops oldest turns and never exceeds the bound', () => {
   const clipped = clipTranscript([
     { role: 'user', text: 'old fact that should drop' },
     { role: 'assistant', text: 'old reply' },
     { role: 'user', text: 'newest' },
   ], 20);
-  const blob = clipped.map((turn) => turn.text).join(' ');
-  assert.match(blob, /newest/);
-  assert.equal(clipped.reduce((n, turn) => n + `${turn.role}: ${turn.text}`.length, 0) <= 20 + clipped.length, true);
+  assert.deepEqual(clipped, [{ role: 'user', text: 'newest' }]);
+  assert.equal(clipped.map((turn) => `${turn.role}: ${turn.text}`).join('\n').length, 'user: newest'.length);
+  assert.ok(clipped.every((turn) => !/old/.test(turn.text)));
+});
+
+test('clipTranscript tail-clips a single oversize turn to the bound', () => {
+  const clipped = clipTranscript([{ role: 'user', text: 'ABCDEFGHIJKLMNOP' }], 10);
+  assert.deepEqual(clipped, [{ role: 'user', text: 'MNOP' }]);
+  assert.equal(`user: ${clipped[0].text}`.length, 10);
 });
 
 test('injectWorkingSet feeds prior facts into the next turn without blowing 4096 ctx', () => {
@@ -55,6 +61,19 @@ test('a huge history is clipped to the context budget', () => {
   assert.ok(chars <= 800, `clipped ${chars} chars`);
   assert.match(String(clipped.at(-1)?.content), /turn 79/);
   assert.ok(clipped.length < history.length);
+  assert.equal(clipped.some((message) => String(message.content).startsWith('turn 0 ')), false);
+});
+
+test('clipMessages keeps the system prefix and the newest user turn under the budget', () => {
+  const clipped = clipMessages([
+    { role: 'system', content: 'sys' },
+    { role: 'user', content: 'aaaa' },
+    { role: 'assistant', content: 'bbbb' },
+    { role: 'user', content: 'cccc' },
+  ], 10);
+  assert.deepEqual(clipped.map((message) => message.content), ['sys', 'cccc']);
+  const chars = clipped.reduce((n, message) => n + String(message.content).length, 0);
+  assert.ok(chars <= 10, `clipped ${chars} chars`);
 });
 
 test('prepareInferenceBody injects session memory on the next turn', () => {

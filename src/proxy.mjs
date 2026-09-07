@@ -60,6 +60,33 @@ function clientAskedForReasoning(body) {
   return body?.enable_thinking === true || body?.chat_template_kwargs?.enable_thinking === true;
 }
 
+export function assistantContentFromJson(payload) {
+  if (!payload || typeof payload !== 'object') return '';
+  const choice = payload.choices?.[0];
+  if (!choice) return '';
+  return String(choice.message?.content ?? choice.delta?.content ?? '');
+}
+
+function assistantDeltaFromJson(payload) {
+  const choice = payload?.choices?.[0];
+  if (!choice) return '';
+  if (typeof choice.delta?.content === 'string') return choice.delta.content;
+  if (typeof choice.message?.content === 'string') return choice.message.content;
+  return '';
+}
+
+function frameFromParsed(parsed, keepReasoning) {
+  if (!parsed) return null;
+  if (parsed.done) return { frame: 'data: [DONE]\n\n', delta: '' };
+  if (parsed.json) {
+    return {
+      frame: `data: ${JSON.stringify(sanitizeCompletionJson(parsed.json, { keepReasoning }))}\n\n`,
+      delta: assistantDeltaFromJson(parsed.json),
+    };
+  }
+  return { frame: `data: ${parsed.raw}\n\n`, delta: '' };
+}
+
 function parseSseBlock(raw) {
   const data = String(raw).split('\n')
     .filter((line) => line.startsWith('data:'))
@@ -97,28 +124,49 @@ export function sanitizeSseText(raw, { keepReasoning = false } = {}) {
   return out.join('');
 }
 
+function writeSseFrame(response, framed) {
+  if (!framed) return;
+  if (typeof response.write === 'function') response.write(framed.frame);
+}
+
 async function writeSanitizedSse(upstream, response, { keepReasoning, signal } = {}) {
   const headers = downstreamHeaders(upstream);
   delete headers['content-length'];
+  let content = '';
   if (response.writableEnded) {
     try { await upstream.body?.cancel?.(); } catch {}
-    return;
+    return content;
   }
   response.writeHead(upstream.status, { ...headers, 'content-type': headers['content-type'] || 'text/event-stream; charset=utf-8' });
-  if (!upstream.body) {
-    if (typeof upstream.text === 'function') {
-      const raw = await upstream.text();
-      if (typeof response.write === 'function') response.write(sanitizeSseText(raw, { keepReasoning }));
-      else return response.end(sanitizeSseText(raw, { keepReasoning }));
+  const takeText = async () => {
+    if (typeof upstream.text !== 'function') return;
+    const raw = await upstream.text();
+    const text = sanitizeSseText(raw, { keepReasoning });
+    if (typeof response.write === 'function') response.write(text);
+    else response.end(text);
+    const src = String(raw ?? '').replace(/\r\n/g, '\n');
+    let pos = 0;
+    while (true) {
+      const sep = src.indexOf('\n\n', pos);
+      if (sep === -1) break;
+      const framed = frameFromParsed(parseSseBlock(src.slice(pos, sep)), keepReasoning);
+      pos = sep + 2;
+      if (framed) content += framed.delta;
     }
-    return response.end();
+    if (src.slice(pos).trim()) {
+      const framed = frameFromParsed(parseSseBlock(src.slice(pos)), keepReasoning);
+      if (framed) content += framed.delta;
+    }
+  };
+  if (!upstream.body) {
+    await takeText();
+    if (typeof response.end === 'function' && !response.writableEnded) response.end();
+    return content;
   }
   if (typeof upstream.body.getReader !== 'function') {
-    if (typeof upstream.text === 'function') {
-      const raw = await upstream.text();
-      if (typeof response.write === 'function') response.write(sanitizeSseText(raw, { keepReasoning }));
-    }
-    return response.end();
+    await takeText();
+    if (typeof response.end === 'function' && !response.writableEnded) response.end();
+    return content;
   }
   const reader = upstream.body.getReader();
   const decoder = new TextDecoder();
@@ -134,29 +182,28 @@ async function writeSanitizedSse(upstream, response, { keepReasoning, signal } =
       while (true) {
         const sep = carry.indexOf('\n\n', pos);
         if (sep === -1) break;
-        const parsed = parseSseBlock(carry.slice(pos, sep));
+        const framed = frameFromParsed(parseSseBlock(carry.slice(pos, sep)), keepReasoning);
         pos = sep + 2;
-        if (!parsed) continue;
-        const frame = parsed.done
-          ? 'data: [DONE]\n\n'
-          : parsed.json
-            ? `data: ${JSON.stringify(sanitizeCompletionJson(parsed.json, { keepReasoning }))}\n\n`
-            : `data: ${parsed.raw}\n\n`;
-        if (typeof response.write === 'function') response.write(frame);
+        if (framed) {
+          content += framed.delta;
+          writeSseFrame(response, framed);
+        }
       }
       carry = carry.slice(pos);
     }
     carry += decoder.decode();
     if (carry.trim()) {
-      const parsed = parseSseBlock(carry);
-      if (parsed?.json && typeof response.write === 'function') {
-        response.write(`data: ${JSON.stringify(sanitizeCompletionJson(parsed.json, { keepReasoning }))}\n\n`);
+      const framed = frameFromParsed(parseSseBlock(carry), keepReasoning);
+      if (framed) {
+        content += framed.delta;
+        writeSseFrame(response, framed);
       }
     }
   } finally {
     reader.releaseLock?.();
   }
-  return response.end();
+  if (typeof response.end === 'function' && !response.writableEnded) response.end();
+  return content;
 }
 
 export async function proxyJson({ request, response, body, target, config, signal, fetchImpl = fetch, beforeClientWrite }) {
@@ -177,13 +224,14 @@ export async function proxyJson({ request, response, body, target, config, signa
         continue;
       }
       if (body?.stream) {
+        let content = '';
         try {
           if (beforeClientWrite) await beforeClientWrite();
-          await writeSanitizedSse(upstream, response, { keepReasoning, signal: attemptSignal });
+          content = await writeSanitizedSse(upstream, response, { keepReasoning, signal: attemptSignal }) ?? '';
         } catch (streamError) {
           if (!response.writableEnded) response.destroy?.(streamError);
         }
-        return { status: upstream.status };
+        return { status: upstream.status, content };
       }
       const canSanitize = typeof upstream.text === 'function' || upstream.body;
       if (canSanitize) {
@@ -199,26 +247,29 @@ export async function proxyJson({ request, response, body, target, config, signa
         const headers = downstreamHeaders(upstream);
         delete headers['content-length'];
         let data;
+        let content = '';
         try {
-          data = Buffer.from(JSON.stringify(sanitizeCompletionJson(JSON.parse(raw), { keepReasoning })));
+          const sanitized = sanitizeCompletionJson(JSON.parse(raw), { keepReasoning });
+          content = assistantContentFromJson(sanitized);
+          data = Buffer.from(JSON.stringify(sanitized));
         } catch {
           data = Buffer.from(raw);
         }
-        if (response.writableEnded) return { status: upstream.status };
+        if (response.writableEnded) return { status: upstream.status, content };
         if (beforeClientWrite) await beforeClientWrite();
         response.writeHead(upstream.status, { ...headers, 'content-length': data.length });
         response.end(data);
-        return { status: upstream.status };
+        return { status: upstream.status, content };
       }
       if (response.writableEnded) {
         try { await upstream.body?.cancel(); } catch {}
-        return { status: upstream.status };
+        return { status: upstream.status, content: '' };
       }
       if (beforeClientWrite) await beforeClientWrite();
       response.writeHead(upstream.status, downstreamHeaders(upstream));
       if (!upstream.body) {
         response.end();
-        return { status: upstream.status };
+        return { status: upstream.status, content: '' };
       }
       try {
         await pipeline(Readable.fromWeb(upstream.body), response, { signal: attemptSignal });
@@ -227,7 +278,7 @@ export async function proxyJson({ request, response, body, target, config, signa
         // into the handler (headers are already sent).
         if (!response.writableEnded) response.destroy(streamError);
       }
-      return { status: upstream.status };
+      return { status: upstream.status, content: '' };
     } catch (error) {
       if (isTimeoutAbort(error, signal)) {
         throw new UpstreamTimeoutError('upstream backend timed out', { target: redactTarget(target), timeout_ms: upstreamTimeout });

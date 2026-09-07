@@ -12,7 +12,9 @@ class FakeResponse extends EventEmitter {
     this.ended = false;
   }
   writeHead(status, headers) { this.status = status; this.headers = headers; }
-  end(chunk) { if (chunk) this.chunks.push(chunk); this.ended = true; this.emit('finish'); }
+  write(chunk) { if (chunk) this.chunks.push(Buffer.from(chunk)); return true; }
+  end(chunk) { if (chunk) this.chunks.push(Buffer.from(chunk)); this.ended = true; this.emit('finish'); }
+  get writableEnded() { return this.ended; }
 }
 
 test('connection refused retries before headers, then succeeds', async () => {
@@ -129,4 +131,64 @@ test('strips ESC and C0 controls from completion content', async () => {
   });
   const parsed = JSON.parse(Buffer.concat(response.chunks).toString());
   assert.equal(parsed.choices[0].message.content, 'redbell');
+});
+
+test('proxyJson returns assistant content from a JSON completion', async () => {
+  const response = new FakeResponse();
+  const proxied = await proxyJson({
+    request: { method: 'POST', headers: {} },
+    response,
+    body: { model: 'general-text-speculator', messages: [] },
+    target: 'http://127.0.0.1:9/v1/chat/completions',
+    config: { retry_initial_ms: 5, retry_max_ms: 10, retry_deadline_ms: 50 },
+    fetchImpl: async () => ({
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      async text() {
+        return JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'Hello Ada' } }] });
+      },
+    }),
+  });
+  assert.equal(proxied.status, 200);
+  assert.equal(proxied.content, 'Hello Ada');
+});
+
+test('proxyJson returns concatenated assistant deltas from an SSE stream', async () => {
+  const sse = [
+    `data: ${JSON.stringify({ choices: [{ delta: { content: 'Hello ' } }] })}`,
+    '',
+    `data: ${JSON.stringify({ choices: [{ delta: { content: 'Ada' } }] })}`,
+    '',
+    'data: [DONE]',
+    '',
+  ].join('\n');
+  const buf = new TextEncoder().encode(sse);
+  const response = new FakeResponse();
+  const proxied = await proxyJson({
+    request: { method: 'POST', headers: {} },
+    response,
+    body: { model: 'general-text-speculator', stream: true, messages: [] },
+    target: 'http://127.0.0.1:9/v1/chat/completions',
+    config: { retry_initial_ms: 5, retry_max_ms: 10, retry_deadline_ms: 50 },
+    fetchImpl: async () => ({
+      status: 200,
+      headers: new Headers({ 'content-type': 'text/event-stream' }),
+      body: {
+        getReader() {
+          let sent = false;
+          return {
+            async read() {
+              if (sent) return { done: true, value: undefined };
+              sent = true;
+              return { done: false, value: buf };
+            },
+            releaseLock() {},
+            async cancel() {},
+          };
+        },
+      },
+    }),
+  });
+  assert.equal(proxied.status, 200);
+  assert.equal(proxied.content, 'Hello Ada');
 });

@@ -24,20 +24,25 @@ In-process conversational memory on the existing `SessionLedger` (no parallel st
 
 Budget: stored transcript is `gateway.memory_transcript_chars` (MVP **2048**). Live prompt clip is `agent.context_size` (Athlon **4096**) with a 4 chars/token estimate — not a silent `slice(-N)`.
 
-Install keys (no silent defaults): `memory_transcript_chars`, `memory_facts_limit` in `config/agents.windows-mvp.json`, `config/agents.android.json`, `validateManifest`, `ORCHESTRATOR_BOUNDED_KEYS`.
+Install keys (no silent defaults): `memory_transcript_chars`, `memory_facts_limit` in `config/agents.windows-mvp.json`, `config/agents.android.json`, `config/agents.windows.json`, `validateManifest`, `ORCHESTRATOR_BOUNDED_KEYS`.
+
+## Continuation (this pass)
+
+1. **SSE / JSON assistant capture.** `proxyJson` returns `{ status, content }` for both JSON completions and SSE delta streams. Gateway `recordProxy` writes that into `SessionLedger` on `chat_default`, text fallback, resident, direct-alias, and peek-timeout retry. `scripts/chat-mvp.cmd` stream:true is no longer user-only.
+2. **windows.json keys.** `memory_transcript_chars` / `memory_facts_limit` added.
+3. **Append-only jsonl.** `SessionLedger({ persistDir })` writes `data/sessions/<uuid>.jsonl` (latest line wins on reload). Serve wires `persistDir` to `<packageRoot>/data/sessions`. Tests use a temp dir. Not GREEN_BRAINZ_ROOT / not a new GGUF.
+4. **Clip tests tightened.** Oldest dropped, oversize turn tail-clipped to the exact bound, `clipMessages` keeps system + newest user under budget.
 
 ## Tests run
 
 ```
-node --test test/sessions.test.mjs test/session-memory.test.mjs test/memory.test.mjs test/gateway.test.mjs
+node --test test/session-memory.test.mjs test/sessions.test.mjs test/gateway.test.mjs
 ```
 
-68 pass / 0 fail (includes RAM admission, two-turn Ada inject, ctx clip, gateway hop wiring). `test/config.test.mjs` also green for the new install keys.
+Also `test/proxy.test.mjs` this pass. Combined: **75 pass / 0 fail**.
 
-## Remaining backlog
+## Remaining
 
-- **Plate 6** durable CoW store (`GREEN_BRAINZ_ROOT` / `src/brainz.mjs`) — optional, out of this slice.
-- Assistant text is recorded on peek-keep; streamed `proxyJson` chat_default does not tap the SSE, so only the user turn is stored unless the client resends history.
-- `config/agents.windows.json` is mid-merge; parent must add the two memory keys when landing.
-- No tokenizer; clip is character-budget. A real token count can replace `CHARS_PER_TOKEN` later.
-- Containment / partition states stay prompt-prose (Plate 5); this seam only injects the admitted working set.
+- Plate 6 `GREEN_BRAINZ_ROOT` CoW is still optional and unused.
+- Clip is still a character budget (`CHARS_PER_TOKEN = 4`), not a tokenizer.
+- Containment / partition stay prompt-prose.
