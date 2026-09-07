@@ -96,8 +96,17 @@ test('bind then yield', () => {
   assert.equal(Object.prototype.hasOwnProperty.call(place, 'vote'), false);
   assert.equal(Object.prototype.hasOwnProperty.call(place, 'reboot'), false);
   assert.equal(Object.prototype.hasOwnProperty.call(place, 'secure_reboot'), false);
-  assert.throws(() => vote(), /complex-last/);
-  assert.throws(() => secureReboot(), /complex-last/);
+  const voteReject = vote();
+  assert.equal(voteReject.kind, 'reject');
+  assert.equal(voteReject.ok, false);
+  assert.match(voteReject.reason, /uncallable/);
+  assert.equal(voteReject.to, 'vote');
+  const secureReject = secureReboot();
+  assert.equal(secureReject.kind, 'reject');
+  assert.equal(secureReject.ok, false);
+  assert.match(secureReject.reason, /uncallable/);
+  assert.equal(secureReject.to, 'secure_reboot');
+  assert.notEqual(voteReject, secureReject);
 });
 
 test('second bind of llama floor rejected', () => {

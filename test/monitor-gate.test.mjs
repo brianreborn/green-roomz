@@ -111,7 +111,10 @@ test('begin does not await a vote promise', async () => {
   assert.equal(finished.voted, false);
   assert.equal(voteTouched, false);
 
-  assert.throws(() => vote(), /complex-last/);
+  const voteReject = vote();
+  assert.equal(voteReject.kind, 'reject');
+  assert.equal(voteReject.ok, false);
+  assert.match(voteReject.reason, /uncallable/);
 });
 
 test('illegal caller denied', () => {

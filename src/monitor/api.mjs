@@ -4,7 +4,7 @@
  * seq and ticket are 64-bit {hi, lo} uint32 pairs.
  */
 
-import { normalizeU64, u64 } from './ids.mjs';
+import { normalizeU64, u64, hashStringToU64 } from './ids.mjs';
 import { isAllowlistedOp } from './calls.mjs';
 import { makeReject } from './states.mjs';
 
@@ -94,6 +94,7 @@ export function makeUpcall(partial = {}) {
 
 function uncallableEnvelope(verb) {
   const envelope = makeReject({
+    ticket: hashStringToU64(`api:${verb}`),
     from: 'api',
     to: verb,
     reason: `${verb} is uncallable (v1)`,
