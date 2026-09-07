@@ -46,6 +46,16 @@ if (wantLive) {
   } else {
     console.error(`health=${h.status}`);
   }
+  try {
+    const root = await fetch(`${base}/`, { signal: AbortSignal.timeout(3_000) });
+    const type = root.headers.get('content-type') ?? '';
+    if (root.status !== 200 || !/text\/html/i.test(type)) {
+      halt(`GET / was ${root.status} ${type} (want 200 text/html; bounce serve onto main)`);
+    }
+    console.error('GET / = 200 text/html');
+  } catch (error) {
+    halt(`GET / failed: ${error.message}`);
+  }
 }
 
 run('unit', [
@@ -54,6 +64,10 @@ run('unit', [
   './test/config.test.mjs',
   './test/routing.test.mjs',
   './test/gateway.test.mjs',
+  './test/session-memory.test.mjs',
+  './test/sessions.test.mjs',
+  './test/proxy.test.mjs',
+  './test/operator-index.test.mjs',
 ]);
 run('e2e-smoke', ['./scripts/agent-e2e-eval.mjs']);
 if (wantLive) run('e2e-live', ['./scripts/agent-e2e-eval.mjs', '--live-only']);
