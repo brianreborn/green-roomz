@@ -54,6 +54,7 @@ test('GET / is an HTML operator page, not a JSON 404', async (t) => {
   assert.equal(page.status, 200);
   assert.match(page.type, /text\/html/);
   assert.match(page.body, /OpenAI-compatible HTTP API/);
+  assert.match(page.body, /chat-mvp/);
   assert.match(page.body, /not https/);
   assert.match(page.body, /\/health/);
 });

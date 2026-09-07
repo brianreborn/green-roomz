@@ -49,7 +49,7 @@ describe('green-roomz end-to-end', { skip: pre.ok ? false : `e2e prereqs not met
     assert.equal(res.status, 200);
     assert.match(res.headers.get('content-type') ?? '', /text\/html/);
     const text = await res.text();
-    assert.match(text, /OpenAI-compatible HTTP API/);
+    assert.match(text, /chat-mvp/);
     assert.match(text, /not https/);
   });
 

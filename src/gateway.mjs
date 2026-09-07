@@ -332,13 +332,16 @@ export class Gateway {
 <html lang="en"><head><meta charset="utf-8"><title>Green-Roomz</title></head>
 <body>
 <h1>Green-Roomz</h1>
-<p>This is an OpenAI-compatible HTTP API, not a website. There is no TLS on :8080 &mdash; use <code>http://127.0.0.1:8080</code>, not https, and prefer <code>127.0.0.1</code> over <code>localhost</code> if Firefox HTTPS-Only mode upgrades the name.</p>
+<p>Interactive chat is <strong>chat-mvp</strong> (not this page):</p>
+<pre>scripts\\chat-mvp.cmd</pre>
+<p>Coding agent jail: <code>node bin\\green-roomz.mjs agent --goal "..."</code></p>
+<p>This URL is an OpenAI-compatible HTTP API. No TLS on :8080 &mdash; use <code>http://127.0.0.1:8080</code>, not https.</p>
 <ul>
 <li><a href="/health"><code>GET /health</code></a></li>
 <li><a href="/v1/models"><code>GET /v1/models</code></a></li>
 <li><code>POST /v1/chat/completions</code></li>
 </ul>
-<p>Clients: curl, llama.app, or any OpenAI SDK pointed at this origin.</p>
+<p>Other clients: curl, llama.app, any OpenAI SDK at this origin.</p>
 </body></html>
 `;
     const data = Buffer.from(html);
