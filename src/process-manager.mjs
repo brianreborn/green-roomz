@@ -675,7 +675,13 @@ export class ProcessManager {
           if (typeof response.arrayBuffer === 'function') await response.arrayBuffer();
           else if (response.body?.cancel) await response.body.cancel();
         } catch {}
-        if (probe.ready(response)) return;
+        if (probe.ready(response)) {
+          // RF4: health can be a leftover listener; require this child still alive after the probe.
+          if (record.child.exitCode !== null) {
+            throw new Error(`process exited with ${record.child.exitCode} after health probe`);
+          }
+          return;
+        }
       } catch {}
       await sleep(200, signal);
     }
@@ -702,17 +708,27 @@ export class ProcessManager {
     // A SIGSTOP'd process won't act on SIGTERM until it runs again.
     if (record.state === 'suspended') { try { this.resumeImpl(record.child.pid); } catch {} }
     record.state = 'stopping';
-    const exited = new Promise((resolve) => record.child.once('exit', resolve));
+    const exited = new Promise((resolve) => {
+      if (record.child.exitCode !== null) return resolve();
+      record.child.once('exit', resolve);
+    });
     if (record.child.exitCode === null) record.child.kill('SIGTERM');
     let timer;
-    const timeout = new Promise((resolve) => {
+    const killDeadline = new Promise((resolve) => {
       timer = setTimeout(() => {
-        if (record.child.exitCode === null) record.child.kill('SIGKILL');
+        if (record.child.exitCode === null) {
+          try { record.child.kill('SIGKILL'); } catch {}
+        }
         resolve();
       }, 3000);
     });
-    await Promise.race([exited, timeout]);
+    // RF4: timer alone must not return while the child is still alive.
+    await Promise.race([exited, killDeadline]);
     clearTimeout(timer);
+    if (record.child.exitCode === null) {
+      try { record.child.kill('SIGKILL'); } catch {}
+      await exited;
+    }
   }
 
   async stopAll() {
@@ -791,7 +807,14 @@ export class ProcessManager {
     if (terminated.length) {
       const ports = terminated.map((r) => this.manifest.agents.find((a) => a.alias === r.alias)?.port).filter(Boolean);
       await Promise.all(terminated.map((r) => this.stop(r.alias)));
-      await this.waitForPortsFree(ports);
+      const free = await this.waitForPortsFree(ports);
+      // RF4: timeout = still occupied — do not let the incoming start bind-steal.
+      if (!free) {
+        throw new UnavailableError(
+          `${incomingAlias ?? 'specialist'}: evicted ports still busy after stop`,
+          { code: 'port_busy', ports },
+        );
+      }
     }
     return { suspended: suspended.map((r) => r.alias), terminated: terminated.map((r) => r.alias) };
   }

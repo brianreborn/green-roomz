@@ -718,3 +718,101 @@ test('PF1: stopAll on empty manager is ok; childrenSnapshot empty', async () => 
   assert.deepEqual(manager.childrenSnapshot(), []);
   assert.deepEqual(manager.ownedPorts().sort(), [18080].sort());
 });
+
+test('RF4: waitForReady rejects when child exits after health probe', async () => {
+  const manifest = sampleManifest();
+  const registry = new AgentRegistry(manifest);
+  const agent = manifest.agents.find((a) => a.alias === 'tool-router-agent');
+  const child = new FakeChild();
+  const manager = new ProcessManager({
+    manifest,
+    registry,
+    hostAdapter: { applyPriority() {} },
+    spawnImpl: () => child,
+    fetchImpl: async () => {
+      // Health looks ready, but the child died during the probe (stale listener case).
+      child.exitCode = 1;
+      return { ok: true, status: 200, async arrayBuffer() { return new ArrayBuffer(0); } };
+    },
+  });
+  manager.cpuAllocator.allocate = () => [0, 1];
+  agent.profiles = [{ id: 'cpu-2', args: ['--device', 'none', '--threads', '2', '--threads-batch', '2', '--n-gpu-layers', '0'] }];
+  await assert.rejects(
+    () => manager.startProfile(agent, agent.profiles[0]),
+    (err) => /exited with 1 after health probe|Failed to start/.test(String(err.message)),
+  );
+});
+
+test('RF4: stopRecord awaits exit after SIGKILL (timer alone is not enough)', async () => {
+  const manifest = sampleManifest();
+  const registry = new AgentRegistry(manifest);
+  const manager = new ProcessManager({
+    manifest,
+    registry,
+    spawnImpl() { throw new Error('no'); },
+  });
+  class StickyChild extends EventEmitter {
+    constructor() {
+      super();
+      this.pid = 9991;
+      this.exitCode = null;
+      this.killed = [];
+      this.stdout = new EventEmitter();
+      this.stderr = new EventEmitter();
+    }
+    kill(signal) {
+      this.killed.push(signal);
+      if (signal === 'SIGKILL') {
+        // Exit only after a short delay — old Promise.race would return on the timer first.
+        setTimeout(() => {
+          this.exitCode = 1;
+          this.emit('exit', 1, signal);
+        }, 50);
+      }
+    }
+  }
+  const child = new StickyChild();
+  const record = { alias: 'general-text-speculator', owned: true, child, state: 'ready' };
+  manager.processes.set(record.alias, record);
+  // Shrink the SIGTERM deadline so the test is fast.
+  const orig = manager.stopRecord.bind(manager);
+  // Monkey: call stopRecord but with a patched setTimeout via temporary override of kill path
+  // by replacing the method's 3000 with racing a shorter path — instead invoke stopRecord
+  // after patching child.kill to ignore SIGTERM and only exit on SIGKILL delayed.
+  child.kill = function kill(signal) {
+    this.killed.push(signal);
+    if (signal === 'SIGTERM') return; // ignore soft kill
+    if (signal === 'SIGKILL') {
+      setTimeout(() => {
+        this.exitCode = 1;
+        this.emit('exit', 1, signal);
+      }, 30);
+    }
+  };
+  const started = Date.now();
+  await manager.stopRecord(record);
+  assert.ok(record.child.exitCode !== null, 'must wait until exitCode is set');
+  assert.ok(child.killed.includes('SIGKILL'));
+  assert.ok(Date.now() - started >= 30);
+});
+
+test('RF4: evictForNewSpecialist throws when ports stay busy after stop', async () => {
+  const manager = new ProcessManager({
+    manifest: sampleManifest(),
+    registry: new AgentRegistry(sampleManifest()),
+    spawnImpl() { throw new Error('no'); },
+  });
+  manager.maxWarmSpecialists = 1;
+  manager.canSuspend = false;
+  const now = Date.now();
+  const child = new FakeChild();
+  manager.processes.set('general-text-speculator', {
+    alias: 'general-text-speculator', owned: true, resident: false, state: 'ready',
+    child, lastUsedAt: now - 5000, refs: 0,
+  });
+  manager.waitForPortsFree = async () => false;
+  await assert.rejects(
+    () => manager.evictForNewSpecialist('qwenstral-code-speculator'),
+    (err) => err?.code === 'port_busy' || /ports still busy/.test(String(err.message)),
+  );
+});
