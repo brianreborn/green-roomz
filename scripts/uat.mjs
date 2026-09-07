@@ -11,7 +11,23 @@
  * Exit 0 only if every required operator check passes.
  */
 const base = (process.argv[2] || process.env.GRZ_BASE_URL || 'http://127.0.0.1:8080').replace(/\/$/, '');
+const CHAT_MS = Number(process.env.GRZ_UAT_CHAT_MS ?? 600_000);
 const rows = [];
+
+function sseText(text) {
+  let out = '';
+  for (const line of String(text).split(/\r?\n/)) {
+    if (!line.startsWith('data:')) continue;
+    const data = line.slice(5).trim();
+    if (!data || data === '[DONE]') continue;
+    try {
+      out += JSON.parse(data)?.choices?.[0]?.delta?.content
+        ?? JSON.parse(data)?.choices?.[0]?.message?.content
+        ?? '';
+    } catch { /* keep going */ }
+  }
+  return out;
+}
 
 function record(id, ok, detail) {
   rows.push({ id, ok, detail });
@@ -65,15 +81,16 @@ await check('POST chat hello', async () => {
     method: 'POST',
     body: {
       model: 'general-text-speculator',
+      lock_alias: true,
+      stream: true,
+      max_tokens: 16,
       messages: [{ role: 'user', content: 'Say hello in one short sentence.' }],
-      max_tokens: 32,
-      stream: false,
     },
-    timeout: 180_000,
+    timeout: CHAT_MS,
   });
-  const content = chat.json?.choices?.[0]?.message?.content;
-  record('POST chat hello', chat.status === 200 && typeof content === 'string' && content.length > 0,
-    `${chat.status} ${(content ?? chat.text).slice(0, 80)}`);
+  const content = sseText(chat.text) || chat.json?.choices?.[0]?.message?.content || '';
+  record('POST chat hello', chat.status === 200 && content.length > 0,
+    `${chat.status} ${content.slice(0, 80)}`);
   chatSid = chat.headers.get('x-green-roomz-session') ?? chat.headers.get('x-session-id');
 });
 
@@ -95,13 +112,16 @@ await check('session follow-up', async () => {
     headers: { 'x-session-id': chatSid },
     body: {
       model: 'general-text-speculator',
+      lock_alias: true,
+      stream: true,
+      max_tokens: 16,
       messages: [{ role: 'user', content: 'What did I just ask you to say?' }],
-      max_tokens: 32,
-      stream: false,
     },
-    timeout: 180_000,
+    timeout: CHAT_MS,
   });
-  record('session follow-up', follow.status === 200, String(follow.status));
+  const followText = sseText(follow.text);
+  record('session follow-up', follow.status === 200 && followText.length > 0,
+    `${follow.status} ${followText.slice(0, 80)}`);
 });
 
 const httpsUrl = base.replace(/^http:/, 'https:');

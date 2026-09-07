@@ -1491,8 +1491,8 @@ export class Gateway {
       }
       socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n');
     });
-    server.headersTimeout = this.manifest.gateway.headers_timeout_ms ?? this.manifest.gateway.request_timeout_ms ?? 30_000;
-    server.requestTimeout = this.manifest.gateway.request_timeout_ms;
+    server.headersTimeout = this.manifest.gateway.headers_timeout_ms ?? 30_000;
+    server.requestTimeout = this.manifest.gateway.request_timeout_ms ?? 0;
     return new Promise((resolve, reject) => {
       server.once('error', reject);
       server.listen(listenPort, address, () => resolve(server));
