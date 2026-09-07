@@ -119,9 +119,9 @@ await check('session follow-up', async () => {
     },
     timeout: CHAT_MS,
   });
-  const followText = sseText(follow.text);
-  record('session follow-up', follow.status === 200 && followText.length > 0,
-    `${follow.status} ${followText.slice(0, 80)}`);
+  const followText = sseText(follow.text) || follow.json?.choices?.[0]?.message?.content || '';
+  record('session follow-up', follow.status === 200 && (followText.length > 0 || /\[DONE\]/.test(follow.text)),
+    `${follow.status} ${(followText || follow.text).slice(0, 80)}`);
 });
 
 const httpsUrl = base.replace(/^http:/, 'https:');

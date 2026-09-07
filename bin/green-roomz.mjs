@@ -177,18 +177,32 @@ async function cmdServe(ctx, args) {
         const messages = system
           ? [{ role: 'system', content: system }, { role: 'user', content: '.' }]
           : [{ role: 'user', content: '.' }];
-        await fetch(`http://127.0.0.1:${chatAgent.port}/v1/chat/completions`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            model: chatAgent.alias,
-            messages,
-            max_tokens: 1,
-            stream: false,
-          }),
-          signal: AbortSignal.timeout(600_000),
-        });
-        console.error(`primed ${chatAgent.alias} with stock prompt (1 token; client turns reuse KV)`);
+        let primed = false;
+        let lastErr = null;
+        for (let attempt = 1; attempt <= 3 && !primed; attempt += 1) {
+          try {
+            await fetch(`http://127.0.0.1:${chatAgent.port}/v1/chat/completions`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                model: chatAgent.alias,
+                messages,
+                max_tokens: 1,
+                stream: false,
+              }),
+              signal: AbortSignal.timeout(600_000),
+            });
+            primed = true;
+          } catch (error) {
+            lastErr = error;
+            await new Promise((resolve) => setTimeout(resolve, 2000 * attempt));
+          }
+        }
+        if (primed) {
+          console.error(`primed ${chatAgent.alias} with stock prompt (1 token; client turns reuse KV)`);
+        } else {
+          throw lastErr ?? new Error('prime fetch failed');
+        }
       } catch (error) {
         console.error(`chat prime failed: ${error.message}`);
       }
