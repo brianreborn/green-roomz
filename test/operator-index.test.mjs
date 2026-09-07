@@ -69,4 +69,5 @@ test('GET /unicorn is the file-drop chat UI', async (t) => {
   assert.match(page.body, /chat-mvp/);
   assert.match(page.body, /\/v1\/chat\/completions/);
   assert.match(page.body, /Drop files here/);
+  assert.match(page.body, /extractAssistantText/);
 });

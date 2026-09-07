@@ -14,17 +14,28 @@ const base = (process.argv[2] || process.env.GRZ_BASE_URL || 'http://127.0.0.1:8
 const CHAT_MS = Number(process.env.GRZ_UAT_CHAT_MS ?? 600_000);
 const rows = [];
 
-function sseText(text) {
+function textFromChoice(choice) {
+  if (!choice) return '';
+  const c = choice.delta?.content ?? choice.message?.content ?? '';
+  if (typeof c === 'string') return c;
+  if (Array.isArray(c)) return c.map((part) => (typeof part === 'string' ? part : part?.text ?? '')).join('');
+  if (c && typeof c === 'object' && typeof c.text === 'string') return c.text;
+  return '';
+}
+
+/** Same contract as Unicorn: JSON chat.completion OR SSE data: lines. */
+function assistantText(raw) {
+  const t = String(raw ?? '');
+  const trimmed = t.trim();
+  if (trimmed.startsWith('{')) {
+    try { return textFromChoice(JSON.parse(trimmed)?.choices?.[0]); } catch { /* SSE */ }
+  }
   let out = '';
-  for (const line of String(text).split(/\r?\n/)) {
+  for (const line of t.split(/\r?\n/)) {
     if (!line.startsWith('data:')) continue;
     const data = line.slice(5).trim();
     if (!data || data === '[DONE]') continue;
-    try {
-      out += JSON.parse(data)?.choices?.[0]?.delta?.content
-        ?? JSON.parse(data)?.choices?.[0]?.message?.content
-        ?? '';
-    } catch { /* keep going */ }
+    try { out += textFromChoice(JSON.parse(data)?.choices?.[0]); } catch { /* keep going */ }
   }
   return out;
 }
@@ -64,7 +75,7 @@ await check('GET / operator HTML', async () => {
 
 await check('GET /unicorn HTML', async () => {
   const page = await http('/unicorn');
-  record('GET /unicorn HTML', page.status === 200 && /text\/html/.test(page.type) && /Green Unicorn/.test(page.text),
+  record('GET /unicorn HTML', page.status === 200 && /text\/html/.test(page.type) && /Green Unicorn/.test(page.text) && /extractAssistantText/.test(page.text),
     `${page.status} ${page.type.split(';')[0]}`);
 });
 
@@ -94,7 +105,7 @@ await check('POST chat hello', async () => {
     },
     timeout: CHAT_MS,
   });
-  const content = sseText(chat.text) || chat.json?.choices?.[0]?.message?.content || '';
+  const content = assistantText(chat.text);
   record('POST chat hello', chat.status === 200 && content.length > 0,
     `${chat.status} ${content.slice(0, 80)}`);
   chatSid = chat.headers.get('x-green-roomz-session') ?? chat.headers.get('x-session-id');
@@ -125,9 +136,9 @@ await check('session follow-up', async () => {
     },
     timeout: CHAT_MS,
   });
-  const followText = sseText(follow.text) || follow.json?.choices?.[0]?.message?.content || '';
-  record('session follow-up', follow.status === 200 && (followText.length > 0 || /\[DONE\]/.test(follow.text)),
-    `${follow.status} ${(followText || follow.text).slice(0, 80)}`);
+  const followText = assistantText(follow.text);
+  record('session follow-up', follow.status === 200 && followText.length > 0,
+    `${follow.status} ${followText.slice(0, 80)}`);
 });
 
 const httpsUrl = base.replace(/^http:/, 'https:');

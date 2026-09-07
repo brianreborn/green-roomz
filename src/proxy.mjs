@@ -64,7 +64,31 @@ export function assistantContentFromJson(payload) {
   if (!payload || typeof payload !== 'object') return '';
   const choice = payload.choices?.[0];
   if (!choice) return '';
-  return String(choice.message?.content ?? choice.delta?.content ?? '');
+  const raw = choice.message?.content ?? choice.delta?.content ?? '';
+  if (typeof raw === 'string') return raw;
+  if (Array.isArray(raw)) {
+    return raw.map((part) => (typeof part === 'string' ? part : part?.text ?? '')).join('');
+  }
+  if (raw && typeof raw === 'object' && typeof raw.text === 'string') return raw.text;
+  return String(raw ?? '');
+}
+
+/** llama.cpp sometimes ignores stream:true and returns one JSON chat.completion. */
+export function sseFromJsonCompletion(payload, keepReasoning = false) {
+  const sanitized = sanitizeCompletionJson(payload, { keepReasoning });
+  const text = assistantContentFromJson(sanitized);
+  const chunk = {
+    id: sanitized.id,
+    object: 'chat.completion.chunk',
+    created: sanitized.created,
+    model: sanitized.model,
+    choices: [{
+      index: 0,
+      delta: { role: 'assistant', ...(text ? { content: text } : {}) },
+      finish_reason: sanitized.choices?.[0]?.finish_reason ?? 'stop',
+    }],
+  };
+  return { text, sse: `data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n` };
 }
 
 function assistantDeltaFromJson(payload) {
@@ -137,6 +161,34 @@ async function writeSanitizedSse(upstream, response, { keepReasoning, signal } =
     try { await upstream.body?.cancel?.(); } catch {}
     return content;
   }
+  const ct = String(headers['content-type'] ?? '').toLowerCase();
+  if (ct.includes('application/json') && !ct.includes('event-stream')) {
+    let raw = '';
+    try {
+      raw = typeof upstream.text === 'function'
+        ? await upstream.text()
+        : await readCappedText(upstream, UPSTREAM_MAX_BUFFER_BYTES);
+    } catch {
+      raw = '';
+    }
+    const sseHeaders = { ...headers, 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache' };
+    response.writeHead(upstream.status, sseHeaders);
+    const trimmed = raw.trim();
+    if (trimmed.startsWith('{')) {
+      try {
+        const wrapped = sseFromJsonCompletion(JSON.parse(trimmed), keepReasoning);
+        content = wrapped.text;
+        if (typeof response.write === 'function') response.write(wrapped.sse);
+      } catch {
+        if (typeof response.write === 'function') response.write(raw);
+      }
+    } else if (trimmed) {
+      const text = sanitizeSseText(raw, { keepReasoning });
+      if (typeof response.write === 'function') response.write(text || raw);
+    }
+    if (typeof response.end === 'function' && !response.writableEnded) response.end();
+    return content;
+  }
   response.writeHead(upstream.status, { ...headers, 'content-type': headers['content-type'] || 'text/event-stream; charset=utf-8' });
   const takeText = async () => {
     if (typeof upstream.text !== 'function') return;
@@ -193,10 +245,25 @@ async function writeSanitizedSse(upstream, response, { keepReasoning, signal } =
     }
     carry += decoder.decode();
     if (carry.trim()) {
-      const framed = frameFromParsed(parseSseBlock(carry), keepReasoning);
-      if (framed) {
-        content += framed.delta;
-        writeSseFrame(response, framed);
+      const trimmed = carry.trim();
+      if (trimmed.startsWith('{') && !trimmed.startsWith('data:')) {
+        try {
+          const wrapped = sseFromJsonCompletion(JSON.parse(trimmed), keepReasoning);
+          content += wrapped.text;
+          if (typeof response.write === 'function') response.write(wrapped.sse);
+        } catch {
+          const framed = frameFromParsed(parseSseBlock(carry), keepReasoning);
+          if (framed) {
+            content += framed.delta;
+            writeSseFrame(response, framed);
+          }
+        }
+      } else {
+        const framed = frameFromParsed(parseSseBlock(carry), keepReasoning);
+        if (framed) {
+          content += framed.delta;
+          writeSseFrame(response, framed);
+        }
       }
     }
   } finally {

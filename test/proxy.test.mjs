@@ -192,3 +192,33 @@ test('proxyJson returns concatenated assistant deltas from an SSE stream', async
   assert.equal(proxied.status, 200);
   assert.equal(proxied.content, 'Hello Ada');
 });
+
+test('stream:true + upstream JSON completion is rewritten as SSE', async () => {
+  const response = new FakeResponse();
+  const proxied = await proxyJson({
+    request: { method: 'POST', headers: {} },
+    response,
+    body: { model: 'general-text-speculator', stream: true, messages: [] },
+    target: 'http://127.0.0.1:9/v1/chat/completions',
+    config: { retry_initial_ms: 5, retry_max_ms: 10, retry_deadline_ms: 50 },
+    fetchImpl: async () => ({
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json; charset=utf-8' }),
+      async text() {
+        return JSON.stringify({
+          id: 'chatcmpl-test',
+          object: 'chat.completion',
+          model: 'general-text-speculator',
+          choices: [{ index: 0, message: { role: 'assistant', content: 'HELLO!' }, finish_reason: 'stop' }],
+        });
+      },
+    }),
+  });
+  const body = Buffer.concat(response.chunks).toString();
+  assert.equal(proxied.status, 200);
+  assert.equal(proxied.content, 'HELLO!');
+  assert.match(response.headers['content-type'], /text\/event-stream/);
+  assert.match(body, /data: /);
+  assert.match(body, /HELLO!/);
+  assert.match(body, /\[DONE\]/);
+});

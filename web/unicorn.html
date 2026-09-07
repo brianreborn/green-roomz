@@ -203,6 +203,45 @@
     return content.concat(parts);
   }
 
+  function textFromChoice(choice) {
+    if (!choice) return '';
+    const c = (choice.delta && choice.delta.content != null)
+      ? choice.delta.content
+      : (choice.message && choice.message.content != null ? choice.message.content : '');
+    if (typeof c === 'string') return c;
+    if (Array.isArray(c)) {
+      return c.map((part) => typeof part === 'string' ? part : (part && part.text) || '').join('');
+    }
+    if (c && typeof c.text === 'string') return c.text;
+    return '';
+  }
+
+  // llama.cpp / Roomz may return a JSON chat.completion even when stream:true.
+  // Keep in sync with scripts/uat.mjs assistantText.
+  function extractAssistantText(raw) {
+    const t = String(raw || '');
+    const trimmed = t.trim();
+    if (trimmed.charAt(0) === '{') {
+      try {
+        const chunk = JSON.parse(trimmed);
+        return textFromChoice(chunk.choices && chunk.choices[0]);
+      } catch { /* fall through to SSE */ }
+    }
+    let out = '';
+    const lines = t.split(/\r?\n/);
+    for (let i = 0; i < lines.length; i += 1) {
+      const line = lines[i];
+      if (line.indexOf('data:') !== 0) continue;
+      const payload = line.slice(5).trim();
+      if (!payload || payload === '[DONE]') continue;
+      try {
+        const chunk = JSON.parse(payload);
+        out += textFromChoice(chunk.choices && chunk.choices[0]);
+      } catch { /* skip malformed SSE */ }
+    }
+    return out;
+  }
+
   async function send() {
     const text = promptEl.value.trim();
     if (!text && !pending.length) return;
@@ -241,26 +280,36 @@
       const reader = res.body.getReader();
       const dec = new TextDecoder();
       let buf = '';
+      let raw = '';
       let out = '';
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        buf += dec.decode(value, { stream: true });
+        const piece = dec.decode(value, { stream: true });
+        raw += piece;
+        buf += piece;
         const lines = buf.split(/\n/);
         buf = lines.pop();
         for (const line of lines) {
-          if (!line.startsWith('data:')) continue;
+          if (line.indexOf('data:') !== 0) continue;
           const payload = line.slice(5).trim();
           if (!payload || payload === '[DONE]') continue;
           try {
             const chunk = JSON.parse(payload);
-            const delta = chunk.choices?.[0]?.delta?.content || chunk.choices?.[0]?.message?.content || '';
+            const delta = textFromChoice(chunk.choices && chunk.choices[0]);
             if (delta) { out += delta; box.textContent = out; logEl.scrollTop = logEl.scrollHeight; }
           } catch { /* skip malformed SSE */ }
         }
       }
-      if (out) messages.push({ role: 'assistant', content: out });
-      else box.textContent = box.textContent || '(empty)';
+      raw += dec.decode();
+      if (buf.trim() && !out) out = extractAssistantText(raw + buf);
+      else if (!out) out = extractAssistantText(raw);
+      if (out) {
+        box.textContent = out;
+        messages.push({ role: 'assistant', content: out });
+      } else {
+        box.textContent = box.textContent || '(empty)';
+      }
     } catch (err) {
       if (err.name === 'AbortError') {
         box.textContent = (box.textContent || '') + '\n[stopped]';
