@@ -170,18 +170,25 @@ async function cmdServe(ctx, args) {
       await ctx.processes.ensure(chatAgent);
       console.error(`pre-warmed ${chatAgent.alias} on :${chatAgent.port} (pinned chat; generic clients skip mmap)`);
       try {
+        const kernelText = loadDeclaredKernel(chatAgent);
+        const system = kernelText
+          ? compileStockPrompt(chatAgent, { kernelText })
+          : null;
+        const messages = system
+          ? [{ role: 'system', content: system }, { role: 'user', content: '.' }]
+          : [{ role: 'user', content: '.' }];
         await fetch(`http://127.0.0.1:${chatAgent.port}/v1/chat/completions`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
             model: chatAgent.alias,
-            messages: [{ role: 'user', content: '.' }],
+            messages,
             max_tokens: 1,
             stream: false,
           }),
-          signal: AbortSignal.timeout(60_000),
+          signal: AbortSignal.timeout(600_000),
         });
-        console.error(`primed ${chatAgent.alias} (1 token; first client turn should stay under a minute)`);
+        console.error(`primed ${chatAgent.alias} with stock prompt (1 token; client turns reuse KV)`);
       } catch (error) {
         console.error(`chat prime failed: ${error.message}`);
       }
