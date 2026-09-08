@@ -275,6 +275,7 @@ export const NATIVE_CHAT = Object.freeze({
   'retrieval-rerank-agent': { path: '/v1/rerank', kind: 'rerank' },
   'audio-transcription-agent': { path: '/inference', kind: 'whisper' },
   'image-generation-agent': { path: '/v1/images/generations', kind: 'image' },
+  'safety-policy-agent': { path: '/v1/moderations', kind: 'moderation' },
 });
 
 function latestUserCommandText(body) {

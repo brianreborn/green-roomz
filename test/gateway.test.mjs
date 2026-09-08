@@ -1361,3 +1361,121 @@ test('an image request whose vision backend will not start is a 503, never a tex
   assert.equal(res.status, 503);
   assert.notEqual(res.headers['x-green-roomz-effective-alias'], 'general-text-speculator');
 });
+
+test('/v1/embeddings generates embeddings via semantic-embedding-agent', async (t) => {
+  const { server } = await withServer(t, {}, {
+    ready: ['semantic-embedding-agent'],
+    stubEnsure: true,
+    fetchImpl: async (url, init) => {
+      const parsed = JSON.parse(init.body);
+      assert.equal(parsed.input, 'hello green roomz');
+      return jsonFetch({
+        object: 'list',
+        data: [{ object: 'embedding', embedding: [0.1, 0.2, 0.3, 0.4], index: 0 }],
+        model: 'semantic-embedding-agent',
+        usage: { prompt_tokens: 4, total_tokens: 4 },
+      });
+    },
+  });
+
+  const res = await request(server, {
+    path: '/v1/embeddings',
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: { input: 'hello green roomz' },
+  });
+
+  assert.equal(res.status, 200);
+  assert.equal(res.body.data[0].embedding.length, 4);
+  assert.equal(res.headers['x-green-roomz-effective-alias'], 'semantic-embedding-agent');
+});
+
+test('/v1/rerank scores passages via retrieval-rerank-agent', async (t) => {
+  const { server } = await withServer(t, {}, {
+    ready: ['retrieval-rerank-agent'],
+    stubEnsure: true,
+    fetchImpl: async (url, init) => {
+      const parsed = JSON.parse(init.body);
+      assert.equal(parsed.query, 'what is green roomz');
+      assert.equal(parsed.documents.length, 2);
+      return jsonFetch({
+        model: 'retrieval-rerank-agent',
+        results: [
+          { index: 1, relevance_score: 0.95, document: 'Green Roomz is a multi-agent AI server' },
+          { index: 0, relevance_score: 0.12, document: 'Apples are red fruits' },
+        ],
+      });
+    },
+  });
+
+  const res = await request(server, {
+    path: '/v1/rerank',
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: {
+      query: 'what is green roomz',
+      documents: ['Apples are red fruits', 'Green Roomz is a multi-agent AI server'],
+    },
+  });
+
+  assert.equal(res.status, 200);
+  assert.equal(res.body.results[0].index, 1);
+  assert.equal(res.body.results[0].relevance_score, 0.95);
+  assert.equal(res.headers['x-green-roomz-effective-alias'], 'retrieval-rerank-agent');
+});
+
+test('/v1/moderations classifies content via safety-policy-agent', async (t) => {
+  const { server } = await withServer(t, {}, {
+    ready: ['safety-policy-agent'],
+    stubEnsure: true,
+    fetchImpl: async (url, init) => {
+      return jsonFetch({
+        id: 'modr-12345',
+        model: 'safety-policy-agent',
+        results: [{
+          flagged: false,
+          categories: { hate: false, violence: false, self_harm: false, sexual: false },
+          category_scores: { hate: 0.001, violence: 0.002, self_harm: 0.0001, sexual: 0.0005 },
+        }],
+      });
+    },
+  });
+
+  const res = await request(server, {
+    path: '/v1/moderations',
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: { input: 'hello world safety test' },
+  });
+
+  assert.equal(res.status, 200);
+  assert.equal(res.body.results[0].flagged, false);
+  assert.equal(res.headers['x-green-roomz-effective-alias'], 'safety-policy-agent');
+});
+
+test('/v1/images/generations generates images via image-generation-agent', async (t) => {
+  const { server } = await withServer(t, {}, {
+    ready: ['image-generation-agent'],
+    stubEnsure: true,
+    fetchImpl: async (url, init) => {
+      const parsed = JSON.parse(init.body);
+      assert.equal(parsed.prompt, 'a cozy cabin in the woods');
+      return jsonFetch({
+        created: 123456789,
+        data: [{ b64_json: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==' }],
+      });
+    },
+  });
+
+  const res = await request(server, {
+    path: '/v1/images/generations',
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: { prompt: 'a cozy cabin in the woods', n: 1, size: '512x512' },
+  });
+
+  assert.equal(res.status, 200);
+  assert.ok(res.body.data[0].b64_json);
+  assert.equal(res.headers['x-green-roomz-effective-alias'], 'image-generation-agent');
+});
+

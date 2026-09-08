@@ -33,6 +33,8 @@ const EXPLICIT_ROUTES = new Set([
   '/v1/chat/completions/route',
   '/v1/embeddings',
   '/v1/rerank',
+  '/v1/moderations',
+  '/v1/images/generations',
 ]);
 
 const UNICORN_PAGE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'web', 'unicorn.html');
@@ -240,6 +242,11 @@ function wrapNativeAsChat(alias, nativeJson, kind) {
       ? [{ type: 'image_url', image_url: { url } }]
       : JSON.stringify(nativeJson);
   }
+  else if (kind === 'moderation') {
+    const res = nativeJson?.results?.[0];
+    const flagged = res?.flagged ? 'FLAGGED: Content violates safety policy' : 'PASSED: Content adheres to safety policy';
+    content = `${flagged}\n\n${JSON.stringify(nativeJson, null, 2)}`;
+  }
   else content = JSON.stringify(nativeJson);
   return {
     id: `grz-native-${alias}`,
@@ -274,6 +281,10 @@ function nativePayload(kind, body, alias) {
     const prompt = String(text ?? '').trim();
     if (!prompt) throw new ValidationError('image generation needs a text prompt');
     return { prompt, n: 1, response_format: 'b64_json' };
+  }
+  if (kind === 'moderation') {
+    const input = typeof body.input === 'string' ? body.input : text;
+    return { model: alias, input };
   }
   return body;
 }
@@ -576,6 +587,8 @@ export class Gateway {
       }
       if (url.pathname === '/v1/embeddings') body.model = body.model ?? 'semantic-embedding-agent';
       if (url.pathname === '/v1/rerank') body.model = body.model ?? 'retrieval-rerank-agent';
+      if (url.pathname === '/v1/moderations') body.model = body.model ?? 'safety-policy-agent';
+      if (url.pathname === '/v1/images/generations') body.model = body.model ?? 'image-generation-agent';
       return await this.handleInference(request, response, body, identity, cors, url.pathname);
     } catch (error) {
       const status = error instanceof GreenRoomzError ? error.status : 500;
