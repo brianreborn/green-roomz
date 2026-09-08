@@ -48,6 +48,7 @@ Host: Athlon II X2, 16 GB, CPU llama only. Never GGUF on the 8600 GT.
 | L18 | Stock-prompt “memory-feedback-loop” as if it were a store | Model reads prose; nothing persisted; Ada dropped on turn 2 | Prompt frames ≠ memory. Need `SessionLedger` working set + inject + header. Prompt can **describe** the loop; code must **run** it. Continuation: SSE capture + `data/sessions/<uuid>.jsonl` |
 | L19 | `max_tokens` 16 on a 0.5B that wraps in `Reason`/`Summary` | Client sees a heading, not a sentence | Cap for speed, but the quality bar is the model. Do not fake ChatGPT wording |
 | L20 | `chat_default` streamed via `proxyJson` without returning assistant text | Session memory stored the user turn only; `chat-mvp.cmd` (SSE) dropped Ada | `proxyJson` must return `{ status, content }` for JSON **and** SSE; gateway `recordProxy` writes it. A stream:true client is the dogfood path |
+| L21 | Naive wall-clock timeout on streaming (`retry_deadline_ms` capping `writeSanitizedSse`) + `idempotencyKey` gate on 503 | Active generation aborted mid-sentence at 180s on CPU (~3 tok/s); standard clients without `idempotency-key` failed 503 on warmup | Decouple connect retry budget from stream duration. Streaming uses an **inactivity stall watchdog** and socket reset/client abort detection, not a wall-clock guillotine. 503 retries on startup require no special header |
 
 ## How to add a lesson
 

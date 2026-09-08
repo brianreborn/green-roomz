@@ -12,9 +12,9 @@ import { sampleManifest } from './helpers.mjs';
 
 async function withServer(t, extras = {}) {
   const manifest = sampleManifest();
-  const registry = await new AgentRegistry(manifest).inspect();
-  for (const alias of extras.ready ?? []) registry.setStatus(alias, 'ready');
-  const hostAdapter = extras.hostAdapter ?? { sampleResources() { return { freeMemoryBytes: 1 }; } };
+  const hostAdapter = extras.hostAdapter ?? { sampleResources() { return { freeMemoryBytes: 32 * 1024 * 1024 * 1024 }; } };
+  const registry = await new AgentRegistry(manifest).inspect({ hostAdapter });
+  for (const alias of extras.ready ?? []) registry.setStatus(alias, 'ready', { missing: [] });
   const processes = new ProcessManager({ manifest, registry, hostAdapter, spawnImpl() { throw new Error('should not spawn in this test'); } });
   processes.ensure = async (agent) => {
     if (extras.visitedBlock?.has(agent.alias)) throw new Error(`refused ensure of visited ${agent.alias}`);
@@ -193,7 +193,7 @@ test('visited blocks looping the same specialist', async (t) => {
     path: '/v1/chat/completions',
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: { messages: [{ role: 'user', content: 'hello' }] },
+    body: { model: 'tool-router-agent', messages: [{ role: 'user', content: 'write a function' }] },
   });
   assert.equal(ensured.filter((alias) => alias === 'qwenstral-code-speculator').length, 1);
   assert.equal(result.status, 200);
@@ -257,3 +257,93 @@ test('consultNexus omits impractical aliases from AVAILABLE the way unused visio
   assert.equal(result.headers['x-green-roomz-effective-alias'], 'general-text-speculator');
   assert.ok(enums.length >= 1);
 });
+
+test('wrong security dispatch (/sast on threat-model) hands off and reissues to general-text', async (t) => {
+  let specialistCalls = 0;
+  const { server } = await withServer(t, {
+    ready: ['tool-router-agent', 'qwenstral-code-speculator', 'general-text-speculator'],
+    fetchImpl: async (url, init) => {
+      const href = String(url);
+      specialistCalls += 1;
+      // First hop: /sast routed to code specialist (port 18183)
+      if (href.includes(':18183')) {
+        return sseFetch('HANDOFF {"reason":"architectural threat model is not code SAST","suggest":"general-text-speculator"}');
+      }
+      // Reissued second hop: text specialist (port 18184) fulfills STRIDE
+      if (href.includes(':18184')) {
+        return jsonFetch({
+          choices: [{
+            message: {
+              role: 'assistant',
+              content: '### STRIDE Threat Model\n1. Spoofing: Validate API bearer tokens\n2. Tampering: Sign HMAC on payloads\n3. Information Disclosure: Enforce TLS',
+            },
+          }],
+        });
+      }
+      throw new Error(`unexpected call to ${href}`);
+    },
+  });
+
+  const result = await request(server, {
+    path: '/v1/chat/completions',
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: {
+      messages: [{ role: 'user', content: '/sast Perform STRIDE threat modeling on the API gateway' }],
+    },
+  });
+
+  assert.equal(result.status, 200);
+  assert.equal(result.headers['x-green-roomz-effective-alias'], 'general-text-speculator');
+  assert.match(result.headers['x-green-roomz-hops'], /qwenstral-code-speculator/);
+  assert.match(result.headers['x-green-roomz-hops'], /general-text-speculator/);
+  assert.match(result.body.choices[0].message.content, /STRIDE Threat Model/);
+  assert.equal(specialistCalls, 2, 'called wrong specialist first, then reissued to suggested specialist');
+});
+
+test('wrong security dispatch (/threatmodel on C buffer overflow) hands off to code specialist', async (t) => {
+  let specialistCalls = 0;
+  const { server } = await withServer(t, {
+    ready: ['tool-router-agent', 'qwenstral-code-speculator', 'general-text-speculator'],
+    fetchImpl: nexusThenSpecialists(
+      [{ route: 'qwenstral-code-speculator', confidence: 0.9, reason: 'code SAST fix' }],
+      (href) => {
+        specialistCalls += 1;
+        // First hop: /threatmodel routed to text specialist (port 18184)
+        if (href.includes(':18184')) {
+          return sseFetch('HANDOFF {"reason":"raw C buffer overflow patch is code SAST","suggest":"qwenstral-code-speculator"}');
+        }
+        // Reissued second hop: code specialist (port 18183) provides the secure fix
+        if (href.includes(':18183')) {
+          return jsonFetch({
+            choices: [{
+              message: {
+                role: 'assistant',
+                content: 'void secure_copy(const char* src, char* dst, size_t dst_sz) { strncpy(dst, src, dst_sz - 1); dst[dst_sz - 1] = \'\\0\'; }',
+              },
+            }],
+          });
+        }
+        throw new Error(`unexpected call to ${href}`);
+      },
+    ),
+  });
+
+  const result = await request(server, {
+    path: '/v1/chat/completions',
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: {
+      messages: [{ role: 'user', content: '/threatmodel fix this C code strcpy buffer overflow void foo(char* src) { char b[8]; strcpy(b, src); }' }],
+    },
+  });
+
+  assert.equal(result.status, 200);
+  assert.equal(result.headers['x-green-roomz-effective-alias'], 'qwenstral-code-speculator');
+  assert.match(result.headers['x-green-roomz-hops'], /general-text-speculator/);
+  assert.match(result.headers['x-green-roomz-hops'], /qwenstral-code-speculator/);
+  assert.match(result.body.choices[0].message.content, /secure_copy/);
+  assert.equal(specialistCalls, 2);
+});
+
+

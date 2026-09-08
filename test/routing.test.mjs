@@ -294,3 +294,36 @@ test('model "tool-router-agent" without lock_alias is nexus-routed, not pinned t
   const pinned = routeRequest({ model: 'tool-router-agent', lock_alias: true, messages: [{ role: 'user', content: 'hi' }] }, registry());
   assert.equal(pinned.effectiveAlias, 'tool-router-agent');
 });
+
+test('security slash dispatches route to their corresponding specialists', () => {
+  const reg = registry();
+  
+  // Code security & SAST -> qwenstral-code-speculator
+  const sast = hardRuleRoute({ messages: [{ role: 'user', content: '/sast check buffer overflow' }] }, reg);
+  assert.equal(sast.effectiveAlias, 'qwenstral-code-speculator');
+  assert.equal(sast.reason, 'slash_sast');
+
+  const audit = hardRuleRoute({ messages: [{ role: 'user', content: '/audit review auth handler' }] }, reg);
+  assert.equal(audit.effectiveAlias, 'qwenstral-code-speculator');
+  assert.equal(audit.reason, 'slash_audit');
+
+  // Threat modeling & OSINT -> general-text-speculator
+  const threat = hardRuleRoute({ messages: [{ role: 'user', content: '/threatmodel STRIDE analysis of gateway' }] }, reg);
+  assert.equal(threat.effectiveAlias, 'general-text-speculator');
+  assert.equal(threat.reason, 'slash_threatmodel');
+
+  const osint = hardRuleRoute({ messages: [{ role: 'user', content: '/osint summarize attack surface' }] }, reg);
+  assert.equal(osint.effectiveAlias, 'general-text-speculator');
+  assert.equal(osint.reason, 'slash_osint');
+
+  // Detection rules -> qwenstral-code-speculator
+  const rules = hardRuleRoute({ messages: [{ role: 'user', content: '/sigma generate rule for lolbin' }] }, reg);
+  assert.equal(rules.effectiveAlias, 'qwenstral-code-speculator');
+  assert.equal(rules.reason, 'slash_sigma');
+
+  // Monitor -> security-monitor-agent
+  const mon = hardRuleRoute({ messages: [{ role: 'user', content: '/monitor snapshot' }] }, reg);
+  assert.equal(mon.effectiveAlias, 'security-monitor-agent');
+  assert.equal(mon.reason, 'slash_monitor');
+});
+

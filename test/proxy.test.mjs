@@ -10,10 +10,12 @@ class FakeResponse extends EventEmitter {
     this.headers = null;
     this.chunks = [];
     this.ended = false;
+    this.destroyed = false;
   }
   writeHead(status, headers) { this.status = status; this.headers = headers; }
   write(chunk) { if (chunk) this.chunks.push(Buffer.from(chunk)); return true; }
   end(chunk) { if (chunk) this.chunks.push(Buffer.from(chunk)); this.ended = true; this.emit('finish'); }
+  destroy(err) { this.destroyed = true; this.ended = true; this.destroyError = err; this.emit('close'); }
   get writableEnded() { return this.ended; }
 }
 
@@ -221,4 +223,113 @@ test('stream:true + upstream JSON completion is rewritten as SSE', async () => {
   assert.match(body, /data: /);
   assert.match(body, /HELLO!/);
   assert.match(body, /\[DONE\]/);
+});
+
+test('streaming outlasts retry_deadline_ms without premature truncation', async () => {
+  const response = new FakeResponse();
+  let chunksRead = 0;
+  const sseChunk1 = `data: ${JSON.stringify({ choices: [{ delta: { content: 'chunk 1 ' } }] })}\n\n`;
+  const sseChunk2 = `data: ${JSON.stringify({ choices: [{ delta: { content: 'chunk 2' } }] })}\n\n`;
+  const proxied = await proxyJson({
+    request: { method: 'POST', headers: {} },
+    response,
+    body: { model: 'general-text-speculator', stream: true, messages: [] },
+    target: 'http://127.0.0.1:9/v1/chat/completions',
+    config: { retry_initial_ms: 5, retry_max_ms: 10, retry_deadline_ms: 30, upstream_timeout_ms: 5000 },
+    fetchImpl: async () => ({
+      status: 200,
+      headers: new Headers({ 'content-type': 'text/event-stream' }),
+      body: {
+        getReader() {
+          return {
+            async read() {
+              chunksRead += 1;
+              if (chunksRead === 1) {
+                return { done: false, value: new TextEncoder().encode(sseChunk1) };
+              }
+              if (chunksRead === 2) {
+                // Wait past retry_deadline_ms (which is 30ms)
+                await new Promise((r) => setTimeout(r, 60));
+                return { done: false, value: new TextEncoder().encode(sseChunk2) };
+              }
+              return { done: true, value: undefined };
+            },
+            releaseLock() {},
+            async cancel() {},
+          };
+        },
+      },
+    }),
+  });
+  assert.equal(proxied.status, 200);
+  assert.equal(proxied.content, 'chunk 1 chunk 2');
+  assert.equal(response.ended, true);
+  assert.equal(response.destroyed, false);
+});
+
+test('upstream socket drop during streaming destroys response and re-throws', async () => {
+  const response = new FakeResponse();
+  const socketError = new Error('ECONNRESET');
+  socketError.code = 'ECONNRESET';
+  await assert.rejects(
+    () => proxyJson({
+      request: { method: 'POST', headers: {} },
+      response,
+      body: { model: 'general-text-speculator', stream: true, messages: [] },
+      target: 'http://127.0.0.1:9/v1/chat/completions',
+      config: { retry_initial_ms: 5, retry_max_ms: 10, retry_deadline_ms: 500 },
+      fetchImpl: async () => ({
+        status: 200,
+        headers: new Headers({ 'content-type': 'text/event-stream' }),
+        body: {
+          getReader() {
+            return {
+              async read() {
+                throw socketError;
+              },
+              releaseLock() {},
+              async cancel() {},
+            };
+          },
+        },
+      }),
+    }),
+    (err) => err.code === 'ECONNRESET',
+  );
+  assert.equal(response.destroyed, true);
+});
+
+test('caller cancel during streaming stops upstream reader cleanly', async () => {
+  const response = new FakeResponse();
+  const caller = new AbortController();
+  let cancelled = false;
+  let readCount = 0;
+  const chunk = `data: ${JSON.stringify({ choices: [{ delta: { content: 'hello' } }] })}\n\n`;
+  const proxied = await proxyJson({
+    request: { method: 'POST', headers: {} },
+    response,
+    body: { model: 'general-text-speculator', stream: true, messages: [] },
+    target: 'http://127.0.0.1:9/v1/chat/completions',
+    config: { retry_initial_ms: 5, retry_max_ms: 10, retry_deadline_ms: 500, upstream_timeout_ms: 5000 },
+    signal: caller.signal,
+    fetchImpl: async () => ({
+      status: 200,
+      headers: new Headers({ 'content-type': 'text/event-stream' }),
+      body: {
+        getReader() {
+          return {
+            async read() {
+              readCount += 1;
+              caller.abort();
+              return { done: false, value: new TextEncoder().encode(chunk) };
+            },
+            releaseLock() {},
+            async cancel() { cancelled = true; },
+          };
+        },
+      },
+    }),
+  });
+  assert.equal(proxied.status, 200);
+  assert.equal(proxied.content, 'hello');
 });

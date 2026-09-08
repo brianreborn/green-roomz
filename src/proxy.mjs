@@ -153,11 +153,11 @@ function writeSseFrame(response, framed) {
   if (typeof response.write === 'function') response.write(framed.frame);
 }
 
-async function writeSanitizedSse(upstream, response, { keepReasoning, signal } = {}) {
+async function writeSanitizedSse(upstream, response, { keepReasoning, signal, callerSignal, inactivityTimeoutMs = 0 } = {}) {
   const headers = downstreamHeaders(upstream);
   delete headers['content-length'];
   let content = '';
-  if (response.writableEnded) {
+  if (response.writableEnded || response.destroyed) {
     try { await upstream.body?.cancel?.(); } catch {}
     return content;
   }
@@ -186,7 +186,7 @@ async function writeSanitizedSse(upstream, response, { keepReasoning, signal } =
       const text = sanitizeSseText(raw, { keepReasoning });
       if (typeof response.write === 'function') response.write(text || raw);
     }
-    if (typeof response.end === 'function' && !response.writableEnded) response.end();
+    if (typeof response.end === 'function' && !response.writableEnded && !response.destroyed) response.end();
     return content;
   }
   response.writeHead(upstream.status, { ...headers, 'content-type': headers['content-type'] || 'text/event-stream; charset=utf-8' });
@@ -212,12 +212,12 @@ async function writeSanitizedSse(upstream, response, { keepReasoning, signal } =
   };
   if (!upstream.body) {
     await takeText();
-    if (typeof response.end === 'function' && !response.writableEnded) response.end();
+    if (typeof response.end === 'function' && !response.writableEnded && !response.destroyed) response.end();
     return content;
   }
   if (typeof upstream.body.getReader !== 'function') {
     await takeText();
-    if (typeof response.end === 'function' && !response.writableEnded) response.end();
+    if (typeof response.end === 'function' && !response.writableEnded && !response.destroyed) response.end();
     return content;
   }
   const reader = upstream.body.getReader();
@@ -269,36 +269,63 @@ async function writeSanitizedSse(upstream, response, { keepReasoning, signal } =
   } finally {
     reader.releaseLock?.();
   }
-  if (typeof response.end === 'function' && !response.writableEnded) response.end();
+  if (typeof response.end === 'function' && !response.writableEnded && !response.destroyed) response.end();
   return content;
 }
 
 export async function proxyJson({ request, response, body, target, config, signal, fetchImpl = fetch, beforeClientWrite }) {
   const payload = Buffer.from(JSON.stringify(body));
-  const idempotencyKey = request.headers['idempotency-key'];
-  const deadline = Date.now() + config.retry_deadline_ms;
-  const upstreamTimeout = config.upstream_timeout_ms ?? UPSTREAM_TIMEOUT_MS;
-  const maxBuffer = config.upstream_max_buffer_bytes ?? UPSTREAM_MAX_BUFFER_BYTES;
+  const deadline = Date.now() + (config?.retry_deadline_ms ?? 180_000);
+  const upstreamTimeout = config?.upstream_timeout_ms ?? UPSTREAM_TIMEOUT_MS;
+  const maxBuffer = config?.upstream_max_buffer_bytes ?? UPSTREAM_MAX_BUFFER_BYTES;
   let attempt = 0;
   const keepReasoning = clientAskedForReasoning(body);
   while (true) {
     const remaining = Math.max(1, deadline - Date.now());
-    const attemptTimeout = Math.min(upstreamTimeout, remaining);
-    const attemptSignal = deadlineSignal(signal, attemptTimeout);
+    const connectTimeout = Math.min(upstreamTimeout, remaining);
+    const connectController = new AbortController();
+    let forwardCallerAbort = null;
+    if (signal) {
+      if (signal.aborted) {
+        connectController.abort(signal.reason);
+      } else {
+        forwardCallerAbort = () => connectController.abort(signal.reason);
+        signal.addEventListener('abort', forwardCallerAbort, { once: true });
+      }
+    }
+    const connectTimer = setTimeout(() => {
+      const err = new Error('upstream backend timed out');
+      err.name = 'TimeoutError';
+      connectController.abort(err);
+    }, connectTimeout);
+
     try {
-      const upstream = await fetchImpl(target, { method: request.method, headers: upstreamHeaders(request), body: payload, signal: attemptSignal });
-      if (upstream.status === 503 && idempotencyKey && Date.now() < deadline) {
+      const upstream = await fetchImpl(target, {
+        method: request.method,
+        headers: upstreamHeaders(request),
+        body: payload,
+        signal: connectController.signal,
+      });
+
+      // Headers arrived: connection established, clear connection/retry timeout.
+      clearTimeout(connectTimer);
+
+      if (upstream.status === 503 && Date.now() < deadline) {
         try { await upstream.body?.cancel(); } catch {}
-        await sleep(jitteredBackoff(attempt++, config.retry_initial_ms, config.retry_max_ms), signal);
+        await sleep(jitteredBackoff(attempt++, config?.retry_initial_ms, config?.retry_max_ms), signal);
         continue;
       }
+
       if (body?.stream) {
         let content = '';
         try {
           if (beforeClientWrite) await beforeClientWrite();
-          content = await writeSanitizedSse(upstream, response, { keepReasoning, signal: attemptSignal }) ?? '';
+          // Naive streaming: driven by active socket reader & client cancellation, no arbitrary cutoff
+          content = await writeSanitizedSse(upstream, response, { keepReasoning, signal }) ?? '';
         } catch (streamError) {
-          if (!response.writableEnded) response.destroy?.(streamError);
+          if (!response.writableEnded && !response.destroyed) response.destroy?.(streamError);
+          if (signal?.aborted) throw signal.reason ?? streamError;
+          throw streamError;
         }
         return { status: upstream.status, content };
       }
@@ -324,13 +351,13 @@ export async function proxyJson({ request, response, body, target, config, signa
         } catch {
           data = Buffer.from(raw);
         }
-        if (response.writableEnded) return { status: upstream.status, content };
+        if (response.writableEnded || response.destroyed) return { status: upstream.status, content };
         if (beforeClientWrite) await beforeClientWrite();
         response.writeHead(upstream.status, { ...headers, 'content-length': data.length });
         response.end(data);
         return { status: upstream.status, content };
       }
-      if (response.writableEnded) {
+      if (response.writableEnded || response.destroyed) {
         try { await upstream.body?.cancel(); } catch {}
         return { status: upstream.status, content: '' };
       }
@@ -341,21 +368,26 @@ export async function proxyJson({ request, response, body, target, config, signa
         return { status: upstream.status, content: '' };
       }
       try {
-        await pipeline(Readable.fromWeb(upstream.body), response, { signal: attemptSignal });
+        await pipeline(Readable.fromWeb(upstream.body), response, { signal: connectController.signal });
       } catch (streamError) {
         // Client gone or upstream stalled mid-stream: tear the socket down, do not rethrow
         // into the handler (headers are already sent).
-        if (!response.writableEnded) response.destroy(streamError);
+        if (!response.writableEnded && !response.destroyed) response.destroy(streamError);
       }
       return { status: upstream.status, content: '' };
     } catch (error) {
       if (isTimeoutAbort(error, signal)) {
-        throw new UpstreamTimeoutError('upstream backend timed out', { target: redactTarget(target), timeout_ms: attemptTimeout });
+        throw new UpstreamTimeoutError('upstream backend timed out', { target: redactTarget(target), timeout_ms: connectTimeout });
       }
       if (signal?.aborted) throw error;
       const code = error.cause?.code ?? error.code;
       if (code !== 'ECONNREFUSED' || Date.now() >= deadline) throw error;
       await sleep(jitteredBackoff(attempt++, config.retry_initial_ms, config.retry_max_ms), signal);
+    } finally {
+      clearTimeout(connectTimer);
+      if (signal && forwardCallerAbort) {
+        signal.removeEventListener('abort', forwardCallerAbort);
+      }
     }
   }
 }
