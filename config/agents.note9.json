@@ -155,7 +155,7 @@
       "system_policy": "policies/tool-router.md",
       "context_size": 2048,
       "profiles": [
-        {"id": "cpu-4", "args": ["--load-mode", "mmap", "--fit", "off", "--device", "none", "--no-op-offload", "--threads", "4", "--threads-batch", "4", "--n-gpu-layers", "0"]}
+        {"id": "cpu-4", "args": ["--load-mode", "mmap", "--fit", "off", "--device", "none", "--no-op-offload", "--threads", "4", "--threads-batch", "4", "--n-gpu-layers", "0", "--cache-type-k", "q8_0", "--cache-type-v", "q8_0", "--batch-size", "512", "--ubatch-size", "128"]}
       ]
     },
     {
