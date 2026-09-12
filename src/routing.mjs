@@ -70,10 +70,11 @@ export function isExplicitTranslationRequest(body) {
 
 const ROUTER_SENTINELS = new Set(['auto', NEXUS_ALIAS]);
 
-export function isRouterSentinel(alias, registry) {
+export function isRouterSentinel(alias, _registry) {
   if (!alias) return true;
   if (ROUTER_SENTINELS.has(alias)) return true;
-  return Boolean(registry) && !registry.agents.has(alias);
+  // Unknown aliases are NOT sentinels — they must 400, not fall through to nexus.
+  return false;
 }
 
 export function isRoutableAlias(registry, alias) {
@@ -128,6 +129,45 @@ function finish(body, registry, alias, reason, modality) {
 
 /** Model ids that mean "route this for me" rather than pinning a specific agent. */
 const AUTO_MODEL_IDS = new Set(['auto', 'green-roomz', 'green-roomz-auto', 'default', 'gpt-4', 'gpt-4o', 'gpt-3.5-turbo']);
+
+export function isAutoModelId(alias) {
+  if (alias == null || alias === '') return true;
+  const id = String(alias);
+  if (ROUTER_SENTINELS.has(id)) return true;
+  return AUTO_MODEL_IDS.has(id.toLowerCase());
+}
+
+/**
+ * Pure P0 pin policy for explicit client `model` values (DISPATCH-FIX-01).
+ * unknown → ValidationError 400; known unavailable → pin (gateway 503); auto/compat → nexus.
+ */
+export function resolveExplicitModelPin(model, registry, { lockAlias = false } = {}) {
+  if (isAutoModelId(model)) return { decision: 'nexus' };
+  const alias = String(model);
+  if (!registry?.agents?.has(alias)) {
+    const allowed = [];
+    if (registry?.agents?.keys) {
+      for (const name of registry.agents.keys()) {
+        if (!ROUTER_SENTINELS.has(name)) allowed.push(name);
+      }
+      allowed.sort();
+    }
+    throw new ValidationError(`Unknown agent alias: ${alias}`, { allowed });
+  }
+  const status = registry.status(alias);
+  const unavailable = status?.state === 'unavailable';
+  if (unavailable) {
+    return {
+      decision: 'pin',
+      alias,
+      reason: lockAlias ? 'lock_alias' : 'requested_alias',
+    };
+  }
+  if (lockAlias) {
+    return { decision: 'pin', alias, reason: 'lock_alias' };
+  }
+  return { decision: 'nexus' };
+}
 
 /** Continue / curl / ChatGPT-compat clients. llama.app last-alias (e.g. after /code) is not this. */
 export function isGenericChatRequest(body) {
@@ -416,25 +456,10 @@ export function hardRuleRoute(body, registry) {
     return finish(body, registry, MONITOR_ALIAS, 'mailbox', modality);
   }
   const requested = body?.model ?? null;
-  // llama.app sends the last alias as `model`. Ignore it unless lock_alias.
-  // Unavailable native/speech still pin so /draw on a missing sd-server is 503.
-  if (requested && !AUTO_MODEL_IDS.has(String(requested).toLowerCase())) {
-    const locked = body.lock_alias === true;
-    const reason = locked ? 'lock_alias' : 'requested_alias';
-    if (locked && requested === NEXUS_ALIAS && registry.agents.has(requested) && registry.status(requested).state !== 'unavailable') {
-      return finish(body, registry, requested, reason, modality);
-    }
-    if (locked && requested !== NEXUS_ALIAS && isRoutableAlias(registry, requested)) {
-      return finish(body, registry, requested, reason, modality);
-    }
-    if (
-      requested !== NEXUS_ALIAS
-      && registry.agents.has(requested)
-      && (NATIVE_CHAT[requested] || requested === 'speech-synthesis-agent')
-      && !isRoutableAlias(registry, requested)
-    ) {
-      return finish(body, registry, requested, reason, modality);
-    }
+  // DISPATCH-FIX-01: unknown → 400; unavailable → pin (503 at gateway); sticky available without lock → nexus.
+  const pin = resolveExplicitModelPin(requested, registry, { lockAlias: body.lock_alias === true });
+  if (pin.decision === 'pin') {
+    return finish(body, registry, pin.alias, pin.reason, modality);
   }
   return finish(body, registry, null, 'nexus', modality);
 }
