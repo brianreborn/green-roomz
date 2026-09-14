@@ -230,9 +230,21 @@ Own gear only. Theory, not a recipe — no payloads. Prefer interfaces a normal 
 | Serve live | resident **8187** + gateway **:8080** (often `degraded`) |
 | Direct 8187 8-tok | **3.0 tok/s meas** (2026-08-29) |
 | `/code` via gateway | still needs live re-verify |
-| Local CI loop | **`scripts/local-ci-window.cmd`** detached, every 5 min → `data/local-ci.log` |
+| Local CI loop | **`scripts/local-ci.ps1`** detached (WMI/`Start-Process`), interval **900s** → `data/local-ci.log` (optional sm11 probe) |
 | Visible console | `serve-window.cmd` / `local-ci-window.cmd` |
+| Chat path | **`GRZ_OFFLINE_NEXUS=1`** — skip 4B `chat_default`, skip live nexus consult; resident 0.5B |
 | Git | develop on **shalom**; both trees at `origin/main` |
+
+### Athlon chat path (`GRZ_OFFLINE_NEXUS`)
+
+Athlon II is too slow for mmap'd 4B Instruct as generic chat and for a live 0.5B nexus consult (consult can sit silent past client timeouts; abort on `--parallel 1` wedges the resident slot).
+
+| knob | effect |
+|---|---|
+| `GRZ_OFFLINE_NEXUS=1` | `consultNexus` uses `offlinePlan` (no POST to `:8187`). Generic chat → resident 0.5B (`tool-router-agent`, reason `chat_default_resident`) instead of 4B Instruct |
+| `data/local-env.cmd` | **gitignored** host overrides. `scripts/serve-window.cmd` `call`s it when present. On qodesh: `GRZ_OFFLINE_NEXUS=1` and `GRZ_SM11=1`. **Do not commit.** |
+
+Landed `b1c034f`. User-facing resident completions do **not** inject `tool-router.md` (else the 0.5B echoes route JSON).
 
 ---
 
@@ -346,7 +358,7 @@ SKU confirmed: **Snapdragon, not Exynos.** GPU pack = OpenCL/Vulkan, not Mali.
 - **Load / soak** — `scripts/sm11-load.mjs` + `scripts/sm11-soak.mjs`; live soak `--waves 40 --per-wave 128` → **10240** pushes, `fail==0`, `serveAlive`, rising `gpuOk` / ring counters
 - **N-API wontfix** — #17 closed; Win32 CUDA vs x64 Node / missing `vcvars64` / VS2013 vs node-gyp → keep `--serve`
 
-Issue: https://github.com/brianreborn/green-roomz/issues/13 — **usefulness bar DONE**. Stretch leftovers (open, not the bar): Win32→x64 (#16); optional 0.5B offload (#14); deeper CUDA-owned ring index **wontfix** (meta mirror landed).
+Issue: https://github.com/brianreborn/green-roomz/issues/13 — **usefulness bar DONE**. Stretch leftovers (open, not the bar): Win32→x64 (#16); optional 0.5B offload (#14); deeper CUDA-owned ring index **wontfix** (meta mirror landed). Athlon **chat** path (not the bar): resident 0.5B under `GRZ_OFFLINE_NEXUS` — see [Athlon chat path](#athlon-chat-path-grz_offline_nexus).
 
 **Optional later (not required to call the GPU useful):** partial 0.5B Q4 `n-gpu-layers` offload on the same toolchain. Nice if tok/s >= CPU-only; not the usefulness bar.
 
