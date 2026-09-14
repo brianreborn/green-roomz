@@ -27,7 +27,7 @@ No root. Do not `adb push` into Termux private dirs. Do not `su`.
 | llama-bench pp64 | **36.8** |
 | llama-bench tg32 | **23.8** |
 
-Pack on shalom: `C:\LocalAI\android-pack\arm64-v8a` (~219 MB). Model: `C:\LocalAI\Qwenstral-Small-3.1-0.5B.Q4_K_M.gguf` (~439 MiB). ADB push ~28 MB/s.
+Historical host pack: android-arm64 runtime (~219 MB) + `Qwenstral-Small-3.1-0.5B.Q4_K_M.gguf` (~439 MiB) under pack `runtime/android-arm64/` + `models/` (not LocalAI paths). ADB push ~28 MB/s. PF-M3: deploy pushes **all** files under pack `models/` when present; Termux setup mkdirs `$HOME/grz-runtime/{bin,lib,models,missing}` and copies all staged models.
 
 ## Live layout on device
 

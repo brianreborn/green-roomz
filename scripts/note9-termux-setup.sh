@@ -25,7 +25,7 @@ command -v node >/dev/null || { echo "ERROR: nodejs install failed"; exit 1; }
 
 HOME_GRZ="$HOME/green-roomz"
 RT="$HOME/grz-runtime"
-mkdir -p "$HOME_GRZ" "$RT/bin" "$RT/lib" "$RT/models"
+mkdir -p "$HOME_GRZ" "$RT/bin" "$RT/lib" "$RT/models" "$RT/missing"
 
 echo "=== copy JS tree ==="
 if [[ -d $SRC_TMP/green-roomz ]]; then
@@ -42,14 +42,23 @@ cp -a "$SRC_TMP/bin/llama-server" "$SRC_TMP/bin/llama-cli" "$SRC_TMP/bin/llama-b
 cp -a "$SRC_TMP/lib/"*.so "$RT/lib/"
 cp -a "$SRC_TMP/bin/"libggml-cpu-*.so "$RT/bin/" 2>/dev/null || true
 cp -a "$SRC_TMP/bin/libggml-base.so" "$SRC_TMP/bin/libggml.so" "$SRC_TMP/bin/libc++_shared.so" "$RT/bin/" 2>/dev/null || true
-# model: prefer tmp (already on device); copy only if missing in runtime
-if [[ ! -f $RT/models/Qwenstral-Small-3.1-0.5B.Q4_K_M.gguf ]]; then
-  if [[ -f $SRC_TMP/models/Qwenstral-Small-3.1-0.5B.Q4_K_M.gguf ]]; then
-    echo "copying GGUF into \$HOME (may take a minute)..."
-    cp -a "$SRC_TMP/models/Qwenstral-Small-3.1-0.5B.Q4_K_M.gguf" "$RT/models/" || \
-      ln -sf "$SRC_TMP/models/Qwenstral-Small-3.1-0.5B.Q4_K_M.gguf" "$RT/models/" || true
-  fi
-fi
+# PF-M3: copy ALL staged models (not nexus-only) from adb drop / sdcard staging
+echo "=== copy models into \$HOME/grz-runtime/models (all files present) ==="
+copied=0
+for src_models in "$SRC_TMP/models" "$SD/models"; do
+  [[ -d $src_models ]] || continue
+  for f in "$src_models"/*; do
+    [[ -f $f ]] || continue
+    base="$(basename "$f")"
+    if [[ ! -e $RT/models/$base ]]; then
+      echo "copying model $base..."
+      cp -a "$f" "$RT/models/" || ln -sf "$f" "$RT/models/" || true
+      copied=$((copied + 1))
+    fi
+  done
+done
+echo "models_copied_new=$copied"
+ls -la "$RT/models" 2>/dev/null | head -40 || true
 chmod 755 "$RT/bin/llama-server" "$RT/bin/llama-cli" "$RT/bin/llama-bench" 2>/dev/null || true
 
 cat > "$RT/run-llama-server.sh" <<'WRAP'

@@ -18,7 +18,7 @@ command -v node >/dev/null || { echo "ERROR: nodejs missing"; exit 1; }
 
 HOME_GRZ="$HOME/green-roomz"
 RT="$HOME/grz-runtime"
-mkdir -p "$HOME_GRZ" "$RT/bin" "$RT/lib" "$RT/models"
+mkdir -p "$HOME_GRZ" "$RT/bin" "$RT/lib" "$RT/models" "$RT/missing"
 
 if [[ -d $SRC/green-roomz ]]; then
   cp -a "$SRC/green-roomz/." "$HOME_GRZ/"
@@ -35,13 +35,22 @@ for src in "$SRC/bin" "$SRC"; do
   cp -a "$src/"*.so "$RT/bin/" 2>/dev/null || true
 done
 cp -a "$SRC/lib/"*.so "$RT/lib/" 2>/dev/null || true
-if [[ ! -f $RT/models/Qwenstral-Small-3.1-0.5B.Q4_K_M.gguf ]]; then
-  if [[ -f $SRC/models/Qwenstral-Small-3.1-0.5B.Q4_K_M.gguf ]]; then
-    echo "copying GGUF into \$HOME..."
-    cp -a "$SRC/models/Qwenstral-Small-3.1-0.5B.Q4_K_M.gguf" "$RT/models/" || \
-      ln -sf "$SRC/models/Qwenstral-Small-3.1-0.5B.Q4_K_M.gguf" "$RT/models/" || true
-  fi
-fi
+# PF-M3: copy ALL staged models (not nexus-only)
+echo "=== copy models into \$HOME/grz-runtime/models (all files present) ==="
+copied=0
+for src_models in "$SRC/models" "$SD/models"; do
+  [[ -d $src_models ]] || continue
+  for f in "$src_models"/*; do
+    [[ -f $f ]] || continue
+    base="$(basename "$f")"
+    if [[ ! -e $RT/models/$base ]]; then
+      echo "copying model $base..."
+      cp -a "$f" "$RT/models/" || ln -sf "$f" "$RT/models/" || true
+      copied=$((copied + 1))
+    fi
+  done
+done
+echo "models_copied_new=$copied"
 chmod 755 "$RT/bin/llama-server" 2>/dev/null || true
 
 cat > "$RT/run-llama-server.sh" <<'WRAP'
