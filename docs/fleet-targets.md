@@ -335,24 +335,24 @@ SKU confirmed: **Snapdragon, not Exynos.** GPU pack = OpenCL/Vulkan, not Mali.
 | Piece | Spec | Status (qodesh) |
 |---|---|---|
 | Binary | Our CUDA **6.5 / compute_11** build (VS2013 + staged toolkit; careful Win11 driver story) | **shipped** — Win32 fallback (`native/sm11-monitor`); see #16 for x64 |
-| Work | Majority of monitor/mailbox hot path on GPU: copy-engine or host-memcpy slot (**F3/F21**), seq `{hi,lo}`, push/drain assist, payload hash / ring scrub — **GPU MUST NOT list** (private slot, not a model roster) | **largely met** — warm `--serve`, private-slot ring, `preferRing` hot path |
-| Useful = | Under load, most monitor ops hit the 8600; CPU fallback still correct if GPU absent | **largely met** — `scripts/sm11-load.mjs` hammer; CPU twin when GPU absent |
+| Work | Majority of monitor/mailbox hot path on GPU: copy-engine or host-memcpy slot (**F3/F21**), seq `{hi,lo}`, push/drain assist, payload hash / ring scrub — **GPU MUST NOT list** (private slot, not a model roster) | **met** — warm `--serve`, private-slot ring, `preferRing` hot path, meta mirror |
+| Useful = | Under load, most monitor ops hit the 8600; CPU fallback still correct if GPU absent | **met** — soak 10k+ pushes `fail==0`; CPU twin when GPU absent |
 
-**Usefulness bar (monitor-on-8600): largely met.** Live on qodesh tip `9722e60` / `8b19760`:
+**Usefulness bar (monitor-on-8600): met.** Live on qodesh tip `3685dcd` / `c19af7e` (#13 closed):
 
 - **Warm `--serve`** — persistent CUDA context + resident ring (cold spawn ~100 ms → warm ops ~sub-ms–2 ms)
 - **`preferRing` hot path** — with `GRZ_SM11=1` + exe, Mailbox/MonitorIpc enqueue→`assistRingPush`, drop→`assistRingScrub`, drain→`assistRingDrain` (probe seq/scrub/batch fallback)
-- **Private-slot ring** — host 32-bit index; GPU hash/copy/scrub/cmp/seq only (**GPU MUST NOT list**)
-- **Load / soak** — `scripts/sm11-load.mjs` + longer `scripts/sm11-soak.mjs` (`--waves` / `--per-wave`); assert `fail==0`, `serveAlive`, rising `gpuOk` / `ringPush`/`ringDrain`/`ringScrub`
+- **Private-slot ring** — host 32-bit index; GPU hash/copy/scrub/cmp/seq only (**GPU MUST NOT list**); host-authoritative **meta mirror** (`3685dcd`) — true CUDA-owned index **wontfix** on sm_1.1
+- **Load / soak** — `scripts/sm11-load.mjs` + `scripts/sm11-soak.mjs`; live soak `--waves 40 --per-wave 128` → **10240** pushes, `fail==0`, `serveAlive`, rising `gpuOk` / ring counters
 - **N-API wontfix** — #17 closed; Win32 CUDA vs x64 Node / missing `vcvars64` / VS2013 vs node-gyp → keep `--serve`
 
-Issue: https://github.com/brianreborn/green-roomz/issues/13 — stretch left: **CUDA-owned ring index** (host still owns head/tail today); Win32→x64 (#16); optional 0.5B offload (#14, **not** the usefulness bar).
+Issue: https://github.com/brianreborn/green-roomz/issues/13 — **usefulness bar DONE**. Stretch leftovers (open, not the bar): Win32→x64 (#16); optional 0.5B offload (#14); deeper CUDA-owned ring index **wontfix** (meta mirror landed).
 
 **Optional later (not required to call the GPU useful):** partial 0.5B Q4 `n-gpu-layers` offload on the same toolchain. Nice if tok/s >= CPU-only; not the usefulness bar.
 
 **Non-goals on 224 MB:** whole chat models in VRAM; Vulkan lighting up; vision/whisper/sd on this card.
 
-**Order:** CPU nexus stays live -> CUDA 6.5 toolchain -> **monitor-on-8600** (done enough to ship) -> (optional) 0.5B partial offload.
+**Order:** CPU nexus stays live -> CUDA 6.5 toolchain -> **monitor-on-8600** (**bar met**) -> (optional) 0.5B partial offload.
 
 ## Block layouts (all considered)
 
