@@ -107,15 +107,15 @@ if [[ -n "${REVIEWS_DIR:-}" && -f "$REVIEWS_DIR/green-roomz-models.lock.json" ]]
 else
   echo "WARN: GOS-P7 lockfile not found (set GRZ_REVIEWS or place reviews/green-roomz-models.lock.json)"
 fi
-SLIM_TORRENT="${REVIEWS_DIR:-/workspace/reviews}/green-roomz-beta-0.5.2-slim.torrent"
+SLIM_TORRENT="${REVIEWS_DIR:-/workspace/reviews}/green-roomz-beta-0.5.3-slim.torrent"
 if [[ -f "$SLIM_TORRENT" ]]; then
-  echo "GOS-P7: pushing slim .torrent + note (infohash 74f859266f933588fdd32dffd9272f41f9ad6c7c)"
-  adb push "$SLIM_TORRENT" "$DEST/green-roomz-beta-0.5.2-slim.torrent"
+  echo "GOS-P7: pushing slim .torrent + note (infohash a2344816d2a5f8ff3ecb3d533ff36b096441843c)"
+  adb push "$SLIM_TORRENT" "$DEST/green-roomz-beta-0.5.3-slim.torrent"
   note="$stage/slim-torrent-note.txt"
   printf '%s\n' \
-    "green-roomz-beta-0.5.2-slim.torrent" \
-    "infohash 74f859266f933588fdd32dffd9272f41f9ad6c7c" \
-    "magnet:?xt=urn:btih:74f859266f933588fdd32dffd9272f41f9ad6c7c&dn=green-roomz-beta-0.5.2-slim.zip" \
+    "green-roomz-beta-0.5.3-slim.torrent" \
+    "infohash a2344816d2a5f8ff3ecb3d533ff36b096441843c" \
+    "magnet:?xt=urn:btih:a2344816d2a5f8ff3ecb3d533ff36b096441843c&dn=green-roomz-beta-0.5.3-slim.zip" \
     >"$note"
   adb push "$note" "$DEST/slim-torrent-note.txt"
 fi
