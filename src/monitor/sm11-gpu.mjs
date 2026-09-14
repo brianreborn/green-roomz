@@ -21,6 +21,9 @@ export const SM11_DEFAULT_ENV_BYTES = 256;
 export const SM11_PROBE_PAYLOAD = 'green-roomz-mailbox-probe';
 /** Native seq wrap probe start — matches sm11_monitor.cu seq_start. */
 export const SM11_SEQ_START = Object.freeze({ hi: 0, lo: 0xfffffffe });
+/** Small probe sizes for mailbox/monitor hot-path assists (avoid 8600 VRAM spikes). */
+export const SM11_HOT_BATCH = 8;
+export const SM11_HOT_ENV_BYTES = 64;
 
 const REPO_ROOT = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
 
@@ -501,7 +504,14 @@ export function createSm11Assist(options = {}) {
   const runExe = opts.runExe ?? defaultRunExe;
   const timeoutMs = opts.timeoutMs ?? 15_000;
   const verifyOnFat = opts.verifyOnFat !== false;
+  // Follow verifyOnFat unless overridden: auto MonitorIpc stays quiet unless GRZ_SM11=1.
+  const hotPath = opts.hotPath !== undefined ? opts.hotPath !== false : verifyOnFat;
   const shared = { exePath, preferGpu, timeoutMs, runExe, exists };
+  const hotShared = {
+    ...shared,
+    batch: opts.hotBatch ?? SM11_HOT_BATCH,
+    envBytes: opts.hotEnvBytes ?? SM11_HOT_ENV_BYTES,
+  };
 
   const stats = {
     fat: 0,
@@ -509,12 +519,15 @@ export function createSm11Assist(options = {}) {
     scrub: 0,
     seq: 0,
     batch: 0,
+    coalesced: 0,
     gpuOk: 0,
     cpuFallback: 0,
     fail: 0,
     last: null,
   };
   const pending = new Set();
+  /** One in-flight probe per kind — hot path must not spawn-storm under load. */
+  const inflight = { scrub: null, seq: null, batch: null };
 
   function record(result, kind = 'verify') {
     stats.verifyAttempts += 1;
@@ -551,6 +564,19 @@ export function createSm11Assist(options = {}) {
     return p;
   }
 
+  function coalesce(kind, start) {
+    if (inflight[kind]) {
+      stats.coalesced += 1;
+      return inflight[kind];
+    }
+    const p = start();
+    const wrapped = p.finally(() => {
+      if (inflight[kind] === wrapped) inflight[kind] = null;
+    });
+    inflight[kind] = wrapped;
+    return wrapped;
+  }
+
   function observeFat(text) {
     stats.fat += 1;
     const digest = digestFatPayload(text);
@@ -564,17 +590,40 @@ export function createSm11Assist(options = {}) {
 
   /** Non-blocking scrub probe; CPU fallback when exe missing/fails. */
   function assistScrub(probeOpts = {}) {
-    return track(verifyScrub({ ...shared, ...probeOpts }), 'scrub');
+    return coalesce('scrub', () => track(verifyScrub({ ...shared, ...probeOpts }), 'scrub'));
   }
 
   /** Non-blocking seq stamp verify; CPU fallback when exe missing/fails. */
   function assistSeq(probeOpts = {}) {
-    return track(verifySeq({ ...shared, ...probeOpts }), 'seq');
+    return coalesce('seq', () => track(verifySeq({ ...shared, ...probeOpts }), 'seq'));
   }
 
   /** Non-blocking batch envelope hash; CPU fallback when exe missing/fails. */
   function assistBatch(probeOpts = {}) {
-    return track(verifyBatch({ ...shared, ...probeOpts }), 'batch');
+    return coalesce('batch', () => track(verifyBatch({ ...shared, ...probeOpts }), 'batch'));
+  }
+
+  /** Hot-path: seq stamp assist after enqueue (no-op if hotPath disabled). */
+  function onEnqueue() {
+    if (!hotPath) return null;
+    return assistSeq(hotShared);
+  }
+
+  /** Hot-path: scrub assist when a private slot is overwritten/cleared. */
+  function onDropOrClear() {
+    if (!hotPath) return null;
+    return assistScrub(hotShared);
+  }
+
+  /** Hot-path: batch hash assist when draining one or more envelopes. */
+  function onDrain(count) {
+    if (!hotPath) return null;
+    const n = Number(count);
+    if (!Number.isFinite(n) || n < 1) return null;
+    return assistBatch({
+      ...hotShared,
+      batch: clampBatch(n, hotShared.batch),
+    });
   }
 
   async function flush() {
@@ -584,12 +633,16 @@ export function createSm11Assist(options = {}) {
   return {
     exePath,
     preferGpu,
+    hotPath,
     exePresent: () => exists(exePath),
     observeFat,
     scheduleVerify,
     assistScrub,
     assistSeq,
     assistBatch,
+    onEnqueue,
+    onDropOrClear,
+    onDrain,
     verify: (payload) => verifyPayload(payload, shared).then((r) => record(r, 'verify')),
     verifyScrub: (probeOpts) => verifyScrub({ ...shared, ...probeOpts }).then((r) => record(r, 'scrub')),
     verifySeq: (probeOpts) => verifySeq({ ...shared, ...probeOpts }).then((r) => record(r, 'seq')),

@@ -19,7 +19,7 @@ import {
   SM11_SEQ_START,
 } from '../src/monitor/sm11-gpu.mjs';
 import { MonitorIpc } from '../src/monitor/ipc.mjs';
-import { sm11VerifyPayload, fnv1a64Hex as apiFnv } from '../src/monitor/api.mjs';
+import { sm11VerifyPayload, fnv1a64Hex as apiFnv, HOT_RING_SLOTS } from '../src/monitor/api.mjs';
 import { u64Eq } from '../src/monitor/ids.mjs';
 
 const KNOWN = 'green-roomz-mailbox-probe';
@@ -317,6 +317,87 @@ test('MonitorIpc sm11 assistScrub is available without blocking push', async () 
   const scrub = await ipc.sm11.assistScrub({ batch: 4, envBytes: 16 });
   assert.equal(scrub.ok, true);
   assert.equal(scrub.backend, 'cpu');
+});
+
+test('assistScrub/Seq/Batch coalesce concurrent same-kind probes', async () => {
+  let runs = 0;
+  let resolveRun;
+  const gate = new Promise((r) => { resolveRun = r; });
+  const assist = createSm11Assist({
+    verifyOnFat: false,
+    preferGpu: true,
+    exists: () => true,
+    exePath: EXE,
+    runExe: async () => {
+      runs += 1;
+      await gate;
+      return {
+        code: 0,
+        stdout: '{"scrub_ok":true,"ok":true,"device":"mock","sm":"11","batch":4,"env_bytes":16}\n',
+        stderr: '',
+      };
+    },
+  });
+  const a = assist.assistScrub({ batch: 4, envBytes: 16 });
+  const b = assist.assistScrub({ batch: 4, envBytes: 16 });
+  assert.equal(a, b);
+  assert.equal(assist.stats().coalesced, 1);
+  resolveRun();
+  await assist.flush();
+  assert.equal(runs, 1);
+  assert.equal((await a).scrub_ok, true);
+});
+
+test('MonitorIpc hot path fires seq on push, scrub on drop, batch on drain', async () => {
+  const ipc = new MonitorIpc({
+    autoDrain: false,
+    sm11: {
+      verifyOnFat: false,
+      hotPath: true,
+      preferGpu: false,
+      hotBatch: 4,
+      hotEnvBytes: 16,
+    },
+  });
+  // Fill hot ring then one more → drop → scrub; each push → seq (coalesced).
+  for (let i = 0; i < HOT_RING_SLOTS + 1; i += 1) {
+    ipc.push({ kind: 'hop', source: 't', ticket: `t${i}`, payload: { i } });
+  }
+  assert.ok(ipc.stats().hot.dropped >= 1);
+  const drained = ipc.drain();
+  assert.ok(drained.length >= 1);
+  await ipc.sm11.flush();
+  const s = ipc.stats().sm11;
+  assert.ok(s.seq >= 1, `seq=${s.seq}`);
+  assert.ok(s.scrub >= 1, `scrub=${s.scrub}`);
+  assert.ok(s.batch >= 1, `batch=${s.batch}`);
+  assert.ok(s.coalesced >= 1, `coalesced=${s.coalesced}`);
+});
+
+test('Mailbox hot path wires scrub/seq/batch without blocking push', async () => {
+  const box = new Mailbox({
+    capacity: 4,
+    autoDrain: false,
+    sm11: {
+      verifyOnFat: false,
+      hotPath: true,
+      preferGpu: false,
+      hotBatch: 4,
+      hotEnvBytes: 16,
+    },
+  });
+  const t0 = performance.now();
+  for (let i = 0; i < 6; i += 1) {
+    box.push({ kind: 'success', source: 'a', payload: { i } });
+  }
+  assert.ok(performance.now() - t0 < 20);
+  assert.equal(box.stats().dropped, 2);
+  box.drain();
+  await box.sm11.flush();
+  const s = box.stats().sm11;
+  assert.ok(s.seq >= 1);
+  assert.ok(s.scrub >= 1);
+  assert.ok(s.batch >= 1);
 });
 
 test('live sm11_monitor.exe --json on 8600 when present', {

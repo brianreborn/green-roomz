@@ -196,16 +196,19 @@ class CopyRing {
   }
 
   pushCopy(envelope) {
+    let droppedNow = false;
     if (this.size === this.capacity) {
       this.slots[this.tail] = undefined;
       this.tail = (this.tail + 1) & this.mask;
       this.size -= 1;
       this.dropped += 1;
+      droppedNow = true;
     }
     this.slots[this.head] = cloneEnvelope(envelope);
     this.head = (this.head + 1) & this.mask;
     this.size += 1;
     this.pushed += 1;
+    return droppedNow;
   }
 
   peekCopies() {
@@ -263,7 +266,7 @@ export class MonitorIpc {
     this.mappedPinnedHostRing = false;
     this.sharedMapping = null;
     // Auto: CPU always; CUDA when exe present. GRZ_SM11=0 disables.
-    // sm11.assistScrub / assistSeq / assistBatch are non-blocking probe helpers.
+    // Hot path: onEnqueue→assistSeq, drop/clear→assistScrub, drain→assistBatch.
     this.sm11 = resolveSm11Option(sm11 === undefined ? 'auto' : sm11, { mode: 'auto' });
   }
 
@@ -464,6 +467,10 @@ export class MonitorIpc {
     const listeners = typeof callback === 'function' ? [callback, ...this.listeners] : this.listeners.slice();
     const events = [...this.hot.drainCopies(), ...this.upcalls.drainCopies()]
       .sort((a, b) => seqCmp(a.seq, b.seq));
+    if (this.sm11 && events.length > 0) {
+      this.sm11.onDrain(events.length);
+      this.sm11.onDropOrClear();
+    }
     for (const event of events) {
       for (const listener of listeners) {
         try { listener(cloneEnvelope(event)); } catch {}
@@ -537,7 +544,11 @@ export class MonitorIpc {
       copy.seq = u64(this.seq.hi, this.seq.lo);
     }
     const ring = copy.kind === 'upcall' ? this.upcalls : this.hot;
-    ring.pushCopy(copy);
+    const droppedNow = ring.pushCopy(copy);
+    if (this.sm11) {
+      this.sm11.onEnqueue();
+      if (droppedNow) this.sm11.onDropOrClear();
+    }
     const stored = cloneEnvelope(copy);
     this.recentBuf.push(cloneEnvelope(stored));
     if (this.recentBuf.length > this.recentLimit) {

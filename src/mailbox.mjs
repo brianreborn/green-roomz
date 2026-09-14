@@ -23,7 +23,8 @@ import { resolveSm11Option, digestFatPayload } from './monitor/sm11-gpu.mjs';
  * Live hops keep numeric seq + string ticket. Monitor IPC may pass {hi,lo}.
  * Optional sm11 assist (GRZ_SM11=1 or { sm11: true }) verifies fat payloads via
  * CUDA FNV-1a/copy on the 8600 with CPU fallback — never blocks push().
- * Assist also exposes assistScrub / assistSeq / assistBatch for monitor probes.
+ * Hot path (non-blocking, coalesced): push→assistSeq, drop→assistScrub,
+ * drain→assistBatch (+ scrub clear).
  */
 
 function nextPow2(n) {
@@ -129,16 +130,22 @@ export class Mailbox {
       payload: clonePayload(partial.payload, this.sm11),
       target: partial.target ?? 'machine',
     };
+    let droppedNow = false;
     if (this.size === this.capacity) {
       this.tail = (this.tail + 1) & this.mask;
       this.size -= 1;
       this.dropped += 1;
+      droppedNow = true;
     }
     this.slots[this.head] = event;
     this.head = (this.head + 1) & this.mask;
     this.size += 1;
     this.seq = nextSeq;
     this.pushed += 1;
+    if (this.sm11) {
+      this.sm11.onEnqueue();
+      if (droppedNow) this.sm11.onDropOrClear();
+    }
     this.recentBuf.push(event);
     if (this.recentBuf.length > this.recentLimit) this.recentBuf.splice(0, this.recentBuf.length - this.recentLimit);
     if (this.autoDrain) this._scheduleDrain();
@@ -155,6 +162,10 @@ export class Mailbox {
       this.size -= 1;
       this.drained += 1;
       out.push(event);
+    }
+    if (this.sm11 && out.length > 0) {
+      this.sm11.onDrain(out.length);
+      this.sm11.onDropOrClear();
     }
     const listeners = (typeof callback === 'function' ? [callback, ...this.listeners] : this.listeners).slice();
     for (const event of out) {
