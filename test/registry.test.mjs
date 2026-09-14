@@ -38,7 +38,7 @@ test('missing artifacts degrade only the affected alias', async () => {
   assert.equal(monitor.capability_readiness.loaded, true);
 });
 
-test('inspect keeps a memory-tight specialist available (OS pages), not unavailable', async () => {
+test('inspect marks a memory-tight specialist unavailable unless admit_when_tight=page', async () => {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'grz-inspect-ram-'));
   const model = path.join(dir, 'model.gguf');
   writeFileSync(model, '');

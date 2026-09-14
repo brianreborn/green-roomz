@@ -96,14 +96,17 @@ test('bind then yield', () => {
   assert.equal(Object.prototype.hasOwnProperty.call(place, 'vote'), false);
   assert.equal(Object.prototype.hasOwnProperty.call(place, 'reboot'), false);
   assert.equal(Object.prototype.hasOwnProperty.call(place, 'secure_reboot'), false);
+  // API stubs return reject envelopes (never throw, never execute).
   const voted = vote();
   assert.equal(voted.ok, false);
   assert.equal(voted.kind, 'reject');
+  assert.equal(voted.voted, false);
   assert.equal(voted.executed, false);
   assert.match(voted.reason, /uncallable|complex-last/);
   const rebooted = secureReboot();
   assert.equal(rebooted.ok, false);
   assert.equal(rebooted.kind, 'reject');
+  assert.equal(rebooted.voted, false);
   assert.equal(rebooted.executed, false);
   assert.match(rebooted.reason, /uncallable|complex-last/);
 });
