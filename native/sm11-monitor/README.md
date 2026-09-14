@@ -47,8 +47,11 @@ Flags:
 - `--json` — machine-readable one-line JSON
 - `--copy` / `--hash` / `--scrub` / `--seq` — run only those probes (default: all)
 - `--ring-push` / `--ring-hash` / `--ring-scrub` — fixed private-slot ring ops (host index; GPU assist)
+- `--ring-drain N` — host-assisted drain: GPU hash+scrub N slots from tail; host advances index
+- `--ring-verify` — host walks occupied slots; GPU re-hashes each; reports mismatches
 - `--ring-slots N` — ring capacity (default 32, range 16..64)
 - `--ring-slot I` — target slot for hash/scrub (default: last push / tail drop)
+- Ring `--json` fill/drain stats: `ring_occupancy`, `ring_push_count`, `ring_drop_count`, `ring_overwrite_count`, `ring_drain_count` (+ per-call `ring_drained` / `ring_verify_*`)
 - `--batch N` — envelope count for batch hash / seq sample (default 64, max 4096)
 - `--env-bytes B` — bytes per envelope for batch/scrub/ring (default 256, max 4096)
 - `--loops N` — repeat probes in-process; JSON adds `ms_min` / `ms_avg` / `ms_max` / `loop_fail`

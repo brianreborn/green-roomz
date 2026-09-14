@@ -109,7 +109,7 @@ const needBase = {
   verify: WAVES,
 };
 // Ring preferred when serve is up; probe path remains valid fallback/--cpu.
-const needRing = { ringPush: WAVES, ringScrub: 1, ringHash: WAVES };
+const needRing = { ringPush: WAVES, ringScrub: 1, ringDrain: WAVES };
 const needProbe = { seq: WAVES, scrub: 1, batch: WAVES };
 
 for (const [side, s] of [['mailbox', bs], ['ipc', is]]) {
@@ -136,7 +136,7 @@ for (const [side, s] of [['mailbox', bs], ['ipc', is]]) {
       got: {
         ringPush: s?.ringPush ?? 0,
         ringScrub: s?.ringScrub ?? 0,
-        ringHash: s?.ringHash ?? 0,
+        ringDrain: s?.ringDrain ?? 0,
         seq: s?.seq ?? 0,
         scrub: s?.scrub ?? 0,
         batch: s?.batch ?? 0,

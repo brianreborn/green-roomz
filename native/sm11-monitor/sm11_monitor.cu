@@ -520,6 +520,10 @@ static int validate_options(const Options *opt) {
     std::fprintf(stderr, "ring-slot %u >= ring-slots %u\n", opt->ring_slot, opt->ring_slots);
     return 5;
   }
+  if (opt->do_ring_drain && (opt->ring_drain_n < 1u || opt->ring_drain_n > 4096u)) {
+    std::fprintf(stderr, "ring-drain %u out of range (1..4096)\n", opt->ring_drain_n);
+    return 5;
+  }
   const size_t batch_bytes = (size_t)opt->batch * (size_t)opt->env_bytes;
   const size_t ring_bytes = (size_t)opt->ring_slots * (size_t)opt->env_bytes;
   if (batch_bytes > 32u * 1024u * 1024u || ring_bytes > 16u * 1024u * 1024u) {

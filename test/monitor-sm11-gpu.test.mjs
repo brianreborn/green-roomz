@@ -13,6 +13,8 @@ import {
   cpuRingPush,
   cpuRingHash,
   cpuRingScrub,
+  cpuRingDrain,
+  cpuRingVerify,
   createCpuRingState,
   verifyPayload,
   verifyScrub,
@@ -21,6 +23,8 @@ import {
   verifyRingPush,
   verifyRingHash,
   verifyRingScrub,
+  verifyRingDrain,
+  verifyRingVerify,
   createSm11Assist,
   createSm11ServeSession,
   serveRunExeFactory,
@@ -494,7 +498,7 @@ test('Mailbox hot path wires scrub/seq/batch without blocking push', async () =>
   assert.ok(s.batch >= 1);
 });
 
-test('Mailbox/MonitorIpc preferRing hot path uses ring push/hash/scrub (CPU mock)', async () => {
+test('Mailbox/MonitorIpc preferRing hot path uses ring push/scrub/drain (CPU mock)', async () => {
   const box = new Mailbox({
     capacity: 4,
     autoDrain: false,
@@ -943,24 +947,44 @@ test('live --loops reports in-process ms_* when exe present', {
   }
 });
 
-test('cpuRing push/hash/scrub advances host 32-bit index and stamps seq', () => {
+test('cpuRing push/hash/scrub/drain/verify advances host 32-bit index and stamps seq', () => {
   const state = createCpuRingState({ slots: 16, envBytes: 32 });
   const a = cpuRingPush('alpha', { state });
   assert.equal(a.ring_push_ok, true);
   assert.equal(a.ring_slot, 0);
   assert.equal(a.ring_seq.lo, 0);
   assert.equal(a.ring_count, 1);
+  assert.equal(a.ring_occupancy, 1);
   const b = cpuRingPush('beta', { state: a.state });
   assert.equal(b.ring_slot, 1);
   assert.equal(b.ring_seq.lo, 1);
   const h = cpuRingHash({ state: b.state, slot: 0 });
   assert.equal(h.ring_hash_ok, true);
   assert.equal(h.ring_hash, a.ring_hash);
-  const s = cpuRingScrub({ state: b.state });
+  const v = cpuRingVerify({ state: b.state });
+  assert.equal(v.ring_verify_ok, true);
+  assert.equal(v.ring_verify_checked, 2);
+  assert.equal(v.ring_verify_mismatches, 0);
+  const d = cpuRingDrain({ state: b.state, count: 1 });
+  assert.equal(d.ring_drain_ok, true);
+  assert.equal(d.ring_drained, 1);
+  assert.equal(d.ring_drain_count, 1);
+  assert.equal(d.ring_occupancy, 1);
+  const s = cpuRingScrub({ state: d.state });
   assert.equal(s.ring_scrub_ok, true);
-  assert.equal(s.ring_slot, 0);
-  assert.equal(s.ring_count, 1);
-  assert.equal(s.ring_drop_count, 1);
+  assert.equal(s.ring_count, 0);
+  assert.equal(s.ring_drop_count, 2);
+});
+
+test('cpuRing overwrite_count rises on push-when-full', () => {
+  const state = createCpuRingState({ slots: 16, envBytes: 16 });
+  for (let i = 0; i < 16; i += 1) cpuRingPush(`f${i}`, { state });
+  assert.equal(state.count, 16);
+  assert.equal(state.overwriteCount, 0);
+  const over = cpuRingPush('overflow', { state });
+  assert.equal(over.ring_overwrite_count, 1);
+  assert.equal(over.ring_occupancy, 16);
+  assert.equal(over.ring_drop_count, 1);
 });
 
 test('verifyRing* fall back to CPU when exe missing', async () => {
@@ -979,7 +1003,15 @@ test('verifyRing* fall back to CPU when exe missing', async () => {
   const hash = await verifyRingHash({ ...missing, state: push.state, ringSlot: 0 });
   assert.equal(hash.backend, 'cpu');
   assert.equal(hash.ring_hash, push.ring_hash);
-  const scrub = await verifyRingScrub({ ...missing, state: push.state });
+  const ver = await verifyRingVerify({ ...missing, state: push.state });
+  assert.equal(ver.backend, 'cpu');
+  assert.equal(ver.ring_verify_ok, true);
+  assert.equal(ver.ring_verify_checked, 1);
+  const drain = await verifyRingDrain({ ...missing, state: push.state, count: 1 });
+  assert.equal(drain.backend, 'cpu');
+  assert.equal(drain.ring_drain_ok, true);
+  assert.equal(drain.ring_drained, 1);
+  const scrub = await verifyRingScrub({ ...missing, state: drain.state });
   assert.equal(scrub.backend, 'cpu');
   assert.equal(scrub.ring_scrub_ok, true);
 });
@@ -1002,12 +1034,17 @@ test('createSm11Assist assistRing* is non-blocking with CPU fallback', async () 
   assert.equal(assist.stats().ringPush, 1);
   const h = await assist.assistRingHash({ ringSlot: 0 });
   assert.equal(h.ring_hash_ok, true);
+  const v = await assist.assistRingVerify();
+  assert.equal(v.ring_verify_ok, true);
+  const d = await assist.assistRingDrain(1);
+  assert.equal(d.ring_drain_ok, true);
+  assert.equal(assist.stats().ringDrain, 1);
   const s = await assist.assistRingScrub();
   assert.equal(s.ring_scrub_ok, true);
   assert.equal(assist.stats().ringScrub, 1);
 });
 
-test('live private-slot ring push/hash/scrub when exe present', {
+test('live private-slot ring push/hash/scrub/drain/verify when exe present', {
   skip: HAS_EXE ? false : 'native/sm11-monitor/out/sm11_monitor.exe missing',
   timeout: 90_000,
 }, async () => {
@@ -1028,9 +1065,20 @@ test('live private-slot ring push/hash/scrub when exe present', {
     assert.equal(push.ring_hash_ok, true);
     assert.equal(push.ring_cmp_ok, true);
     assert.equal(push.ring_slot, 0);
+    assert.equal(push.ring_occupancy, 1);
+    assert.equal(push.ring_overwrite_count, 0);
     const hash = await assist.verifyRingHash({ ringSlot: 0 });
     assert.equal(hash.ring_hash_ok, true);
     assert.equal(hash.ring_hash, push.ring_hash);
+    const ver = await assist.verifyRingVerify();
+    assert.equal(ver.ring_verify_ok, true);
+    assert.equal(ver.ring_verify_checked, 1);
+    assert.equal(ver.ring_verify_mismatches, 0);
+    const drain = await assist.verifyRingDrain(1);
+    assert.equal(drain.ring_drain_ok, true);
+    assert.equal(drain.ring_drained, 1);
+    assert.equal(drain.ring_occupancy, 0);
+    assert.equal(drain.ring_drain_count, 1);
     const scrub = await assist.verifyRingScrub();
     assert.equal(scrub.ring_scrub_ok, true);
     assert.ok(typeof push.ms === 'number');

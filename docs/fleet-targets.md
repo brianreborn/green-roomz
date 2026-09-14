@@ -341,9 +341,9 @@ SKU confirmed: **Snapdragon, not Exynos.** GPU pack = OpenCL/Vulkan, not Mali.
 **Usefulness bar (monitor-on-8600): largely met.** Live on qodesh tip `9722e60` / `8b19760`:
 
 - **Warm `--serve`** — persistent CUDA context + resident ring (cold spawn ~100 ms → warm ops ~sub-ms–2 ms)
-- **`preferRing` hot path** — with `GRZ_SM11=1` + exe, Mailbox/MonitorIpc enqueue→`assistRingPush`, drop→`assistRingScrub`, drain→`assistRingHash` (probe seq/scrub/batch fallback)
+- **`preferRing` hot path** — with `GRZ_SM11=1` + exe, Mailbox/MonitorIpc enqueue→`assistRingPush`, drop→`assistRingScrub`, drain→`assistRingDrain` (probe seq/scrub/batch fallback)
 - **Private-slot ring** — host 32-bit index; GPU hash/copy/scrub/cmp/seq only (**GPU MUST NOT list**)
-- **Load script** — `scripts/sm11-load.mjs` (`--waves` / `--per-wave`); rising `ringPush`/`ringHash`/`ringScrub`, `serveAlive`
+- **Load script** — `scripts/sm11-load.mjs` (`--waves` / `--per-wave`); rising `ringPush`/`ringDrain`/`ringScrub`, `serveAlive`
 - **N-API wontfix** — #17 closed; Win32 CUDA vs x64 Node / missing `vcvars64` / VS2013 vs node-gyp → keep `--serve`
 
 Issue: https://github.com/brianreborn/green-roomz/issues/13 — stretch left: **CUDA-owned ring index** (host still owns head/tail today); Win32→x64 (#16); optional 0.5B offload (#14, **not** the usefulness bar).
