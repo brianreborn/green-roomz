@@ -11,9 +11,10 @@ if not exist "%KIT%\green-roomz.qcow2" (
   exit /b 1
 )
 REM Host :8080 is often GRZ on Windows; guest HTTP is 18080. SSH 2222.
-"%QEMU%\qemu-system-x86_64.exe" -machine q35 -accel tcg -m 2048 -smp 2 ^
+REM -nographic dies if stdin is closed; use serial file + no display.
+"%QEMU%\qemu-system-x86_64.exe" -L "%QEMU%\share" -machine q35 -accel tcg -m 2048 -smp 2 ^
   -drive "file=%KIT%\green-roomz.qcow2,if=virtio,format=qcow2" ^
   -drive "file=%KIT%\seed.iso,media=cdrom,readonly=on" ^
   -netdev user,id=n0,hostfwd=tcp::18080-:8080,hostfwd=tcp::2222-:22 ^
   -device virtio-net-pci,netdev=n0 ^
-  -display gtk
+  -display none -serial "file:%KIT%\serial.log"
