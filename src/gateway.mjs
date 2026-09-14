@@ -4,7 +4,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { fieldVote, similarityVote, resolveJudgeChoice, judgePrompt } from './council.mjs';
-import { AGENCY_ROLE, DEFAULT_FAITH, DEFAULT_FEAR, FALLBACK_ALIAS, HANDOFF_PEEK_CHARS, HANDOFF_PEEK_TIMEOUT_MS, MAX_SPECIALIST_HOPS, MONITOR_ALIAS, NEXUS_ALIAS, NEXUS_MAX_TOKENS, REBUKE_OP, UPSTREAM_MAX_BUFFER_BYTES, UPSTREAM_TIMEOUT_MS, YOLO_TOKEN } from './constants.mjs';
+import { AGENCY_ROLE, DEFAULT_FAITH, DEFAULT_FEAR, FALLBACK_ALIAS, HANDOFF_PEEK_CHARS, HANDOFF_PEEK_TIMEOUT_MS, MAX_SPECIALIST_HOPS, MONITOR_ALIAS, NEXUS_ALIAS, NEXUS_CHAT_SYSTEM, NEXUS_MAX_TOKENS, REBUKE_OP, UPSTREAM_MAX_BUFFER_BYTES, UPSTREAM_TIMEOUT_MS, YOLO_TOKEN } from './constants.mjs';
 import { loadDeclaredKernel } from './config.mjs';
 import { compileStockPrompt } from './compile-prompt.mjs';
 import { Mailbox } from './mailbox.mjs';
@@ -199,12 +199,24 @@ export function injectSystemPolicy(body, agent) {
   return payload;
 }
 
+/** Tiny chat prompt for the resident 0.5B. Never compileStockPrompt / tool-router.md. */
+function injectNexusChatPrompt(body) {
+  const payload = { ...body };
+  const messages = Array.isArray(payload.messages) ? [...payload.messages] : [];
+  if (messages.some((message) => message?.role === 'system' && String(message.content ?? '').includes(NEXUS_CHAT_SYSTEM))) {
+    payload.messages = messages;
+    return payload;
+  }
+  payload.messages = [{ role: 'system', content: NEXUS_CHAT_SYSTEM }, ...messages];
+  return payload;
+}
+
 export function prepareInferenceBody(body, agent, extras = {}) {
   const stripped = stripSlashCommand(body);
   // Nexus routing kernel (tool-router.md) is only for consultNexus via withNexusPolicy.
-  // Injecting it into user-facing resident completions makes the 0.5B echo route JSON.
+  // User-facing resident completions get a tiny chat prompt so the 0.5B does not dump baked identity.
   const payload = agent.alias === NEXUS_ALIAS
-    ? { ...stripped, model: agent.alias }
+    ? injectNexusChatPrompt({ ...stripped, model: agent.alias })
     : injectSystemPolicy({ ...stripped, model: agent.alias }, agent);
   delete payload.route_plan_only;
   delete payload.lock_alias;

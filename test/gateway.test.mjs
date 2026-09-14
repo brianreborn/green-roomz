@@ -11,7 +11,7 @@ import { PolicyGate } from '../src/scheduler.mjs';
 import { SessionLedger } from '../src/sessions.mjs';
 import { Gateway, prepareInferenceBody } from '../src/gateway.mjs';
 import { sampleManifest } from './helpers.mjs';
-import { REQUIRED_ALIASES } from '../src/constants.mjs';
+import { NEXUS_CHAT_SYSTEM, REQUIRED_ALIASES } from '../src/constants.mjs';
 
 async function withServer(t, env = {}, extras = {}) {
   const previous = { ...process.env };
@@ -435,15 +435,18 @@ test('nexus thinking is always off even if the client asked', () => {
   assert.equal(forced.chat_template_kwargs.enable_thinking, false);
 });
 
-test('user-facing nexus completion does not inject the routing kernel', () => {
+test('user-facing nexus completion injects a short chat prompt, not the routing kernel', () => {
   const body = prepareInferenceBody({
     max_tokens: 16,
     messages: [{ role: 'user', content: 'Reply with exactly: OK' }],
   }, { alias: 'tool-router-agent', system_policy: 'policies/tool-router.md' });
-  assert.equal(body.messages.length, 1);
-  assert.equal(body.messages[0].role, 'user');
-  assert.equal(body.messages[0].content, 'Reply with exactly: OK');
-  assert.equal(body.messages.some((m) => m.role === 'system'), false);
+  assert.equal(body.messages[0].role, 'system');
+  assert.equal(body.messages[0].content, NEXUS_CHAT_SYSTEM);
+  assert.equal(body.messages[1].role, 'user');
+  assert.equal(body.messages[1].content, 'Reply with exactly: OK');
+  const blob = body.messages.map((m) => String(m.content ?? '')).join('\n');
+  assert.equal(blob.includes('Emit ONE minified JSON'), false);
+  assert.equal(blob.includes('Green-Roomz nexus'), false);
 });
 
 test('streamed chat_default records assistant text into session memory', async (t) => {
