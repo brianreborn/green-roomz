@@ -32,7 +32,13 @@ export {
   fnv1a64Hex,
   digestFatPayload,
   cpuVerify as sm11CpuVerify,
+  cpuScrub as sm11CpuScrub,
+  cpuSeq as sm11CpuSeq,
+  cpuBatch as sm11CpuBatch,
   verifyPayload as sm11VerifyPayload,
+  verifyScrub as sm11VerifyScrub,
+  verifySeq as sm11VerifySeq,
+  verifyBatch as sm11VerifyBatch,
   probeSm11,
   createSm11Assist,
 } from './sm11-gpu.mjs';

@@ -1,6 +1,7 @@
 /**
  * sm_1.1 CUDA assist for mailbox/monitor hash + private-slot copy verify.
  * Spawns native/sm11-monitor/out/sm11_monitor.exe --json; CPU FNV-1a fallback.
+ * Also exposes scrub / seq stamp / batch-hash probes (--scrub --seq --batch).
  */
 
 import { existsSync } from 'node:fs';
@@ -8,11 +9,18 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { u64, u64Eq, u64Inc } from './ids.mjs';
 
 const FNV_OFFSET = 14695981039346656037n;
 const FNV_PRIME = 1099511628211n;
 const FAT_LIMIT = 256;
 const SM11_MAX_BYTES = 4096;
+
+export const SM11_DEFAULT_BATCH = 64;
+export const SM11_DEFAULT_ENV_BYTES = 256;
+export const SM11_PROBE_PAYLOAD = 'green-roomz-mailbox-probe';
+/** Native seq wrap probe start — matches sm11_monitor.cu seq_start. */
+export const SM11_SEQ_START = Object.freeze({ hi: 0, lo: 0xfffffffe });
 
 const REPO_ROOT = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
 
@@ -66,6 +74,18 @@ export function digestFatPayload(text) {
   };
 }
 
+export function clampBatch(n, fallback = SM11_DEFAULT_BATCH) {
+  const v = Number(n);
+  if (!Number.isFinite(v) || v < 1) return fallback;
+  return Math.min(4096, Math.floor(v));
+}
+
+export function clampEnvBytes(n, fallback = SM11_DEFAULT_ENV_BYTES) {
+  const v = Number(n);
+  if (!Number.isFinite(v) || v < 1) return fallback;
+  return Math.min(SM11_MAX_BYTES, Math.floor(v));
+}
+
 export function cpuVerify(payload) {
   const bytes = toBytes(payload);
   const hash = fnv1a64Hex(bytes);
@@ -77,6 +97,109 @@ export function cpuVerify(payload) {
     hash,
     expect: hash,
     bytes: bytes.length,
+  };
+}
+
+/** CPU twin of ring scrub (zero + XOR 0xA5) — matches sm11_monitor.cu. */
+export function cpuScrub({ batch = SM11_DEFAULT_BATCH, envBytes = SM11_DEFAULT_ENV_BYTES } = {}) {
+  const b = clampBatch(batch);
+  const e = clampEnvBytes(envBytes);
+  const scrubBytes = e * (b < 16 ? b : 16);
+  const host = Buffer.alloc(scrubBytes);
+  for (let i = 0; i < scrubBytes; i += 1) host[i] = (0x5a ^ (i & 0xff)) & 0xff;
+
+  const afterZero = Buffer.alloc(scrubBytes);
+  host.copy(afterZero);
+  afterZero.fill(0);
+  let zeroOk = true;
+  for (let i = 0; i < scrubBytes; i += 1) {
+    if (afterZero[i] !== 0) { zeroOk = false; break; }
+  }
+
+  const xorPat = 0xa5;
+  const afterXor = Buffer.from(host);
+  for (let i = 0; i < scrubBytes; i += 1) afterXor[i] ^= xorPat;
+  let xorOk = true;
+  for (let i = 0; i < scrubBytes; i += 1) {
+    if (afterXor[i] !== ((host[i] ^ xorPat) & 0xff)) { xorOk = false; break; }
+  }
+
+  const scrubOk = zeroOk && xorOk;
+  return {
+    ok: scrubOk,
+    backend: 'cpu',
+    scrub_ok: scrubOk,
+    scrub_bytes: scrubBytes,
+    batch: b,
+    env_bytes: e,
+  };
+}
+
+/** CPU twin of seq {hi,lo} stamp + wrap — matches sm11_monitor.cu / ids.u64Inc. */
+export function cpuSeq({ batch = SM11_DEFAULT_BATCH, start = SM11_SEQ_START } = {}) {
+  const b = clampBatch(batch);
+  let stampN = b < 8 ? b : 8;
+  if (stampN < 4) stampN = 4;
+
+  const seqStart = u64(start?.hi ?? 0, start?.lo ?? 0xfffffffe);
+  const stamped = [];
+  let cur = u64(seqStart.hi, seqStart.lo);
+  for (let i = 0; i < stampN; i += 1) {
+    stamped.push(u64(cur.hi, cur.lo));
+    cur = u64Inc(cur);
+  }
+  const seqEnd = cur;
+
+  let seqOk = true;
+  let expect = u64(seqStart.hi, seqStart.lo);
+  for (let i = 0; i < stampN; i += 1) {
+    if (!u64Eq(stamped[i], expect)) { seqOk = false; break; }
+    expect = u64Inc(expect);
+  }
+  if (seqOk && !u64Eq(seqEnd, expect)) seqOk = false;
+  if (seqOk && stampN >= 3) {
+    if (stamped[0].hi !== 0 || stamped[0].lo !== 0xfffffffe) seqOk = false;
+    if (stamped[1].hi !== 0 || stamped[1].lo !== 0xffffffff) seqOk = false;
+    if (stamped[2].hi !== 1 || stamped[2].lo !== 0) seqOk = false;
+  }
+
+  return {
+    ok: seqOk,
+    backend: 'cpu',
+    seq_ok: seqOk,
+    seq_start: seqStart,
+    seq_end: seqEnd,
+    stamp_n: stampN,
+    batch: b,
+  };
+}
+
+/** Build synthetic batch envelopes matching native fill pattern. */
+export function makeBatchEnvelopes(batch = SM11_DEFAULT_BATCH, envBytes = SM11_DEFAULT_ENV_BYTES) {
+  const b = clampBatch(batch);
+  const e = clampEnvBytes(envBytes);
+  const envs = [];
+  for (let i = 0; i < b; i += 1) {
+    const buf = Buffer.alloc(e, (0xa5 ^ (i & 0xff)) & 0xff);
+    buf[0] = i & 0xff;
+    if (e > 1) buf[1] = (i >> 8) & 0xff;
+    envs.push(buf);
+  }
+  return { batch: b, envBytes: e, envs };
+}
+
+/** CPU twin of batch envelope FNV — matches sm11_monitor.cu k_fnv1a_batch. */
+export function cpuBatch({ batch = SM11_DEFAULT_BATCH, envBytes = SM11_DEFAULT_ENV_BYTES } = {}) {
+  const { batch: b, envBytes: e, envs } = makeBatchEnvelopes(batch, envBytes);
+  const hashes = envs.map((env) => fnv1a64Hex(env));
+  return {
+    ok: true,
+    backend: 'cpu',
+    batch_ok: true,
+    hash_ok: true,
+    batch: b,
+    env_bytes: e,
+    hashes,
   };
 }
 
@@ -115,6 +238,73 @@ export function defaultRunExe(exePath, args, { timeoutMs = 15_000 } = {}) {
   });
 }
 
+function buildCliArgs({ flags, batch, envBytes, payload }) {
+  const args = ['--json', ...flags];
+  if (batch != null) {
+    args.push('--batch', String(clampBatch(batch)));
+  }
+  if (envBytes != null) {
+    args.push('--env-bytes', String(clampEnvBytes(envBytes)));
+  }
+  if (payload != null && payload !== '') {
+    args.push(String(payload));
+  }
+  return args;
+}
+
+function cudaBase(parsed) {
+  return {
+    ok: true,
+    backend: 'cuda',
+    device: parsed.device ?? null,
+    sm: parsed.sm ?? null,
+    vram_mb: parsed.vram_mb ?? null,
+    batch: parsed.batch,
+    env_bytes: parsed.env_bytes,
+    raw: parsed,
+  };
+}
+
+/**
+ * Shared spawn path for scrub/seq/batch probes. Falls back to CPU when exe missing or CUDA fails.
+ */
+async function runAssistProbe({
+  flags,
+  batch,
+  envBytes,
+  payload = SM11_PROBE_PAYLOAD,
+  exePath,
+  preferGpu = true,
+  timeoutMs = 15_000,
+  runExe = defaultRunExe,
+  exists = existsSync,
+  cpu,
+  accept,
+}) {
+  const cpuResult = () => cpu();
+
+  if (!preferGpu || !exePath || !exists(exePath)) {
+    return { ...cpuResult(), fallback: preferGpu ? 'exe_missing' : 'prefer_cpu' };
+  }
+
+  const args = buildCliArgs({ flags, batch, envBytes, payload });
+  const ran = await runExe(exePath, args, { timeoutMs });
+  const parsed = parseJsonLine(ran.stdout);
+  if (!parsed || ran.code === 127 || ran.code === 124) {
+    return { ...cpuResult(), fallback: ran.code === 124 ? 'timeout' : 'spawn_failed', stderr: ran.stderr };
+  }
+  const accepted = accept(parsed);
+  if (accepted) {
+    return { ...cudaBase(parsed), ...accepted };
+  }
+  return {
+    ...cpuResult(),
+    fallback: 'cuda_fail',
+    cuda: parsed,
+    stderr: ran.stderr,
+  };
+}
+
 /**
  * Run native --json --copy --hash [payload]. Falls back to CPU if exe missing or CUDA fails.
  */
@@ -126,6 +316,8 @@ export async function verifyPayload(payload, options = {}) {
     runExe = defaultRunExe,
     exists = existsSync,
     flags = ['--copy', '--hash'],
+    batch,
+    envBytes,
   } = options;
 
   const bytes = toBytes(payload);
@@ -144,7 +336,7 @@ export async function verifyPayload(payload, options = {}) {
     return { ...cpu(), fallback: 'non_cli_payload' };
   }
 
-  const args = ['--json', ...flags, asText];
+  const args = buildCliArgs({ flags, batch, envBytes, payload: asText });
   const ran = await runExe(exePath, args, { timeoutMs });
   const parsed = parseJsonLine(ran.stdout);
   if (!parsed || ran.code === 127 || ran.code === 124) {
@@ -162,6 +354,12 @@ export async function verifyPayload(payload, options = {}) {
       hash: parsed.hash ?? null,
       expect: parsed.expect ?? fnv1a64Hex(bytes),
       batch_ok: parsed.batch_ok,
+      scrub_ok: parsed.scrub_ok,
+      seq_ok: parsed.seq_ok,
+      seq_start: parsed.seq_start,
+      seq_end: parsed.seq_end,
+      batch: parsed.batch,
+      env_bytes: parsed.env_bytes,
       bytes: bytes.length,
       raw: parsed,
     };
@@ -174,10 +372,120 @@ export async function verifyPayload(payload, options = {}) {
   };
 }
 
+export async function verifyScrub(options = {}) {
+  const {
+    exePath = defaultExePath(),
+    preferGpu = true,
+    timeoutMs = 15_000,
+    runExe = defaultRunExe,
+    exists = existsSync,
+    batch = SM11_DEFAULT_BATCH,
+    envBytes = SM11_DEFAULT_ENV_BYTES,
+    payload = SM11_PROBE_PAYLOAD,
+  } = options;
+
+  return runAssistProbe({
+    flags: ['--scrub'],
+    batch,
+    envBytes,
+    payload,
+    exePath,
+    preferGpu,
+    timeoutMs,
+    runExe,
+    exists,
+    cpu: () => cpuScrub({ batch, envBytes }),
+    accept: (parsed) => {
+      if (parsed.ok === true && parsed.scrub_ok === true) {
+        return {
+          scrub_ok: true,
+          scrub_bytes: clampEnvBytes(envBytes) * (clampBatch(batch) < 16 ? clampBatch(batch) : 16),
+        };
+      }
+      return null;
+    },
+  });
+}
+
+export async function verifySeq(options = {}) {
+  const {
+    exePath = defaultExePath(),
+    preferGpu = true,
+    timeoutMs = 15_000,
+    runExe = defaultRunExe,
+    exists = existsSync,
+    batch = SM11_DEFAULT_BATCH,
+    payload = SM11_PROBE_PAYLOAD,
+  } = options;
+
+  return runAssistProbe({
+    flags: ['--seq'],
+    batch,
+    payload,
+    exePath,
+    preferGpu,
+    timeoutMs,
+    runExe,
+    exists,
+    cpu: () => cpuSeq({ batch }),
+    accept: (parsed) => {
+      if (parsed.ok === true && parsed.seq_ok === true) {
+        return {
+          seq_ok: true,
+          seq_start: parsed.seq_start ?? null,
+          seq_end: parsed.seq_end ?? null,
+        };
+      }
+      return null;
+    },
+  });
+}
+
+export async function verifyBatch(options = {}) {
+  const {
+    exePath = defaultExePath(),
+    preferGpu = true,
+    timeoutMs = 15_000,
+    runExe = defaultRunExe,
+    exists = existsSync,
+    batch = SM11_DEFAULT_BATCH,
+    envBytes = SM11_DEFAULT_ENV_BYTES,
+    payload = SM11_PROBE_PAYLOAD,
+  } = options;
+
+  return runAssistProbe({
+    flags: ['--hash'],
+    batch,
+    envBytes,
+    payload,
+    exePath,
+    preferGpu,
+    timeoutMs,
+    runExe,
+    exists,
+    cpu: () => cpuBatch({ batch, envBytes }),
+    accept: (parsed) => {
+      if (parsed.ok === true && parsed.batch_ok === true && parsed.hash_ok !== false) {
+        return {
+          batch_ok: true,
+          hash_ok: parsed.hash_ok === true,
+          hash: parsed.hash ?? null,
+          expect: parsed.expect ?? null,
+        };
+      }
+      return null;
+    },
+  });
+}
+
 export async function probeSm11(options = {}) {
-  return verifyPayload(options.payload ?? 'green-roomz-mailbox-probe', {
+  const batch = options.batch;
+  const envBytes = options.envBytes;
+  return verifyPayload(options.payload ?? SM11_PROBE_PAYLOAD, {
     ...options,
     flags: options.flags ?? ['--copy', '--hash', '--scrub', '--seq'],
+    batch,
+    envBytes,
   });
 }
 
@@ -193,10 +501,14 @@ export function createSm11Assist(options = {}) {
   const runExe = opts.runExe ?? defaultRunExe;
   const timeoutMs = opts.timeoutMs ?? 15_000;
   const verifyOnFat = opts.verifyOnFat !== false;
+  const shared = { exePath, preferGpu, timeoutMs, runExe, exists };
 
   const stats = {
     fat: 0,
     verifyAttempts: 0,
+    scrub: 0,
+    seq: 0,
+    batch: 0,
     gpuOk: 0,
     cpuFallback: 0,
     fail: 0,
@@ -204,18 +516,39 @@ export function createSm11Assist(options = {}) {
   };
   const pending = new Set();
 
-  function record(result) {
+  function record(result, kind = 'verify') {
     stats.verifyAttempts += 1;
+    if (kind === 'scrub') stats.scrub += 1;
+    if (kind === 'seq') stats.seq += 1;
+    if (kind === 'batch') stats.batch += 1;
     stats.last = {
       backend: result.backend,
       ok: result.ok,
       fallback: result.fallback ?? null,
       hash: result.hash ?? null,
+      kind,
+      scrub_ok: result.scrub_ok,
+      seq_ok: result.seq_ok,
+      batch_ok: result.batch_ok,
     };
     if (result.backend === 'cuda' && result.ok) stats.gpuOk += 1;
     else if (result.fallback) stats.cpuFallback += 1;
     if (!result.ok) stats.fail += 1;
     return result;
+  }
+
+  function track(promise, kind) {
+    const p = promise
+      .then((result) => record(result, kind))
+      .catch((error) => record({
+        ok: false,
+        backend: 'cpu',
+        fallback: 'error',
+        error: String(error?.message ?? error),
+      }, kind))
+      .finally(() => { pending.delete(p); });
+    pending.add(p);
+    return p;
   }
 
   function observeFat(text) {
@@ -226,17 +559,22 @@ export function createSm11Assist(options = {}) {
   }
 
   function scheduleVerify(payload) {
-    const p = verifyPayload(payload, { exePath, preferGpu, timeoutMs, runExe, exists })
-      .then(record)
-      .catch((error) => record({
-        ok: false,
-        backend: 'cpu',
-        fallback: 'error',
-        error: String(error?.message ?? error),
-      }))
-      .finally(() => { pending.delete(p); });
-    pending.add(p);
-    return p;
+    return track(verifyPayload(payload, shared), 'verify');
+  }
+
+  /** Non-blocking scrub probe; CPU fallback when exe missing/fails. */
+  function assistScrub(probeOpts = {}) {
+    return track(verifyScrub({ ...shared, ...probeOpts }), 'scrub');
+  }
+
+  /** Non-blocking seq stamp verify; CPU fallback when exe missing/fails. */
+  function assistSeq(probeOpts = {}) {
+    return track(verifySeq({ ...shared, ...probeOpts }), 'seq');
+  }
+
+  /** Non-blocking batch envelope hash; CPU fallback when exe missing/fails. */
+  function assistBatch(probeOpts = {}) {
+    return track(verifyBatch({ ...shared, ...probeOpts }), 'batch');
   }
 
   async function flush() {
@@ -249,7 +587,13 @@ export function createSm11Assist(options = {}) {
     exePresent: () => exists(exePath),
     observeFat,
     scheduleVerify,
-    verify: (payload) => verifyPayload(payload, { exePath, preferGpu, timeoutMs, runExe, exists }).then(record),
+    assistScrub,
+    assistSeq,
+    assistBatch,
+    verify: (payload) => verifyPayload(payload, shared).then((r) => record(r, 'verify')),
+    verifyScrub: (probeOpts) => verifyScrub({ ...shared, ...probeOpts }).then((r) => record(r, 'scrub')),
+    verifySeq: (probeOpts) => verifySeq({ ...shared, ...probeOpts }).then((r) => record(r, 'seq')),
+    verifyBatch: (probeOpts) => verifyBatch({ ...shared, ...probeOpts }).then((r) => record(r, 'batch')),
     flush,
     stats: () => ({ ...stats, last: stats.last ? { ...stats.last } : null, pending: pending.size }),
   };

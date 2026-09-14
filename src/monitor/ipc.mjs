@@ -263,6 +263,7 @@ export class MonitorIpc {
     this.mappedPinnedHostRing = false;
     this.sharedMapping = null;
     // Auto: CPU always; CUDA when exe present. GRZ_SM11=0 disables.
+    // sm11.assistScrub / assistSeq / assistBatch are non-blocking probe helpers.
     this.sm11 = resolveSm11Option(sm11 === undefined ? 'auto' : sm11, { mode: 'auto' });
   }
 
