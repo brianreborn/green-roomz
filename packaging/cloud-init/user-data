@@ -1,0 +1,12 @@
+#cloud-config
+# Future qcow2/OVA first-boot: install Docker and run the try image.
+# Not applied on qodesh (no hypervisor toolchain there).
+
+package_update: true
+packages:
+  - docker.io
+  - curl
+runcmd:
+  - [ sh, -c, "docker pull ghcr.io/brianreborn/green-roomz:try || true" ]
+  - [ sh, -c, "docker run -d --restart unless-stopped -p 8080:8080 --name green-roomz ghcr.io/brianreborn/green-roomz:try" ]
+final_message: "Green-Roomz try: http://this-host:8080  (Bearer try-local)"

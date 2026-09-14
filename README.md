@@ -14,6 +14,17 @@ This is the first executable implementation. It includes:
 - Windows and Android host fingerprints;
 - a dependency-free Node gateway and test suite.
 
+## Try it (open image)
+
+CPU-only container — no qodesh GPU required. Details: [packaging/README.md](packaging/README.md).
+
+```bash
+docker pull ghcr.io/brianreborn/green-roomz:try
+docker run --rm -p 8080:8080 ghcr.io/brianreborn/green-roomz:try
+```
+
+Bearer token: `try-local`. GitHub Actions builds the image on `main`. A bootable qcow2/OVA is follow-up ([#19](https://github.com/brianreborn/green-roomz/issues/19)).
+
 ## Quick start on this host
 
 Use the bundled Node executable discovered by Codex:
