@@ -11,8 +11,17 @@ Proves the GPU can do mailbox/monitor floor work without listing models (**GPU M
 | **seq `{hi,lo}`** stamp | logical 64-bit seq on sm_1.1 (matches `ids.mjs` `u64Inc`) |
 | ring **scrub** (zero / XOR) | clear or mask private-slot bytes |
 | **private-slot ring** (16–64 × env_bytes) | host 32-bit index; H2D→device copy into slot; stamp seq; hash; scrub on drop |
+| **ring meta mirror** `{head,tail,count}` | host commits index; H2D into `d_meta`; D2H dump verifies — **not** CUDA-owned |
 
-Host owns the 32-bit lock-free ring index; GPU assists hash/copy/scrub/cmp/seq only (**GPU MUST NOT list**). No replica quorum here. Place / respond / logger launches stay off CUDA.
+Host owns the 32-bit lock-free ring index; GPU assists hash/copy/scrub/cmp/seq only (**GPU MUST NOT list**). Device may **mirror** `{head,tail,count}` after host commits (`--ring-sync-meta` / `--ring-dump-meta`). No replica quorum here. Place / respond / logger launches stay off CUDA.
+
+### Why not a true CUDA-owned lock-free ring index on sm_1.1?
+
+- **Atomics:** sm_1.1 has 32-bit atomics only — no reliable multi-word CAS for `{head,tail,count}` as one commit. Split device updates tear under concurrent readers.
+- **Audit:** a device-side producer choosing slots without host policy is listing-adjacent and breaks F3/F21 (host must stay authoritative for policy).
+- **Hardware:** one copy engine on the 8600 — prefer host commit + a single H2D of `RingMeta` over mapped host atomics or device spinlocks.
+
+**Landed instead:** host-authoritative index + optional device meta mirror (auto H2D after push/scrub commits; explicit sync/dump flags for verify).
 
 ## Build (qodesh)
 
@@ -49,9 +58,11 @@ Flags:
 - `--ring-push` / `--ring-hash` / `--ring-scrub` — fixed private-slot ring ops (host index; GPU assist)
 - `--ring-drain N` — host-assisted drain: GPU hash+scrub N slots from tail; host advances index
 - `--ring-verify` — host walks occupied slots; GPU re-hashes each; reports mismatches
+- `--ring-sync-meta` — H2D host `{head,tail,count}` into device mirror (`ring_sync_meta_ok`)
+- `--ring-dump-meta` — D2H mirror; compare to host (`ring_meta_ok` + `ring_meta_head`/`tail`/`count`)
 - `--ring-slots N` — ring capacity (default 32, range 16..64)
 - `--ring-slot I` — target slot for hash/scrub (default: last push / tail drop)
-- Ring `--json` fill/drain stats: `ring_occupancy`, `ring_push_count`, `ring_drop_count`, `ring_overwrite_count`, `ring_drain_count` (+ per-call `ring_drained` / `ring_verify_*`)
+- Ring `--json` fill/drain stats: `ring_occupancy`, `ring_push_count`, `ring_drop_count`, `ring_overwrite_count`, `ring_drain_count` (+ per-call `ring_drained` / `ring_verify_*` / meta fields)
 - `--batch N` — envelope count for batch hash / seq sample (default 64, max 4096)
 - `--env-bytes B` — bytes per envelope for batch/scrub/ring (default 256, max 4096)
 - `--loops N` — repeat probes in-process; JSON adds `ms_min` / `ms_avg` / `ms_max` / `loop_fail`
@@ -89,8 +100,10 @@ Occasional multi-second outliers on scrub/seq are driver/context hiccups under c
 | `--serve` then `--json --ring-hash --ring-slot 1` | ≈1.1 ms |
 | `--serve` then `--json --ring-scrub` | ≈0.14 ms |
 | `--serve` then `--json --ring-push … --loops 20` | `loop_fail=0`, `ms_avg≈0.42`, `ms_max≈0.68` |
+| `--serve` push then `--ring-dump-meta` | `ring_meta_ok` (device mirror matches host head/tail/count) |
+| `--serve` `--ring-sync-meta` | `ring_sync_meta_ok` (explicit H2D of index meta) |
 
-**Implication:** mailbox/monitor hot path must prefer `--serve` (or another persistent bridge). Per-op spawn cannot carry load. The private-slot ring stays resident across serve commands (host index; GPU never lists).
+**Implication:** mailbox/monitor hot path must prefer `--serve` (or another persistent bridge). Per-op spawn cannot carry load. The private-slot ring stays resident across serve commands (host index; GPU never lists; meta mirror is host→device only).
 
 ## Node wiring
 
@@ -118,7 +131,7 @@ Occasional multi-second outliers on scrub/seq are driver/context hiccups under c
 - Stats: `hotEvents.{enqueue,drop,drain,reject,wait}` + `fail` / `failByKind` (assists may coalesce).
 - **Not hooked on CUDA (audit / no API):** vote/lockdown/reboot (host reject stubs; enqueue path covers first reject), quarantine (policy grade), clear-all (none — drain already scrubs), place/respond/logger launches.
 - Fat string payloads still store **sha256**; FNV-1a is the sm11 integrity twin / GPU probe.
-- Private-slot ring assists also available directly: `assistRingPush` / `assistRingHash` / `assistRingScrub` / `assistRingDrain` / `assistRingVerify`.
+- Private-slot ring assists also available directly: `assistRingPush` / `assistRingHash` / `assistRingScrub` / `assistRingDrain` / `assistRingVerify` / `assistRingSyncMeta` / `assistRingDumpMeta`.
 
 ```bat
 set GRZ_SM11=1

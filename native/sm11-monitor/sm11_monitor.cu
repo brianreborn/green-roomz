@@ -3,10 +3,20 @@
  * CUDA 6.5 / compute_11: private-slot copy (F3/F21), FNV-1a, seq {hi,lo},
  * batch envelope hash, ring scrub, device cmp, fixed private-slot ring.
  * GPU MUST NOT list. Host owns 32-bit ring index; GPU assists hash/copy/scrub/cmp.
+ * Device may mirror {head,tail,count} via H2D after host commits (not CUDA-owned).
  * Place/respond/logger are never CUDA launches. Build: native/sm11-monitor/build.bat
  *
  * Modes: one-shot CLI; --loops N (in-process stress); --serve (stdin cmds).
  * Ring persists across --serve commands (device slots stay allocated).
+ *
+ * Why not a CUDA-owned lock-free ring index on sm_1.1:
+ * - sm_1.1 atomics are 32-bit only; no reliable 64-bit / multi-word CAS for
+ *   {head,tail,count} as one commit. Split updates tear under concurrent readers.
+ * - A device-side producer would choose slots without host policy — that is listing
+ *   adjacent and breaks F3/F21 audit (host must remain authoritative).
+ * - One copy engine: prefer host commit then a single H2D of RingMeta over mapped
+ *   host atomics or device spinlocks that thrash the 8600.
+ * Landed instead: host-authoritative index + optional device meta mirror.
  */
 #include <cuda_runtime.h>
 #include <cstdio>
@@ -168,15 +178,27 @@ static double wall_ms_now(void) {
 }
 
 /*
+ * Device mirror of host ring index. Host commits first; H2D refreshes d_meta.
+ * Not a lock-free GPU index — see file header (sm_1.1 / audit).
+ */
+struct RingMeta {
+  unsigned head;
+  unsigned tail;
+  unsigned count;
+};
+
+/*
  * Fixed private-slot ring in device memory.
  * Host owns head/tail/count (32-bit lock-free style for single producer probe).
  * GPU never enumerates/list slots; only copy/hash/scrub/cmp on host-chosen indices.
+ * d_meta mirrors {head,tail,count} after host commits (optional dump/verify).
  */
 struct PrivateRing {
   unsigned char *d_slots;   /* slots * env_bytes */
   unsigned char *d_scratch; /* one envelope staging (H2D then device copy — F3) */
   unsigned *d_mis;
   unsigned long long *d_hash;
+  RingMeta *d_meta;         /* device mirror of host index (H2D after commit) */
   unsigned slots;
   unsigned env_bytes;
   unsigned head;            /* next push index */
@@ -203,6 +225,8 @@ struct Options {
   int do_ring_scrub;
   int do_ring_drain;
   int do_ring_verify;
+  int do_ring_sync_meta;
+  int do_ring_dump_meta;
   int any_flag;
   int ring_flag;
   int serve;
@@ -228,6 +252,8 @@ struct ProbeResult {
   int ok_ring_scrub;
   int ok_ring_drain;
   int ok_ring_verify;
+  int ok_ring_meta;
+  int ok_ring_sync_meta;
   int ok_ring;
   unsigned long long h_hash;
   unsigned long long expect_hash;
@@ -252,6 +278,9 @@ struct ProbeResult {
   unsigned ring_drained; /* slots drained this call */
   unsigned ring_verify_checked;
   unsigned ring_verify_mismatches;
+  unsigned ring_meta_head;  /* D2H mirror values from --ring-dump-meta */
+  unsigned ring_meta_tail;
+  unsigned ring_meta_count;
   double ms;
   int cuda_err;
 };
@@ -261,12 +290,15 @@ static void usage(const char *argv0) {
     "usage: %s [--json] [--copy] [--hash] [--scrub] [--seq]\n"
     "          [--ring-push] [--ring-hash] [--ring-scrub]\n"
     "          [--ring-drain N] [--ring-verify]\n"
+    "          [--ring-sync-meta] [--ring-dump-meta]\n"
     "          [--ring-slots N] [--ring-slot I]\n"
     "          [--batch N] [--env-bytes B] [--loops N] [--serve] [payload]\n"
     "  default: all probes (copy+hash+scrub+seq)\n"
     "  --ring-*     fixed private-slot ring (host index; GPU hash/copy/scrub/cmp)\n"
     "  --ring-drain N  hash+scrub N slots from tail; host advances index\n"
     "  --ring-verify   re-hash all occupied slots; report mismatches\n"
+    "  --ring-sync-meta H2D host {head,tail,count} into device mirror\n"
+    "  --ring-dump-meta D2H mirror; compare to host (ring_meta_ok)\n"
     "  --loops N    repeat probes in-process (reports ms_*); N>=1\n"
     "  --serve      stdin lines of CLI args; one JSON reply per line; 'quit' ends\n"
     "  GPU private-slot assist only; does not list models\n",
@@ -295,7 +327,37 @@ static void ring_free(PrivateRing *r) {
   if (r->d_scratch) cudaFree(r->d_scratch);
   if (r->d_mis) cudaFree(r->d_mis);
   if (r->d_hash) cudaFree(r->d_hash);
+  if (r->d_meta) cudaFree(r->d_meta);
   std::memset(r, 0, sizeof(*r));
+}
+
+/* H2D host {head,tail,count} into device mirror after host commits. */
+static int ring_meta_sync(PrivateRing *r) {
+  if (!r || !r->live || !r->d_meta) return 1;
+  RingMeta m;
+  m.head = r->head;
+  m.tail = r->tail;
+  m.count = r->count;
+  return check(cudaMemcpy(r->d_meta, &m, sizeof(m), cudaMemcpyHostToDevice), "H2D ring meta");
+}
+
+/* D2H device mirror; set ok_ring_meta if it matches host index. */
+static int ring_meta_dump(PrivateRing *r, ProbeResult *out) {
+  if (!r || !r->live || !r->d_meta) {
+    out->ok_ring_meta = 0;
+    return 1;
+  }
+  RingMeta m;
+  if (check(cudaMemcpy(&m, r->d_meta, sizeof(m), cudaMemcpyDeviceToHost), "D2H ring meta")) {
+    out->cuda_err = 1;
+    out->ok_ring_meta = 0;
+    return 1;
+  }
+  out->ring_meta_head = m.head;
+  out->ring_meta_tail = m.tail;
+  out->ring_meta_count = m.count;
+  out->ok_ring_meta = (m.head == r->head && m.tail == r->tail && m.count == r->count) ? 1 : 0;
+  return 0;
 }
 
 /* Ensure device ring matches slots×env_bytes. Reallocates if geometry changes. */
@@ -316,6 +378,10 @@ static int ring_ensure(PrivateRing *r, unsigned slots, unsigned env_bytes) {
     ring_free(r);
     return 1;
   }
+  if (check(cudaMalloc((void **)&r->d_meta, sizeof(RingMeta)), "Malloc ring meta")) {
+    ring_free(r);
+    return 1;
+  }
   if (check(cudaMemset(r->d_slots, 0, bytes), "Memset ring")) {
     ring_free(r);
     return 1;
@@ -324,6 +390,10 @@ static int ring_ensure(PrivateRing *r, unsigned slots, unsigned env_bytes) {
   r->env_bytes = env_bytes;
   ring_reset_host_counters(r);
   r->live = 1;
+  if (ring_meta_sync(r)) {
+    ring_free(r);
+    return 1;
+  }
   return 0;
 }
 
@@ -362,6 +432,8 @@ static void options_defaults(Options *opt) {
   opt->do_ring_scrub = 0;
   opt->do_ring_drain = 0;
   opt->do_ring_verify = 0;
+  opt->do_ring_sync_meta = 0;
+  opt->do_ring_dump_meta = 0;
   opt->any_flag = 0;
   opt->ring_flag = 0;
   opt->serve = 0;
@@ -443,6 +515,18 @@ static int parse_args(int argc, char **argv, Options *opt) {
     }
     if (std::strcmp(a, "--ring-verify") == 0) {
       opt->do_ring_verify = 1;
+      opt->any_flag = 1;
+      opt->ring_flag = 1;
+      continue;
+    }
+    if (std::strcmp(a, "--ring-sync-meta") == 0) {
+      opt->do_ring_sync_meta = 1;
+      opt->any_flag = 1;
+      opt->ring_flag = 1;
+      continue;
+    }
+    if (std::strcmp(a, "--ring-dump-meta") == 0) {
+      opt->do_ring_dump_meta = 1;
       opt->any_flag = 1;
       opt->ring_flag = 1;
       continue;
@@ -556,6 +640,8 @@ static void result_clear(ProbeResult *r) {
   r->ok_ring_scrub = 1;
   r->ok_ring_drain = 1;
   r->ok_ring_verify = 1;
+  r->ok_ring_meta = 1;
+  r->ok_ring_sync_meta = 1;
   r->ok_ring = 1;
   r->h_hash = 0;
   r->expect_hash = 0;
@@ -583,6 +669,9 @@ static void result_clear(ProbeResult *r) {
   r->ring_drained = 0;
   r->ring_verify_checked = 0;
   r->ring_verify_mismatches = 0;
+  r->ring_meta_head = 0;
+  r->ring_meta_tail = 0;
+  r->ring_meta_count = 0;
   r->ms = 0;
   r->cuda_err = 0;
 }
@@ -612,6 +701,8 @@ static int ring_scrub_tail(PrivateRing *ring, unsigned threads, ProbeResult *r) 
   ring->tail = ring_mod(ring->tail + 1u, ring->slots);
   ring->count -= 1u;
   ring->drop_count += 1u;
+  /* Host committed index; refresh device mirror (no CUDA-owned index). */
+  if (ring_meta_sync(ring)) { r->cuda_err = 1; return 1; }
   return 0;
 }
 
@@ -672,6 +763,8 @@ static int ring_push_once(PrivateRing *ring, const unsigned char *payload, unsig
   ring->head = ring_mod(ring->head + 1u, ring->slots);
   ring->count += 1u;
   ring->push_count += 1u;
+  /* Host committed index; refresh device mirror (no CUDA-owned index). */
+  if (ring_meta_sync(ring)) { r->cuda_err = 1; return 1; }
   return 0;
 }
 
@@ -838,6 +931,25 @@ static int run_probes_once(const Options *opt, ProbeResult *r) {
       }
     }
 
+    if (opt->do_ring_sync_meta) {
+      if (ring_meta_sync(&g_ring)) {
+        r->cuda_err = 1;
+        r->ok_ring_sync_meta = 0;
+        r->ok_ring = 0;
+        r->ms = wall_ms_now() - t0;
+        return 2;
+      }
+      r->ok_ring_sync_meta = 1;
+    }
+
+    if (opt->do_ring_dump_meta) {
+      if (ring_meta_dump(&g_ring, r)) {
+        r->ok_ring = 0;
+        r->ms = wall_ms_now() - t0;
+        return 2;
+      }
+    }
+
     ring_snapshot(&g_ring, r, opt->do_ring_push ? 1 : 0);
     r->ok_ring = 1;
     if (opt->do_ring_push && !r->ok_ring_push) r->ok_ring = 0;
@@ -845,6 +957,8 @@ static int run_probes_once(const Options *opt, ProbeResult *r) {
     if (opt->do_ring_scrub && !r->ok_ring_scrub) r->ok_ring = 0;
     if (opt->do_ring_drain && !r->ok_ring_drain) r->ok_ring = 0;
     if (opt->do_ring_verify && !r->ok_ring_verify) r->ok_ring = 0;
+    if (opt->do_ring_sync_meta && !r->ok_ring_sync_meta) r->ok_ring = 0;
+    if (opt->do_ring_dump_meta && !r->ok_ring_meta) r->ok_ring = 0;
 
     /* Ring-only invocation: skip legacy probes unless also requested. */
     if (!opt->do_copy && !opt->do_hash && !opt->do_scrub && !opt->do_seq) {
@@ -1063,6 +1177,8 @@ static int result_all_ok(const Options *opt, const ProbeResult *r) {
   if (opt->do_ring_scrub && !r->ok_ring_scrub) return 0;
   if (opt->do_ring_drain && !r->ok_ring_drain) return 0;
   if (opt->do_ring_verify && !r->ok_ring_verify) return 0;
+  if (opt->do_ring_sync_meta && !r->ok_ring_sync_meta) return 0;
+  if (opt->do_ring_dump_meta && !r->ok_ring_meta) return 0;
   return 1;
 }
 
@@ -1128,6 +1244,14 @@ static void print_json_result(const Options *opt, const cudaDeviceProp &prop,
                   r->ok_ring_verify ? "true" : "false",
                   r->ring_verify_checked, r->ring_verify_mismatches);
     }
+    if (opt->do_ring_sync_meta) {
+      std::printf("\"ring_sync_meta_ok\":%s,", r->ok_ring_sync_meta ? "true" : "false");
+    }
+    if (opt->do_ring_dump_meta) {
+      std::printf("\"ring_meta_ok\":%s,\"ring_meta_head\":%u,\"ring_meta_tail\":%u,\"ring_meta_count\":%u,",
+                  r->ok_ring_meta ? "true" : "false",
+                  r->ring_meta_head, r->ring_meta_tail, r->ring_meta_count);
+    }
   }
   std::printf("\"ms\":%.3f,", r->ms);
   if (loops > 1u) {
@@ -1179,6 +1303,13 @@ static void print_text_result(const Options *opt, const ProbeResult *r) {
     if (opt->do_ring_verify) {
       std::printf("ring_verify_ok=%d checked=%u mismatches=%u\n",
                   r->ok_ring_verify, r->ring_verify_checked, r->ring_verify_mismatches);
+    }
+    if (opt->do_ring_sync_meta) {
+      std::printf("ring_sync_meta_ok=%d\n", r->ok_ring_sync_meta);
+    }
+    if (opt->do_ring_dump_meta) {
+      std::printf("ring_meta_ok=%d meta_head=%u meta_tail=%u meta_count=%u\n",
+                  r->ok_ring_meta, r->ring_meta_head, r->ring_meta_tail, r->ring_meta_count);
     }
   }
   std::printf("ms=%.3f\n", r->ms);

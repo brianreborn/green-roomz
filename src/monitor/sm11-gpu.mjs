@@ -115,6 +115,10 @@ export function createCpuRingState({
     dropCount: 0,
     overwriteCount: 0,
     drainCount: 0,
+    /** CPU twin of device RingMeta mirror (updated after host commits). */
+    metaHead: 0,
+    metaTail: 0,
+    metaCount: 0,
     seq: u64(0, 0),
     slotsData: Array.from({ length: n }, () => Buffer.alloc(e, 0)),
   };
@@ -122,6 +126,12 @@ export function createCpuRingState({
 
 function ringMod(idx, slots) {
   return slots ? (idx % slots) : 0;
+}
+
+function cpuRingMetaSyncInPlace(state) {
+  state.metaHead = state.head;
+  state.metaTail = state.tail;
+  state.metaCount = state.count;
 }
 
 function cpuRingScrubTail(state) {
@@ -133,6 +143,7 @@ function cpuRingScrubTail(state) {
   state.tail = ringMod(state.tail + 1, state.slots);
   state.count -= 1;
   state.dropCount += 1;
+  cpuRingMetaSyncInPlace(state);
   return { ok: true, scrub_ok: true, ring_slot: slot };
 }
 
@@ -149,6 +160,47 @@ function cpuRingStats(ring) {
     ring_overwrite_count: ring.overwriteCount ?? 0,
     ring_drain_count: ring.drainCount ?? 0,
     ring_seq: u64(ring.seq.hi, ring.seq.lo),
+  };
+}
+
+/** CPU twin of --ring-sync-meta (copy host index into meta mirror). */
+export function cpuRingSyncMeta({
+  state,
+  slots = SM11_DEFAULT_RING_SLOTS,
+  envBytes = SM11_HOT_ENV_BYTES,
+} = {}) {
+  const ring = state ?? createCpuRingState({ slots, envBytes });
+  cpuRingMetaSyncInPlace(ring);
+  return {
+    ok: true,
+    backend: 'cpu',
+    ring_ok: true,
+    ring_sync_meta_ok: true,
+    ...cpuRingStats(ring),
+    state: ring,
+  };
+}
+
+/** CPU twin of --ring-dump-meta (compare meta mirror to host index). */
+export function cpuRingDumpMeta({
+  state,
+  slots = SM11_DEFAULT_RING_SLOTS,
+  envBytes = SM11_HOT_ENV_BYTES,
+} = {}) {
+  const ring = state ?? createCpuRingState({ slots, envBytes });
+  const match = ring.metaHead === ring.head
+    && ring.metaTail === ring.tail
+    && ring.metaCount === ring.count;
+  return {
+    ok: match,
+    backend: 'cpu',
+    ring_ok: match,
+    ring_meta_ok: match,
+    ring_meta_head: ring.metaHead >>> 0,
+    ring_meta_tail: ring.metaTail >>> 0,
+    ring_meta_count: ring.metaCount >>> 0,
+    ...cpuRingStats(ring),
+    state: ring,
   };
 }
 
@@ -178,6 +230,7 @@ export function cpuRingPush(payload, {
   ring.head = ringMod(ring.head + 1, ring.slots);
   ring.count += 1;
   ring.pushCount += 1;
+  cpuRingMetaSyncInPlace(ring);
 
   return {
     ok: true,
@@ -688,7 +741,18 @@ export function serveRunExeFactory(session, oneShot = defaultRunExe) {
   };
 }
 
-function buildCliArgs({ flags, batch, envBytes, ringSlots, ringSlot, ringDrain, payload, loops }) {
+function buildCliArgs({
+  flags,
+  batch,
+  envBytes,
+  ringSlots,
+  ringSlot,
+  ringDrain,
+  ringSyncMeta,
+  ringDumpMeta,
+  payload,
+  loops,
+}) {
   const args = ['--json', ...flags];
   if (batch != null) {
     args.push('--batch', String(clampBatch(batch)));
@@ -706,6 +770,8 @@ function buildCliArgs({ flags, batch, envBytes, ringSlots, ringSlot, ringDrain, 
     const n = Math.max(1, Math.min(4096, Math.floor(Number(ringDrain) || 1)));
     args.push('--ring-drain', String(n));
   }
+  if (ringSyncMeta) args.push('--ring-sync-meta');
+  if (ringDumpMeta) args.push('--ring-dump-meta');
   if (loops != null && Number(loops) > 1) {
     args.push('--loops', String(Math.min(10_000, Math.max(1, Math.floor(Number(loops))))));
   }
@@ -738,6 +804,8 @@ async function runAssistProbe({
   ringSlots,
   ringSlot,
   ringDrain,
+  ringSyncMeta,
+  ringDumpMeta,
   payload = SM11_PROBE_PAYLOAD,
   loops,
   exePath,
@@ -754,7 +822,18 @@ async function runAssistProbe({
     return { ...cpuResult(), fallback: preferGpu ? 'exe_missing' : 'prefer_cpu' };
   }
 
-  const args = buildCliArgs({ flags, batch, envBytes, ringSlots, ringSlot, ringDrain, payload, loops });
+  const args = buildCliArgs({
+    flags,
+    batch,
+    envBytes,
+    ringSlots,
+    ringSlot,
+    ringDrain,
+    ringSyncMeta,
+    ringDumpMeta,
+    payload,
+    loops,
+  });
   const ran = await runExe(exePath, args, { timeoutMs });
   const parsed = parseJsonLine(ran.stdout);
   if (!parsed || ran.code === 127 || ran.code === 124) {
@@ -800,6 +879,11 @@ function ringFieldsFromParsed(parsed) {
     ring_verify_checked: parsed.ring_verify_checked,
     ring_verify_mismatches: parsed.ring_verify_mismatches,
     ring_drain_ok: parsed.ring_drain_ok,
+    ring_sync_meta_ok: parsed.ring_sync_meta_ok,
+    ring_meta_ok: parsed.ring_meta_ok,
+    ring_meta_head: parsed.ring_meta_head,
+    ring_meta_tail: parsed.ring_meta_tail,
+    ring_meta_count: parsed.ring_meta_count,
     ring_seq: parsed.ring_seq ?? null,
     ring_hash: parsed.ring_hash ?? null,
     ring_expect: parsed.ring_expect ?? null,
@@ -975,6 +1059,76 @@ export async function verifyRingVerify(options = {}) {
     cpu: () => cpuRingVerify({ state, slots: ringSlots, envBytes }),
     accept: (parsed) => {
       if (parsed.ok === true && parsed.ring_ok === true && parsed.ring_verify_ok === true) {
+        return ringFieldsFromParsed(parsed);
+      }
+      return null;
+    },
+  });
+}
+
+/** H2D host ring index into device meta mirror (--ring-sync-meta). */
+export async function verifyRingSyncMeta(options = {}) {
+  const {
+    exePath = defaultExePath(),
+    preferGpu = true,
+    timeoutMs = 15_000,
+    runExe = defaultRunExe,
+    exists = existsSync,
+    ringSlots = SM11_DEFAULT_RING_SLOTS,
+    envBytes = SM11_HOT_ENV_BYTES,
+    state,
+    payload = SM11_PROBE_PAYLOAD,
+  } = options;
+
+  return runAssistProbe({
+    flags: [],
+    ringSyncMeta: true,
+    ringSlots,
+    envBytes,
+    payload,
+    exePath,
+    preferGpu,
+    timeoutMs,
+    runExe,
+    exists,
+    cpu: () => cpuRingSyncMeta({ state, slots: ringSlots, envBytes }),
+    accept: (parsed) => {
+      if (parsed.ok === true && parsed.ring_ok === true && parsed.ring_sync_meta_ok === true) {
+        return ringFieldsFromParsed(parsed);
+      }
+      return null;
+    },
+  });
+}
+
+/** D2H device meta mirror and compare to host (--ring-dump-meta). */
+export async function verifyRingDumpMeta(options = {}) {
+  const {
+    exePath = defaultExePath(),
+    preferGpu = true,
+    timeoutMs = 15_000,
+    runExe = defaultRunExe,
+    exists = existsSync,
+    ringSlots = SM11_DEFAULT_RING_SLOTS,
+    envBytes = SM11_HOT_ENV_BYTES,
+    state,
+    payload = SM11_PROBE_PAYLOAD,
+  } = options;
+
+  return runAssistProbe({
+    flags: [],
+    ringDumpMeta: true,
+    ringSlots,
+    envBytes,
+    payload,
+    exePath,
+    preferGpu,
+    timeoutMs,
+    runExe,
+    exists,
+    cpu: () => cpuRingDumpMeta({ state, slots: ringSlots, envBytes }),
+    accept: (parsed) => {
+      if (parsed.ok === true && parsed.ring_ok === true && parsed.ring_meta_ok === true) {
         return ringFieldsFromParsed(parsed);
       }
       return null;
@@ -1226,6 +1380,8 @@ export function createSm11Assist(options = {}) {
     ringScrub: 0,
     ringDrain: 0,
     ringVerify: 0,
+    ringSyncMeta: 0,
+    ringDumpMeta: 0,
     coalesced: 0,
     gpuOk: 0,
     cpuFallback: 0,
@@ -1241,6 +1397,8 @@ export function createSm11Assist(options = {}) {
       ringScrub: 0,
       ringDrain: 0,
       ringVerify: 0,
+      ringSyncMeta: 0,
+      ringDumpMeta: 0,
     },
     /** Hot-path event fires (mailbox/ipc); assists may coalesce. */
     hotEvents: {
@@ -1264,6 +1422,8 @@ export function createSm11Assist(options = {}) {
     ringScrub: null,
     ringDrain: null,
     ringVerify: null,
+    ringSyncMeta: null,
+    ringDumpMeta: null,
   };
 
   function record(result, kind = 'verify') {
@@ -1277,6 +1437,8 @@ export function createSm11Assist(options = {}) {
     if (kind === 'ringScrub') stats.ringScrub += 1;
     if (kind === 'ringDrain') stats.ringDrain += 1;
     if (kind === 'ringVerify') stats.ringVerify += 1;
+    if (kind === 'ringSyncMeta') stats.ringSyncMeta += 1;
+    if (kind === 'ringDumpMeta') stats.ringDumpMeta += 1;
     if (result.state) cpuRing = result.state;
     stats.last = {
       backend: result.backend,
@@ -1401,6 +1563,24 @@ export function createSm11Assist(options = {}) {
       state: cpuRing,
       ...probeOpts,
     }), 'ringVerify'));
+  }
+
+  /** Non-blocking H2D of host ring index into device meta mirror. */
+  function assistRingSyncMeta(probeOpts = {}) {
+    return coalesce('ringSyncMeta', () => track(verifyRingSyncMeta({
+      ...ringShared,
+      state: cpuRing,
+      ...probeOpts,
+    }), 'ringSyncMeta'));
+  }
+
+  /** Non-blocking D2H of device meta mirror vs host index. */
+  function assistRingDumpMeta(probeOpts = {}) {
+    return coalesce('ringDumpMeta', () => track(verifyRingDumpMeta({
+      ...ringShared,
+      state: cpuRing,
+      ...probeOpts,
+    }), 'ringDumpMeta'));
   }
 
   function ringOk(result, flag) {
@@ -1548,6 +1728,8 @@ export function createSm11Assist(options = {}) {
     assistRingScrub,
     assistRingDrain,
     assistRingVerify,
+    assistRingSyncMeta,
+    assistRingDumpMeta,
     onEnqueue,
     onDropOrClear,
     onDrain,
@@ -1583,6 +1765,16 @@ export function createSm11Assist(options = {}) {
       state: cpuRing,
       ...probeOpts,
     }).then((r) => record(r, 'ringVerify')),
+    verifyRingSyncMeta: (probeOpts) => verifyRingSyncMeta({
+      ...ringShared,
+      state: cpuRing,
+      ...probeOpts,
+    }).then((r) => record(r, 'ringSyncMeta')),
+    verifyRingDumpMeta: (probeOpts) => verifyRingDumpMeta({
+      ...ringShared,
+      state: cpuRing,
+      ...probeOpts,
+    }).then((r) => record(r, 'ringDumpMeta')),
     flush,
     close,
     stats: () => ({

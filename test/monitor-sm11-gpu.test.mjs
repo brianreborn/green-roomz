@@ -15,6 +15,8 @@ import {
   cpuRingScrub,
   cpuRingDrain,
   cpuRingVerify,
+  cpuRingSyncMeta,
+  cpuRingDumpMeta,
   createCpuRingState,
   verifyPayload,
   verifyScrub,
@@ -25,6 +27,8 @@ import {
   verifyRingScrub,
   verifyRingDrain,
   verifyRingVerify,
+  verifyRingSyncMeta,
+  verifyRingDumpMeta,
   createSm11Assist,
   createSm11ServeSession,
   serveRunExeFactory,
@@ -566,6 +570,8 @@ test('preferRing hot path falls back to seq/scrub/batch when ring throws', async
       || args.includes('--ring-scrub')
       || args.includes('--ring-drain')
       || args.includes('--ring-verify')
+      || args.includes('--ring-sync-meta')
+      || args.includes('--ring-dump-meta')
     ) {
       throw new Error('ring_boom');
     }
@@ -806,7 +812,8 @@ test('sm11 hotEvents and failByKind harden existing enqueue/drop/drain path', as
   assert.equal(s.hotEvents.reject, 0);
   assert.equal(s.hotEvents.wait, 0);
   assert.deepEqual(Object.keys(s.failByKind).sort(), [
-    'batch', 'ringDrain', 'ringHash', 'ringPush', 'ringScrub', 'ringVerify', 'scrub', 'seq', 'verify',
+    'batch', 'ringDrain', 'ringDumpMeta', 'ringHash', 'ringPush', 'ringScrub',
+    'ringSyncMeta', 'ringVerify', 'scrub', 'seq', 'verify',
   ]);
 });
 
@@ -987,6 +994,27 @@ test('cpuRing overwrite_count rises on push-when-full', () => {
   assert.equal(over.ring_drop_count, 1);
 });
 
+test('cpuRing sync/dump meta mirror matches host index after commits', () => {
+  const state = createCpuRingState({ slots: 16, envBytes: 32 });
+  assert.equal(state.metaHead, 0);
+  assert.equal(state.metaCount, 0);
+  cpuRingPush('m0', { state });
+  assert.equal(state.metaHead, state.head);
+  assert.equal(state.metaTail, state.tail);
+  assert.equal(state.metaCount, state.count);
+  const dump = cpuRingDumpMeta({ state });
+  assert.equal(dump.ring_meta_ok, true);
+  assert.equal(dump.ring_meta_head, state.head);
+  assert.equal(dump.ring_meta_count, 1);
+  state.metaCount = 99;
+  const bad = cpuRingDumpMeta({ state });
+  assert.equal(bad.ring_meta_ok, false);
+  const sync = cpuRingSyncMeta({ state });
+  assert.equal(sync.ring_sync_meta_ok, true);
+  assert.equal(state.metaCount, state.count);
+  assert.equal(cpuRingDumpMeta({ state }).ring_meta_ok, true);
+});
+
 test('verifyRing* fall back to CPU when exe missing', async () => {
   const missing = {
     exePath: 'C:\\nonexistent\\sm11_monitor.exe',
@@ -1014,6 +1042,12 @@ test('verifyRing* fall back to CPU when exe missing', async () => {
   const scrub = await verifyRingScrub({ ...missing, state: drain.state });
   assert.equal(scrub.backend, 'cpu');
   assert.equal(scrub.ring_scrub_ok, true);
+  const sync = await verifyRingSyncMeta({ ...missing, state: scrub.state });
+  assert.equal(sync.backend, 'cpu');
+  assert.equal(sync.ring_sync_meta_ok, true);
+  const dump = await verifyRingDumpMeta({ ...missing, state: sync.state });
+  assert.equal(dump.backend, 'cpu');
+  assert.equal(dump.ring_meta_ok, true);
 });
 
 test('createSm11Assist assistRing* is non-blocking with CPU fallback', async () => {
@@ -1042,6 +1076,12 @@ test('createSm11Assist assistRing* is non-blocking with CPU fallback', async () 
   const s = await assist.assistRingScrub();
   assert.equal(s.ring_scrub_ok, true);
   assert.equal(assist.stats().ringScrub, 1);
+  const sync = await assist.assistRingSyncMeta();
+  assert.equal(sync.ring_sync_meta_ok, true);
+  assert.equal(assist.stats().ringSyncMeta, 1);
+  const dump = await assist.assistRingDumpMeta();
+  assert.equal(dump.ring_meta_ok, true);
+  assert.equal(assist.stats().ringDumpMeta, 1);
 });
 
 test('live private-slot ring push/hash/scrub/drain/verify when exe present', {
@@ -1074,11 +1114,21 @@ test('live private-slot ring push/hash/scrub/drain/verify when exe present', {
     assert.equal(ver.ring_verify_ok, true);
     assert.equal(ver.ring_verify_checked, 1);
     assert.equal(ver.ring_verify_mismatches, 0);
+    const dump = await assist.verifyRingDumpMeta();
+    assert.equal(dump.ring_meta_ok, true, JSON.stringify(dump));
+    assert.equal(dump.ring_meta_head, push.ring_head);
+    assert.equal(dump.ring_meta_tail, push.ring_tail);
+    assert.equal(dump.ring_meta_count, push.ring_count);
+    const sync = await assist.verifyRingSyncMeta();
+    assert.equal(sync.ring_sync_meta_ok, true);
     const drain = await assist.verifyRingDrain(1);
     assert.equal(drain.ring_drain_ok, true);
     assert.equal(drain.ring_drained, 1);
     assert.equal(drain.ring_occupancy, 0);
     assert.equal(drain.ring_drain_count, 1);
+    const dump2 = await assist.verifyRingDumpMeta();
+    assert.equal(dump2.ring_meta_ok, true);
+    assert.equal(dump2.ring_meta_count, 0);
     const scrub = await assist.verifyRingScrub();
     assert.equal(scrub.ring_scrub_ok, true);
     assert.ok(typeof push.ms === 'number');
