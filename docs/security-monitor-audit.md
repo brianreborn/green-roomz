@@ -27,3 +27,7 @@ Envelope fields; seq as logical 64-bit with {hi,lo} on sm_1.1; push non-blocking
 ## Leave stub
 
 Replica/quorum, GPU ring choice, respond owner process, per-OS verb matrix, identity struct, ticket representation, second upcall queue body, encrypt-volumes, halt recovery, map-edit vote, enroll of node 1, vote TTL, waitable handle type.
+
+## sm_1.1 probe progress
+
+`native/sm11-monitor` proved copy + FNV on the 8600 GT (CUDA 6.5 / sm_11). Build is **Win32** on this VS2013 box. Not wired to JS yet — see `docs/fleet-targets.md` ship commitment and issue #13.

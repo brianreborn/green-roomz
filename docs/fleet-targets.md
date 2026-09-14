@@ -338,6 +338,8 @@ SKU confirmed: **Snapdragon, not Exynos.** GPU pack = OpenCL/Vulkan, not Mali.
 | Work | Majority of monitor/mailbox hot path on GPU: copy-engine or host-memcpy slot (**F3/F21**), seq `{hi,lo}`, push/drain assist, payload hash / ring scrub — **GPU MUST NOT list** (private slot, not a model roster) |
 | Useful = | Under load, most monitor ops hit the 8600; CPU fallback still correct if GPU absent |
 
+**Live proof (qodesh):** GeForce 8600 GT **sm_11** copy + FNV via `native/sm11-monitor` (`copy_ok=1 hash_ok=1`). Probe only — not yet wired into the JS mailbox/monitor path. Issue: https://github.com/brianreborn/green-roomz/issues/13
+
 **Optional later (not required to call the GPU useful):** partial 0.5B Q4 `n-gpu-layers` offload on the same toolchain. Nice if tok/s >= CPU-only; not the usefulness bar.
 
 **Non-goals on 224 MB:** whole chat models in VRAM; Vulkan lighting up; vision/whisper/sd on this card.
