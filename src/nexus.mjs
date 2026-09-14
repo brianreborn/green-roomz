@@ -218,8 +218,13 @@ async function postNexus({ processes, registry, fetchImpl, body, visited, notes,
     },
   }, nexus);
   const target = `http://127.0.0.1:${nexus.port}/v1/chat/completions`;
-  const timed = AbortSignal.timeout(consultTimeoutMs);
-  const combined = signal ? AbortSignal.any([signal, timed]) : timed;
+  // consultTimeoutMs <= 0 → no gateway abort (client abort still applies).
+  // Aborting mid-prompt on --parallel 1 wedges the resident slot for later fallback.
+  let combined = signal;
+  if (consultTimeoutMs > 0) {
+    const timed = AbortSignal.timeout(consultTimeoutMs);
+    combined = signal ? AbortSignal.any([signal, timed]) : timed;
+  }
   const response = await fetchImpl(target, {
     method: 'POST',
     headers: { 'content-type': 'application/json', connection: 'close' },
@@ -248,9 +253,11 @@ export async function consultNexus({ processes, registry, fetchImpl = fetch, bod
 
   const admitOk = (alias) => alias && aliasCanAdmit(registry, alias, processes);
 
+  const offlineNexus = processes?.manifest?.gateway?.nexus_consult === false
+    || /^(1|true|yes)$/i.test(String(process.env.GRZ_OFFLINE_NEXUS ?? '').trim());
   const ask = async (constraint) => {
     if (!candidates.length) return { route: null, confidence: 0, reason: 'no_admittable_specialist' };
-    if (!live) return offlinePlan(stripped, registry, visited);
+    if (!live || offlineNexus) return offlinePlan(stripped, registry, visited);
     try {
       return await postNexus({
         processes, registry, fetchImpl, body: stripped, visited, notes, constraint, signal,

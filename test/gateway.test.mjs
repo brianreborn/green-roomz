@@ -374,6 +374,17 @@ test('nexus thinking is always off even if the client asked', () => {
   assert.equal(forced.chat_template_kwargs.enable_thinking, false);
 });
 
+test('user-facing nexus completion does not inject the routing kernel', () => {
+  const body = prepareInferenceBody({
+    max_tokens: 16,
+    messages: [{ role: 'user', content: 'Reply with exactly: OK' }],
+  }, { alias: 'tool-router-agent', system_policy: 'policies/tool-router.md' });
+  assert.equal(body.messages.length, 1);
+  assert.equal(body.messages[0].role, 'user');
+  assert.equal(body.messages[0].content, 'Reply with exactly: OK');
+  assert.equal(body.messages.some((m) => m.role === 'system'), false);
+});
+
 test('streamed chat_default records assistant text into session memory', async (t) => {
   const sessions = new SessionLedger();
   const seen = [];

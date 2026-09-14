@@ -201,7 +201,11 @@ export function injectSystemPolicy(body, agent) {
 
 export function prepareInferenceBody(body, agent, extras = {}) {
   const stripped = stripSlashCommand(body);
-  const payload = injectSystemPolicy({ ...stripped, model: agent.alias }, agent);
+  // Nexus routing kernel (tool-router.md) is only for consultNexus via withNexusPolicy.
+  // Injecting it into user-facing resident completions makes the 0.5B echo route JSON.
+  const payload = agent.alias === NEXUS_ALIAS
+    ? { ...stripped, model: agent.alias }
+    : injectSystemPolicy({ ...stripped, model: agent.alias }, agent);
   delete payload.route_plan_only;
   delete payload.lock_alias;
   delete payload.session_id;
@@ -1250,8 +1254,13 @@ export class Gateway {
             && isRoutableAlias(this.registry, FALLBACK_ALIAS)
             && aliasCanAdmit(this.registry, FALLBACK_ALIAS, this.processes);
           if (chatDefault) {
-            alias = FALLBACK_ALIAS;
-            reason = 'chat_default';
+            // Slow hosts (Athlon) set GRZ_OFFLINE_NEXUS=1: prefer resident 0.5B over
+            // mmap'd 4B Instruct, which can sit silent past client timeouts.
+            const preferResident = this.processes?.manifest?.gateway?.chat_default_alias === NEXUS_ALIAS
+              || this.processes?.manifest?.gateway?.nexus_consult === false
+              || /^(1|true|yes)$/i.test(String(process.env.GRZ_OFFLINE_NEXUS ?? '').trim());
+            alias = preferResident ? NEXUS_ALIAS : FALLBACK_ALIAS;
+            reason = preferResident ? 'chat_default_resident' : 'chat_default';
           } else {
             const picked = await consultNexus({
               processes: this.processes,

@@ -29,3 +29,6 @@ Thumbs.db
 
 native/sm11-monitor/out/
 
+
+data/local-env.cmd
+

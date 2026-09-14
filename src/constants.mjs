@@ -28,7 +28,7 @@ export const MONITOR_ALIAS = 'security-monitor-agent';
 export const FALLBACK_ALIAS = 'general-text-speculator';
 export const MAX_SPECIALIST_HOPS = 3;
 export const HANDOFF_PEEK_CHARS = 48;
-export const NEXUS_MAX_TOKENS = 96;
+export const NEXUS_MAX_TOKENS = 32;
 /**
  * Default consult abort is intentionally very generous.
  * If the model stack is slow to warm or the box is loaded, we prefer a slow but
