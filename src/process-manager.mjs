@@ -159,12 +159,13 @@ function attachChildIO(child, append) {
 }
 
 /** Aliases to mmap at serve start. Skip Instruct when generic chat stays on the 0.5B. */
-export function servePrewarmAliases(registry, { gateway, env = process.env } = {}) {
+export function servePrewarmAliases(registry, { gateway, env = process.env, logicalCpus = os.cpus().length } = {}) {
   const aliases = [];
   if (registry?.agents?.has(NEXUS_ALIAS) && registry.status(NEXUS_ALIAS).state !== 'unavailable') {
     aliases.push(NEXUS_ALIAS);
   }
-  if (preferResidentChat(gateway, env)) return aliases;
+  // 2-logical-CPU hosts (and GRZ_OFFLINE_NEXUS) must not pre-warm the 4B Instruct.
+  if (preferResidentChat(gateway, env) || logicalCpus <= 2) return aliases;
   if (registry?.agents?.has(FALLBACK_ALIAS) && registry.status(FALLBACK_ALIAS).state !== 'unavailable') {
     aliases.push(FALLBACK_ALIAS);
   }

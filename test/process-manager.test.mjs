@@ -305,11 +305,15 @@ test('servePrewarmAliases skips FALLBACK_ALIAS when GRZ_OFFLINE_NEXUS=1', async 
   registry.setStatus('tool-router-agent', 'ready');
   registry.setStatus('general-text-speculator', 'ready');
   assert.deepEqual(
-    servePrewarmAliases(registry, { gateway: manifest.gateway, env: {} }),
+    servePrewarmAliases(registry, { gateway: manifest.gateway, env: {}, logicalCpus: 8 }),
     ['tool-router-agent', 'general-text-speculator'],
   );
   assert.deepEqual(
-    servePrewarmAliases(registry, { gateway: manifest.gateway, env: { GRZ_OFFLINE_NEXUS: '1' } }),
+    servePrewarmAliases(registry, { gateway: manifest.gateway, env: { GRZ_OFFLINE_NEXUS: '1' }, logicalCpus: 8 }),
+    ['tool-router-agent'],
+  );
+  assert.deepEqual(
+    servePrewarmAliases(registry, { gateway: manifest.gateway, env: {}, logicalCpus: 2 }),
     ['tool-router-agent'],
   );
   assert.deepEqual(
