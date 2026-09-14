@@ -8,6 +8,7 @@ import { PolicyGate } from '../src/scheduler.mjs';
 import { SessionLedger } from '../src/sessions.mjs';
 import { Gateway } from '../src/gateway.mjs';
 import { isHandoffContent, parseHandoffContent } from '../src/handoff.mjs';
+import { consultNexus, offlinePlan } from '../src/nexus.mjs';
 import { sampleManifest } from './helpers.mjs';
 
 async function withServer(t, extras = {}) {
@@ -344,6 +345,53 @@ test('wrong security dispatch (/threatmodel on C buffer overflow) hands off to c
   assert.match(result.headers['x-green-roomz-hops'], /qwenstral-code-speculator/);
   assert.match(result.body.choices[0].message.content, /secure_copy/);
   assert.equal(specialistCalls, 2);
+});
+
+test('GRZ_OFFLINE_NEXUS consultNexus returns offlinePlan without calling fetchImpl', async (t) => {
+  const previous = process.env.GRZ_OFFLINE_NEXUS;
+  const restore = () => {
+    if (previous === undefined) delete process.env.GRZ_OFFLINE_NEXUS;
+    else process.env.GRZ_OFFLINE_NEXUS = previous;
+  };
+  t.after(restore);
+  process.env.GRZ_OFFLINE_NEXUS = '1';
+  try {
+    const manifest = sampleManifest();
+    const hostAdapter = { sampleResources() { return { freeMemoryBytes: 32 * 1024 * 1024 * 1024 }; } };
+    const registry = await new AgentRegistry(manifest).inspect({ hostAdapter });
+    for (const alias of ['tool-router-agent', 'qwenstral-code-speculator', 'general-text-speculator']) {
+      registry.setStatus(alias, 'ready', { missing: [] });
+    }
+    const processes = new ProcessManager({
+      manifest,
+      registry,
+      hostAdapter,
+      spawnImpl() { throw new Error('should not spawn in this test'); },
+    });
+    processes.ensure = async (agent) => {
+      throw new Error(`ensure must not run for ${agent.alias} when GRZ_OFFLINE_NEXUS=1`);
+    };
+    const body = { messages: [{ role: 'user', content: 'write a python function named hello' }] };
+    let fetches = 0;
+    const result = await consultNexus({
+      processes,
+      registry,
+      fetchImpl: async () => {
+        fetches += 1;
+        throw new Error('fetchImpl must not be called when GRZ_OFFLINE_NEXUS=1');
+      },
+      body,
+    });
+    const expected = offlinePlan(body, registry, new Set());
+    assert.equal(fetches, 0);
+    assert.deepEqual(result, {
+      route: expected.route,
+      confidence: expected.confidence ?? 0.5,
+      reason: expected.reason ?? 'nexus',
+    });
+  } finally {
+    restore();
+  }
 });
 
 

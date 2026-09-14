@@ -1277,6 +1277,9 @@ export class Gateway {
           }
         }
 
+        if (alias === NEXUS_ALIAS && reason === 'chat_default_resident') {
+          return await this.completeOnResident(request, response, body, issuedSession, cors, hops, reason);
+        }
         if (!alias || visited.has(alias) || alias === NEXUS_ALIAS) break;
         if (alias === 'speech-synthesis-agent') {
           const slashOrLock = Boolean(hard.effectiveAlias === alias);
