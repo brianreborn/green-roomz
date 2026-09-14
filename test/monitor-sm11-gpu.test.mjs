@@ -541,10 +541,10 @@ test('Mailbox/MonitorIpc preferRing hot path uses ring push/hash/scrub (CPU mock
   const is = ipc.stats().sm11;
   assert.ok(bs.ringPush >= 1, `box ringPush=${bs.ringPush}`);
   assert.ok(bs.ringScrub >= 1, `box ringScrub=${bs.ringScrub}`);
-  assert.ok(bs.ringHash >= 1, `box ringHash=${bs.ringHash}`);
+  assert.ok(bs.ringDrain >= 1, `box ringDrain=${bs.ringDrain}`);
   assert.ok(is.ringPush >= 1, `ipc ringPush=${is.ringPush}`);
   assert.ok(is.ringScrub >= 1, `ipc ringScrub=${is.ringScrub}`);
-  assert.ok(is.ringHash >= 1, `ipc ringHash=${is.ringHash}`);
+  assert.ok(is.ringDrain >= 1, `ipc ringDrain=${is.ringDrain}`);
   // Probe path stayed idle when ring succeeded.
   assert.equal(bs.seq, 0);
   assert.equal(bs.scrub, 0);
@@ -556,7 +556,13 @@ test('Mailbox/MonitorIpc preferRing hot path uses ring push/hash/scrub (CPU mock
 
 test('preferRing hot path falls back to seq/scrub/batch when ring throws', async () => {
   const runExe = async (_exe, args) => {
-    if (args.includes('--ring-push') || args.includes('--ring-hash') || args.includes('--ring-scrub')) {
+    if (
+      args.includes('--ring-push')
+      || args.includes('--ring-hash')
+      || args.includes('--ring-scrub')
+      || args.includes('--ring-drain')
+      || args.includes('--ring-verify')
+    ) {
       throw new Error('ring_boom');
     }
     if (args.includes('--seq')) {
@@ -638,9 +644,9 @@ test('live Mailbox ring hot-path under --serve when exe present', {
   await box.sm11.flush();
   const s = box.stats().sm11;
   assert.ok(s.ringPush >= 1, `ringPush=${s.ringPush} last=${JSON.stringify(s.last)}`);
-  assert.ok(s.ringHash >= 1, `ringHash=${s.ringHash}`);
+  assert.ok(s.ringDrain >= 1, `ringDrain=${s.ringDrain}`);
   if (s.last?.backend === 'cuda') {
-    assert.equal(s.last.ring_push_ok ?? s.last.ring_ok, true);
+    assert.equal(s.last.ring_push_ok ?? s.last.ring_drain_ok ?? s.last.ring_ok, true);
   }
   await box.sm11.close();
 });
@@ -711,6 +717,93 @@ test('load hammer: Mailbox + MonitorIpc fat/thin pushes stay non-blocking; count
   assert.ok(is.batch >= WAVES, `ipc batch=${is.batch}`);
   assert.ok(bs.coalesced >= 1 && is.coalesced >= 1);
   assert.ok(maxPushMs < PUSH_BUDGET_MS, `maxPushMs=${maxPushMs}`);
+});
+
+test('Mailbox stub reject and MonitorIpc wait/reject-cache fire sm11 assists without blocking', async () => {
+  const box = new Mailbox({
+    capacity: 4,
+    autoDrain: false,
+    sm11: {
+      verifyOnFat: false,
+      hotPath: true,
+      preferGpu: false,
+      hotBatch: 4,
+      hotEnvBytes: 16,
+    },
+  });
+  const ipc = new MonitorIpc({
+    autoDrain: false,
+    sm11: {
+      verifyOnFat: false,
+      hotPath: true,
+      preferGpu: false,
+      preferRing: true,
+      ringSlots: 16,
+      hotEnvBytes: 16,
+      hotBatch: 4,
+    },
+  });
+
+  const t0 = performance.now();
+  const stub = box.push({ kind: 'vote', source: 'deny' });
+  assert.equal(stub.ok, false);
+  assert.ok(performance.now() - t0 < 20);
+
+  // First reject enqueues (onEnqueue); second same ticket is cache hit → onReject.
+  const r1 = ipc.push({ kind: 'vote', source: 'ipc', ticket: 'rej-cache' });
+  assert.equal(r1.ok, false);
+  const r2 = ipc.push({ kind: 'vote', source: 'ipc', ticket: 'rej-cache' });
+  assert.equal(r2.ok, false);
+
+  const tWait = performance.now();
+  const waited = ipc.wait('missing-ticket', { role: 'ticket_owner' });
+  assert.equal(waited.ok, true);
+  assert.ok(performance.now() - tWait < 20);
+
+  await box.sm11.flush();
+  await ipc.sm11.flush();
+
+  const bs = box.stats().sm11;
+  const is = ipc.stats().sm11;
+  assert.ok(bs.hotEvents.reject >= 1, `box reject events=${bs.hotEvents.reject}`);
+  assert.ok(bs.seq >= 1, `box seq after reject=${bs.seq}`);
+  assert.ok(is.hotEvents.reject >= 1, `ipc reject events=${is.hotEvents.reject}`);
+  assert.ok(is.hotEvents.wait >= 1, `ipc wait events=${is.hotEvents.wait}`);
+  assert.ok(is.hotEvents.enqueue >= 1, `ipc enqueue from first reject=${is.hotEvents.enqueue}`);
+  // preferRing wait → ringVerify (or batch fallback); reject → seq.
+  assert.ok(is.ringVerify >= 1 || is.batch >= 1, `wait assist ringVerify=${is.ringVerify} batch=${is.batch}`);
+  assert.ok(is.seq >= 1, `ipc seq from onReject=${is.seq}`);
+  assert.equal(typeof is.failByKind, 'object');
+  assert.equal(typeof is.failByKind.seq, 'number');
+  assert.ok(is.fail >= 0);
+});
+
+test('sm11 hotEvents and failByKind harden existing enqueue/drop/drain path', async () => {
+  const box = new Mailbox({
+    capacity: 2,
+    autoDrain: false,
+    sm11: {
+      verifyOnFat: false,
+      hotPath: true,
+      preferGpu: false,
+      hotBatch: 4,
+      hotEnvBytes: 16,
+    },
+  });
+  box.push({ kind: 'success', source: 'a', payload: { i: 0 } });
+  box.push({ kind: 'success', source: 'a', payload: { i: 1 } });
+  box.push({ kind: 'success', source: 'a', payload: { i: 2 } }); // drop
+  box.drain();
+  await box.sm11.flush();
+  const s = box.stats().sm11;
+  assert.ok(s.hotEvents.enqueue >= 3);
+  assert.ok(s.hotEvents.drop >= 1);
+  assert.ok(s.hotEvents.drain >= 1);
+  assert.equal(s.hotEvents.reject, 0);
+  assert.equal(s.hotEvents.wait, 0);
+  assert.deepEqual(Object.keys(s.failByKind).sort(), [
+    'batch', 'ringDrain', 'ringHash', 'ringPush', 'ringScrub', 'ringVerify', 'scrub', 'seq', 'verify',
+  ]);
 });
 
 test('live sm11_monitor.exe --json on 8600 when present', {

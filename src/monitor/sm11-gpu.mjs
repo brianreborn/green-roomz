@@ -113,6 +113,8 @@ export function createCpuRingState({
     count: 0,
     pushCount: 0,
     dropCount: 0,
+    overwriteCount: 0,
+    drainCount: 0,
     seq: u64(0, 0),
     slotsData: Array.from({ length: n }, () => Buffer.alloc(e, 0)),
   };
@@ -134,6 +136,22 @@ function cpuRingScrubTail(state) {
   return { ok: true, scrub_ok: true, ring_slot: slot };
 }
 
+function cpuRingStats(ring) {
+  return {
+    ring_slots: ring.slots,
+    ring_env_bytes: ring.envBytes,
+    ring_head: ring.head,
+    ring_tail: ring.tail,
+    ring_count: ring.count,
+    ring_occupancy: ring.count,
+    ring_push_count: ring.pushCount,
+    ring_drop_count: ring.dropCount,
+    ring_overwrite_count: ring.overwriteCount ?? 0,
+    ring_drain_count: ring.drainCount ?? 0,
+    ring_seq: u64(ring.seq.hi, ring.seq.lo),
+  };
+}
+
 /** CPU twin of --ring-push (H2D+copy+seq+hash contract). */
 export function cpuRingPush(payload, {
   state,
@@ -142,7 +160,10 @@ export function cpuRingPush(payload, {
 } = {}) {
   const ring = state ?? createCpuRingState({ slots, envBytes });
   let scrub = null;
-  if (ring.count >= ring.slots) scrub = cpuRingScrubTail(ring);
+  if (ring.count >= ring.slots) {
+    scrub = cpuRingScrubTail(ring);
+    ring.overwriteCount = (ring.overwriteCount ?? 0) + 1;
+  }
 
   const host = Buffer.alloc(ring.envBytes, 0);
   const bytes = toBytes(payload);
@@ -166,14 +187,8 @@ export function cpuRingPush(payload, {
     ring_hash_ok: true,
     ring_cmp_ok: true,
     ring_cmp_mismatches: 0,
-    ring_slots: ring.slots,
-    ring_env_bytes: ring.envBytes,
+    ...cpuRingStats(ring),
     ring_slot: slot,
-    ring_head: ring.head,
-    ring_tail: ring.tail,
-    ring_count: ring.count,
-    ring_push_count: ring.pushCount,
-    ring_drop_count: ring.dropCount,
     ring_seq: stamped,
     ring_hash: hash,
     ring_expect: hash,
@@ -212,15 +227,8 @@ export function cpuRingHash({
     backend: 'cpu',
     ring_ok: true,
     ring_hash_ok: true,
-    ring_slots: ring.slots,
-    ring_env_bytes: ring.envBytes,
+    ...cpuRingStats(ring),
     ring_slot: idx,
-    ring_head: ring.head,
-    ring_tail: ring.tail,
-    ring_count: ring.count,
-    ring_push_count: ring.pushCount,
-    ring_drop_count: ring.dropCount,
-    ring_seq: u64(ring.seq.hi, ring.seq.lo),
     ring_hash: hash,
     ring_expect: hash,
     state: ring,
@@ -252,15 +260,8 @@ export function cpuRingScrub({
       backend: 'cpu',
       ring_ok: true,
       ring_scrub_ok: true,
-      ring_slots: ring.slots,
-      ring_env_bytes: ring.envBytes,
+      ...cpuRingStats(ring),
       ring_slot: idx,
-      ring_head: ring.head,
-      ring_tail: ring.tail,
-      ring_count: ring.count,
-      ring_push_count: ring.pushCount,
-      ring_drop_count: ring.dropCount,
-      ring_seq: u64(ring.seq.hi, ring.seq.lo),
       state: ring,
     };
   }
@@ -270,15 +271,88 @@ export function cpuRingScrub({
     backend: 'cpu',
     ring_ok: scrub.ok,
     ring_scrub_ok: scrub.scrub_ok,
-    ring_slots: ring.slots,
-    ring_env_bytes: ring.envBytes,
+    ...cpuRingStats(ring),
     ring_slot: scrub.ring_slot,
-    ring_head: ring.head,
-    ring_tail: ring.tail,
-    ring_count: ring.count,
-    ring_push_count: ring.pushCount,
-    ring_drop_count: ring.dropCount,
-    ring_seq: u64(ring.seq.hi, ring.seq.lo),
+    state: ring,
+  };
+}
+
+/** CPU twin of --ring-drain N (hash+scrub from tail; host advances). */
+export function cpuRingDrain({
+  state,
+  count = 1,
+  slots = SM11_DEFAULT_RING_SLOTS,
+  envBytes = SM11_HOT_ENV_BYTES,
+} = {}) {
+  const ring = state ?? createCpuRingState({ slots, envBytes });
+  const n = Math.max(0, Math.floor(Number(count) || 0));
+  let drained = 0;
+  let lastHash = null;
+  let lastSlot = 0xffffffff;
+  let ok = true;
+  while (drained < n && ring.count > 0) {
+    const slot = ring.tail;
+    const hash = fnv1a64Hex(ring.slotsData[slot]);
+    const scrub = cpuRingScrubTail(ring);
+    if (!scrub.scrub_ok) {
+      ok = false;
+      break;
+    }
+    ring.drainCount = (ring.drainCount ?? 0) + 1;
+    drained += 1;
+    lastHash = hash;
+    lastSlot = slot;
+  }
+  return {
+    ok,
+    backend: 'cpu',
+    ring_ok: ok,
+    ring_drain_ok: ok,
+    ring_hash_ok: ok,
+    ring_scrub_ok: ok,
+    ring_drained: drained,
+    ...cpuRingStats(ring),
+    ring_slot: lastSlot,
+    ring_hash: lastHash,
+    ring_expect: lastHash,
+    state: ring,
+  };
+}
+
+/** CPU twin of --ring-verify (re-hash occupied slots; host walks indices). */
+export function cpuRingVerify({
+  state,
+  slots = SM11_DEFAULT_RING_SLOTS,
+  envBytes = SM11_HOT_ENV_BYTES,
+} = {}) {
+  const ring = state ?? createCpuRingState({ slots, envBytes });
+  let checked = 0;
+  let mismatches = 0;
+  let idx = ring.tail;
+  let lastHash = null;
+  let lastSlot = 0xffffffff;
+  for (let i = 0; i < ring.count; i += 1) {
+    const hash = fnv1a64Hex(ring.slotsData[idx]);
+    // CPU twin: device/host hash are the same buffer — mismatch stays 0 unless corrupt.
+    if (hash !== fnv1a64Hex(ring.slotsData[idx])) mismatches += 1;
+    checked += 1;
+    lastHash = hash;
+    lastSlot = idx;
+    idx = ringMod(idx + 1, ring.slots);
+  }
+  const ok = mismatches === 0;
+  return {
+    ok,
+    backend: 'cpu',
+    ring_ok: ok,
+    ring_verify_ok: ok,
+    ring_verify_checked: checked,
+    ring_verify_mismatches: mismatches,
+    ring_hash_ok: ok,
+    ...cpuRingStats(ring),
+    ring_slot: lastSlot,
+    ring_hash: lastHash,
+    ring_expect: lastHash,
     state: ring,
   };
 }
@@ -614,7 +688,7 @@ export function serveRunExeFactory(session, oneShot = defaultRunExe) {
   };
 }
 
-function buildCliArgs({ flags, batch, envBytes, ringSlots, ringSlot, payload, loops }) {
+function buildCliArgs({ flags, batch, envBytes, ringSlots, ringSlot, ringDrain, payload, loops }) {
   const args = ['--json', ...flags];
   if (batch != null) {
     args.push('--batch', String(clampBatch(batch)));
@@ -627,6 +701,10 @@ function buildCliArgs({ flags, batch, envBytes, ringSlots, ringSlot, payload, lo
   }
   if (ringSlot != null && ringSlot !== 0xffffffff) {
     args.push('--ring-slot', String(Number(ringSlot) >>> 0));
+  }
+  if (ringDrain != null) {
+    const n = Math.max(1, Math.min(4096, Math.floor(Number(ringDrain) || 1)));
+    args.push('--ring-drain', String(n));
   }
   if (loops != null && Number(loops) > 1) {
     args.push('--loops', String(Math.min(10_000, Math.max(1, Math.floor(Number(loops))))));
@@ -659,6 +737,7 @@ async function runAssistProbe({
   envBytes,
   ringSlots,
   ringSlot,
+  ringDrain,
   payload = SM11_PROBE_PAYLOAD,
   loops,
   exePath,
@@ -675,7 +754,7 @@ async function runAssistProbe({
     return { ...cpuResult(), fallback: preferGpu ? 'exe_missing' : 'prefer_cpu' };
   }
 
-  const args = buildCliArgs({ flags, batch, envBytes, ringSlots, ringSlot, payload, loops });
+  const args = buildCliArgs({ flags, batch, envBytes, ringSlots, ringSlot, ringDrain, payload, loops });
   const ran = await runExe(exePath, args, { timeoutMs });
   const parsed = parseJsonLine(ran.stdout);
   if (!parsed || ran.code === 127 || ran.code === 124) {
@@ -711,8 +790,16 @@ function ringFieldsFromParsed(parsed) {
     ring_head: parsed.ring_head,
     ring_tail: parsed.ring_tail,
     ring_count: parsed.ring_count,
+    ring_occupancy: parsed.ring_occupancy ?? parsed.ring_count,
     ring_push_count: parsed.ring_push_count,
     ring_drop_count: parsed.ring_drop_count,
+    ring_overwrite_count: parsed.ring_overwrite_count,
+    ring_drain_count: parsed.ring_drain_count,
+    ring_drained: parsed.ring_drained,
+    ring_verify_ok: parsed.ring_verify_ok,
+    ring_verify_checked: parsed.ring_verify_checked,
+    ring_verify_mismatches: parsed.ring_verify_mismatches,
+    ring_drain_ok: parsed.ring_drain_ok,
     ring_seq: parsed.ring_seq ?? null,
     ring_hash: parsed.ring_hash ?? null,
     ring_expect: parsed.ring_expect ?? null,
@@ -819,6 +906,75 @@ export async function verifyRingScrub(options = {}) {
     cpu: () => cpuRingScrub({ state, slot: ringSlot, slots: ringSlots, envBytes }),
     accept: (parsed) => {
       if (parsed.ok === true && parsed.ring_ok === true && parsed.ring_scrub_ok === true) {
+        return ringFieldsFromParsed(parsed);
+      }
+      return null;
+    },
+  });
+}
+
+export async function verifyRingDrain(options = {}) {
+  const {
+    exePath = defaultExePath(),
+    preferGpu = true,
+    timeoutMs = 15_000,
+    runExe = defaultRunExe,
+    exists = existsSync,
+    ringSlots = SM11_DEFAULT_RING_SLOTS,
+    envBytes = SM11_HOT_ENV_BYTES,
+    count = 1,
+    state,
+    payload = SM11_PROBE_PAYLOAD,
+  } = options;
+  const n = Math.max(1, Math.min(4096, Math.floor(Number(count) || 1)));
+
+  return runAssistProbe({
+    flags: [],
+    ringDrain: n,
+    ringSlots,
+    envBytes,
+    payload,
+    exePath,
+    preferGpu,
+    timeoutMs,
+    runExe,
+    exists,
+    cpu: () => cpuRingDrain({ state, count: n, slots: ringSlots, envBytes }),
+    accept: (parsed) => {
+      if (parsed.ok === true && parsed.ring_ok === true && parsed.ring_drain_ok === true) {
+        return ringFieldsFromParsed(parsed);
+      }
+      return null;
+    },
+  });
+}
+
+export async function verifyRingVerify(options = {}) {
+  const {
+    exePath = defaultExePath(),
+    preferGpu = true,
+    timeoutMs = 15_000,
+    runExe = defaultRunExe,
+    exists = existsSync,
+    ringSlots = SM11_DEFAULT_RING_SLOTS,
+    envBytes = SM11_HOT_ENV_BYTES,
+    state,
+    payload = SM11_PROBE_PAYLOAD,
+  } = options;
+
+  return runAssistProbe({
+    flags: ['--ring-verify'],
+    ringSlots,
+    envBytes,
+    payload,
+    exePath,
+    preferGpu,
+    timeoutMs,
+    runExe,
+    exists,
+    cpu: () => cpuRingVerify({ state, slots: ringSlots, envBytes }),
+    accept: (parsed) => {
+      if (parsed.ok === true && parsed.ring_ok === true && parsed.ring_verify_ok === true) {
         return ringFieldsFromParsed(parsed);
       }
       return null;
@@ -1068,10 +1224,32 @@ export function createSm11Assist(options = {}) {
     ringPush: 0,
     ringHash: 0,
     ringScrub: 0,
+    ringDrain: 0,
+    ringVerify: 0,
     coalesced: 0,
     gpuOk: 0,
     cpuFallback: 0,
     fail: 0,
+    /** Per-kind fail counts (verify/scrub/seq/batch/ring*). */
+    failByKind: {
+      verify: 0,
+      scrub: 0,
+      seq: 0,
+      batch: 0,
+      ringPush: 0,
+      ringHash: 0,
+      ringScrub: 0,
+      ringDrain: 0,
+      ringVerify: 0,
+    },
+    /** Hot-path event fires (mailbox/ipc); assists may coalesce. */
+    hotEvents: {
+      enqueue: 0,
+      drop: 0,
+      drain: 0,
+      reject: 0,
+      wait: 0,
+    },
     last: null,
   };
   const pending = new Set();
@@ -1084,6 +1262,8 @@ export function createSm11Assist(options = {}) {
     ringPush: null,
     ringHash: null,
     ringScrub: null,
+    ringDrain: null,
+    ringVerify: null,
   };
 
   function record(result, kind = 'verify') {
@@ -1095,6 +1275,8 @@ export function createSm11Assist(options = {}) {
     if (kind === 'ringPush') stats.ringPush += 1;
     if (kind === 'ringHash') stats.ringHash += 1;
     if (kind === 'ringScrub') stats.ringScrub += 1;
+    if (kind === 'ringDrain') stats.ringDrain += 1;
+    if (kind === 'ringVerify') stats.ringVerify += 1;
     if (result.state) cpuRing = result.state;
     stats.last = {
       backend: result.backend,
@@ -1109,10 +1291,15 @@ export function createSm11Assist(options = {}) {
       ring_push_ok: result.ring_push_ok,
       ring_hash_ok: result.ring_hash_ok,
       ring_scrub_ok: result.ring_scrub_ok,
+      ring_drain_ok: result.ring_drain_ok,
+      ring_verify_ok: result.ring_verify_ok,
     };
     if (result.backend === 'cuda' && result.ok) stats.gpuOk += 1;
     else if (result.fallback) stats.cpuFallback += 1;
-    if (!result.ok) stats.fail += 1;
+    if (!result.ok) {
+      stats.fail += 1;
+      if (kind in stats.failByKind) stats.failByKind[kind] += 1;
+    }
     return result;
   }
 
@@ -1197,6 +1384,25 @@ export function createSm11Assist(options = {}) {
     }), 'ringScrub'));
   }
 
+  /** Non-blocking host-assisted drain: hash+scrub N slots from tail. */
+  function assistRingDrain(count = 1, probeOpts = {}) {
+    return coalesce('ringDrain', () => track(verifyRingDrain({
+      ...ringShared,
+      state: cpuRing,
+      count,
+      ...probeOpts,
+    }), 'ringDrain'));
+  }
+
+  /** Non-blocking re-hash of all occupied slots; report mismatches. */
+  function assistRingVerify(probeOpts = {}) {
+    return coalesce('ringVerify', () => track(verifyRingVerify({
+      ...ringShared,
+      state: cpuRing,
+      ...probeOpts,
+    }), 'ringVerify'));
+  }
+
   function ringOk(result, flag) {
     return Boolean(result?.ok) && result?.[flag] !== false;
   }
@@ -1231,6 +1437,7 @@ export function createSm11Assist(options = {}) {
    */
   function onEnqueue(payload) {
     if (!hotPath) return null;
+    stats.hotEvents.enqueue += 1;
     if (!preferRing) return assistSeq(hotShared);
     return ringOrFallback(
       'ringPush',
@@ -1246,6 +1453,7 @@ export function createSm11Assist(options = {}) {
   /** Hot-path: prefer ring scrub on drop/clear; fall back to scrub probe. */
   function onDropOrClear() {
     if (!hotPath) return null;
+    stats.hotEvents.drop += 1;
     if (!preferRing) return assistScrub(hotShared);
     return ringOrFallback(
       'ringScrub',
@@ -1258,24 +1466,57 @@ export function createSm11Assist(options = {}) {
     );
   }
 
-  /** Hot-path: prefer ring hash on drain; fall back to batch probe. */
+  /** Hot-path: prefer ring-drain (hash+scrub) on drain; fall back to batch probe. */
   function onDrain(count) {
     if (!hotPath) return null;
     const n = Number(count);
     if (!Number.isFinite(n) || n < 1) return null;
+    stats.hotEvents.drain += 1;
     const batchOpts = {
       ...hotShared,
       batch: clampBatch(n, hotShared.batch),
     };
     if (!preferRing) return assistBatch(batchOpts);
     return ringOrFallback(
-      'ringHash',
-      () => verifyRingHash({
+      'ringDrain',
+      () => verifyRingDrain({
+        ...ringShared,
+        state: cpuRing,
+        count: Math.min(n, ringShared.ringSlots ?? SM11_DEFAULT_RING_SLOTS),
+      }),
+      'ring_drain_ok',
+      () => assistBatch(batchOpts),
+    );
+  }
+
+  /**
+   * Hot-path: reject / deny without (or before) a ring write.
+   * Uses seq stamp integrity — never place/respond/logger CUDA.
+   * Mailbox stub rejects and MonitorIpc idempotent reject-cache hits land here;
+   * rejects that enqueue already fire onEnqueue via _enqueue.
+   */
+  function onReject() {
+    if (!hotPath) return null;
+    stats.hotEvents.reject += 1;
+    return assistSeq(hotShared);
+  }
+
+  /**
+   * Hot-path: wait/peek-side integrity (read path). Prefer ring-verify; else batch.
+   * Does not mutate host rings; GPU MUST NOT list / no respond launch.
+   */
+  function onWait() {
+    if (!hotPath) return null;
+    stats.hotEvents.wait += 1;
+    if (!preferRing) return assistBatch(hotShared);
+    return ringOrFallback(
+      'ringVerify',
+      () => verifyRingVerify({
         ...ringShared,
         state: cpuRing,
       }),
-      'ring_hash_ok',
-      () => assistBatch(batchOpts),
+      'ring_verify_ok',
+      () => assistBatch(hotShared),
     );
   }
 
@@ -1305,9 +1546,13 @@ export function createSm11Assist(options = {}) {
     assistRingPush,
     assistRingHash,
     assistRingScrub,
+    assistRingDrain,
+    assistRingVerify,
     onEnqueue,
     onDropOrClear,
     onDrain,
+    onReject,
+    onWait,
     verify: (payload) => verifyPayload(payload, shared).then((r) => record(r, 'verify')),
     verifyScrub: (probeOpts) => verifyScrub({ ...shared, ...probeOpts }).then((r) => record(r, 'scrub')),
     verifySeq: (probeOpts) => verifySeq({ ...shared, ...probeOpts }).then((r) => record(r, 'seq')),
@@ -1327,10 +1572,23 @@ export function createSm11Assist(options = {}) {
       state: cpuRing,
       ...probeOpts,
     }).then((r) => record(r, 'ringScrub')),
+    verifyRingDrain: (count, probeOpts) => verifyRingDrain({
+      ...ringShared,
+      state: cpuRing,
+      count,
+      ...probeOpts,
+    }).then((r) => record(r, 'ringDrain')),
+    verifyRingVerify: (probeOpts) => verifyRingVerify({
+      ...ringShared,
+      state: cpuRing,
+      ...probeOpts,
+    }).then((r) => record(r, 'ringVerify')),
     flush,
     close,
     stats: () => ({
       ...stats,
+      failByKind: { ...stats.failByKind },
+      hotEvents: { ...stats.hotEvents },
       last: stats.last ? { ...stats.last } : null,
       pending: pending.size,
       serveAlive: session ? session.alive : false,

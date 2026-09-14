@@ -8,6 +8,10 @@
  *
  * vote / lockdown / reboot / secure_reboot stay uncallable (reject envelope).
  * Missing capability bit => reject envelope, never silent no-op.
+ *
+ * sm11 hot path (GRZ_SM11=1 / verifyOnFat): enqueue/drop/drain → ring* or
+ * seq/scrub/batch; reject-cache hit → onReject(seq); wait → onWait(verify/batch).
+ * No CUDA for place/respond/logger; no quarantine/clear-all APIs on this ring.
  */
 
 import {
@@ -443,6 +447,8 @@ export class MonitorIpc {
     const partial = { ticket, source: opts.source ?? 'ipc', target: opts.target };
     const denied = this._denyCall('wait', CAP.WAIT, opts, partial);
     if (denied) return denied;
+    // Read-side integrity assist (ring hash / batch); non-blocking.
+    if (this.sm11) this.sm11.onWait();
     const events = this._copiesForTicket(acceptTicket(ticket));
     return { ok: true, events };
   }
@@ -520,6 +526,8 @@ export class MonitorIpc {
     const cacheTicket = isU64Like(accepted) ? accepted : hashStringToU64(accepted);
     const existing = peekReject(cacheTicket);
     if (existing) {
+      // Idempotent reject: no new enqueue — still fire seq integrity assist.
+      if (this.sm11) this.sm11.onReject();
       const copy = cloneEnvelope(existing);
       copy.ticket = accepted;
       return { ok: false, reject: copy };

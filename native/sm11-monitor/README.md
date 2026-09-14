@@ -109,10 +109,13 @@ Occasional multi-second outliers on scrub/seq are driver/context hiccups under c
 
 ### Hot path (when enabled via `verifyOnFat` / `hotPath`)
 
-- With `preferRing` / `--serve`: enqueue → `assistRingPush`, drop/clear → `assistRingScrub`, drain → `assistRingHash`.
+- With `preferRing` / `--serve`: enqueue → `assistRingPush`, drop/clear → `assistRingScrub`, drain → `assistRingDrain` (`--ring-drain`), wait → `assistRingVerify` (`--ring-verify`).
 - On ring failure → fall back to `assistSeq` / `assistScrub` / `assistBatch` (coalesced, non-blocking; CPU twin OK).
+- **Reject (no ring write):** mailbox stub/invalid kind, MonitorIpc idempotent reject-cache hit → `onReject` → `assistSeq`.
+- Stats: `hotEvents.{enqueue,drop,drain,reject,wait}` + `fail` / `failByKind` (assists may coalesce).
+- **Not hooked on CUDA (audit / no API):** vote/lockdown/reboot (host reject stubs; enqueue path covers first reject), quarantine (policy grade), clear-all (none — drain already scrubs), place/respond/logger launches.
 - Fat string payloads still store **sha256**; FNV-1a is the sm11 integrity twin / GPU probe.
-- Private-slot ring assists also available directly: `assistRingPush` / `assistRingHash` / `assistRingScrub`.
+- Private-slot ring assists also available directly: `assistRingPush` / `assistRingHash` / `assistRingScrub` / `assistRingDrain` / `assistRingVerify`.
 
 ```bat
 set GRZ_SM11=1

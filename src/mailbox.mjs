@@ -24,8 +24,11 @@ import { resolveSm11Option, digestFatPayload } from './monitor/sm11-gpu.mjs';
  * Optional sm11 assist (GRZ_SM11=1 or { sm11: true }) verifies fat payloads via
  * CUDA FNV-1a/copy on the 8600 with CPU fallback — never blocks push().
  * Hot path (non-blocking, coalesced): when --serve is up prefer
- * push→assistRingPush, drop→assistRingScrub, drain→assistRingHash;
+ * push→assistRingPush, drop→assistRingScrub, drain→assistRingDrain;
  * otherwise / on ring failure: assistSeq / assistScrub / assistBatch.
+ * Extra audit-safe hooks: stub/invalid reject→assistSeq (onReject);
+ * no clear-all/quarantine/vote CUDA — those are stubs or policy grades
+ * (vote/lockdown reject host-side; quarantine is policy, not a ring op).
  */
 
 function nextPow2(n) {
@@ -119,6 +122,8 @@ export class Mailbox {
   push(partial = {}) {
     const kind = String(partial.kind ?? '');
     if (!kind || STUB_KINDS.has(kind) || !HOP_KINDS.has(kind)) {
+      // Deny without ring write — seq integrity only (never place/respond).
+      if (this.sm11) this.sm11.onReject();
       return { ok: false, kind: 'reject', executed: false };
     }
     const nextSeq = this.seq + 1;

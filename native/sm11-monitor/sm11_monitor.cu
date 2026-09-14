@@ -179,11 +179,13 @@ struct PrivateRing {
   unsigned long long *d_hash;
   unsigned slots;
   unsigned env_bytes;
-  unsigned head;       /* next push index */
-  unsigned tail;       /* next drop index */
-  unsigned count;      /* occupied */
-  unsigned push_count; /* total pushes (u32 wrap ok) */
-  unsigned drop_count;
+  unsigned head;            /* next push index */
+  unsigned tail;            /* next drop index */
+  unsigned count;           /* occupied (= occupancy) */
+  unsigned push_count;      /* total pushes (u32 wrap ok) */
+  unsigned drop_count;      /* scrub-advanced drops (overwrite + drain + scrub) */
+  unsigned overwrite_count; /* drops forced by push-on-full */
+  unsigned drain_count;     /* slots drained via --ring-drain */
   Seq64 seq;
   int live;
 };
@@ -199,6 +201,8 @@ struct Options {
   int do_ring_push;
   int do_ring_hash;
   int do_ring_scrub;
+  int do_ring_drain;
+  int do_ring_verify;
   int any_flag;
   int ring_flag;
   int serve;
@@ -207,6 +211,7 @@ struct Options {
   unsigned ring_slots;
   unsigned ring_slot; /* UINT_MAX = auto (last push / tail) */
   int ring_slot_set;
+  unsigned ring_drain_n; /* --ring-drain N */
   unsigned loops;
   const char *payload;
 };
@@ -221,6 +226,8 @@ struct ProbeResult {
   int ok_ring_push;
   int ok_ring_hash;
   int ok_ring_scrub;
+  int ok_ring_drain;
+  int ok_ring_verify;
   int ok_ring;
   unsigned long long h_hash;
   unsigned long long expect_hash;
@@ -237,8 +244,14 @@ struct ProbeResult {
   unsigned ring_head;
   unsigned ring_tail;
   unsigned ring_count;
+  unsigned ring_occupancy; /* alias of count for fill/drain stats */
   unsigned ring_push_count;
   unsigned ring_drop_count;
+  unsigned ring_overwrite_count;
+  unsigned ring_drain_count;
+  unsigned ring_drained; /* slots drained this call */
+  unsigned ring_verify_checked;
+  unsigned ring_verify_mismatches;
   double ms;
   int cuda_err;
 };
@@ -247,12 +260,15 @@ static void usage(const char *argv0) {
   std::fprintf(stderr,
     "usage: %s [--json] [--copy] [--hash] [--scrub] [--seq]\n"
     "          [--ring-push] [--ring-hash] [--ring-scrub]\n"
+    "          [--ring-drain N] [--ring-verify]\n"
     "          [--ring-slots N] [--ring-slot I]\n"
     "          [--batch N] [--env-bytes B] [--loops N] [--serve] [payload]\n"
     "  default: all probes (copy+hash+scrub+seq)\n"
-    "  --ring-*  fixed private-slot ring (host index; GPU hash/copy/scrub/cmp)\n"
-    "  --loops N  repeat probes in-process (reports ms_*); N>=1\n"
-    "  --serve    stdin lines of CLI args; one JSON reply per line; 'quit' ends\n"
+    "  --ring-*     fixed private-slot ring (host index; GPU hash/copy/scrub/cmp)\n"
+    "  --ring-drain N  hash+scrub N slots from tail; host advances index\n"
+    "  --ring-verify   re-hash all occupied slots; report mismatches\n"
+    "  --loops N    repeat probes in-process (reports ms_*); N>=1\n"
+    "  --serve      stdin lines of CLI args; one JSON reply per line; 'quit' ends\n"
     "  GPU private-slot assist only; does not list models\n",
     argv0 ? argv0 : "sm11_monitor");
 }
@@ -267,6 +283,8 @@ static void ring_reset_host_counters(PrivateRing *r) {
   r->count = 0;
   r->push_count = 0;
   r->drop_count = 0;
+  r->overwrite_count = 0;
+  r->drain_count = 0;
   r->seq.hi = 0;
   r->seq.lo = 0;
 }
@@ -315,8 +333,11 @@ static void ring_snapshot(const PrivateRing *ring, ProbeResult *r, int keep_seq)
   r->ring_head = ring->head;
   r->ring_tail = ring->tail;
   r->ring_count = ring->count;
+  r->ring_occupancy = ring->count;
   r->ring_push_count = ring->push_count;
   r->ring_drop_count = ring->drop_count;
+  r->ring_overwrite_count = ring->overwrite_count;
+  r->ring_drain_count = ring->drain_count;
   /* Push already stamped r->ring_seq; otherwise expose next seq. */
   if (!keep_seq) r->ring_seq = ring->seq;
 }
@@ -339,6 +360,8 @@ static void options_defaults(Options *opt) {
   opt->do_ring_push = 0;
   opt->do_ring_hash = 0;
   opt->do_ring_scrub = 0;
+  opt->do_ring_drain = 0;
+  opt->do_ring_verify = 0;
   opt->any_flag = 0;
   opt->ring_flag = 0;
   opt->serve = 0;
@@ -347,6 +370,7 @@ static void options_defaults(Options *opt) {
   opt->ring_slots = SM11_DEFAULT_RING_SLOTS;
   opt->ring_slot = 0xffffffffu;
   opt->ring_slot_set = 0;
+  opt->ring_drain_n = 0;
   opt->loops = 1;
   opt->payload = "green-roomz-mailbox-probe";
 }
@@ -403,6 +427,22 @@ static int parse_args(int argc, char **argv, Options *opt) {
     }
     if (std::strcmp(a, "--ring-scrub") == 0) {
       opt->do_ring_scrub = 1;
+      opt->any_flag = 1;
+      opt->ring_flag = 1;
+      continue;
+    }
+    if (std::strcmp(a, "--ring-drain") == 0) {
+      if (i + 1 >= argc || parse_u(argv[++i], &opt->ring_drain_n) || opt->ring_drain_n < 1u) {
+        std::fprintf(stderr, "bad --ring-drain\n");
+        return 1;
+      }
+      opt->do_ring_drain = 1;
+      opt->any_flag = 1;
+      opt->ring_flag = 1;
+      continue;
+    }
+    if (std::strcmp(a, "--ring-verify") == 0) {
+      opt->do_ring_verify = 1;
       opt->any_flag = 1;
       opt->ring_flag = 1;
       continue;
@@ -510,6 +550,8 @@ static void result_clear(ProbeResult *r) {
   r->ok_ring_push = 1;
   r->ok_ring_hash = 1;
   r->ok_ring_scrub = 1;
+  r->ok_ring_drain = 1;
+  r->ok_ring_verify = 1;
   r->ok_ring = 1;
   r->h_hash = 0;
   r->expect_hash = 0;
@@ -529,8 +571,14 @@ static void result_clear(ProbeResult *r) {
   r->ring_head = 0;
   r->ring_tail = 0;
   r->ring_count = 0;
+  r->ring_occupancy = 0;
   r->ring_push_count = 0;
   r->ring_drop_count = 0;
+  r->ring_overwrite_count = 0;
+  r->ring_drain_count = 0;
+  r->ring_drained = 0;
+  r->ring_verify_checked = 0;
+  r->ring_verify_mismatches = 0;
   r->ms = 0;
   r->cuda_err = 0;
 }
@@ -572,6 +620,7 @@ static int ring_push_once(PrivateRing *ring, const unsigned char *payload, unsig
   if (ring->count >= ring->slots) {
     if (ring_scrub_tail(ring, threads, r)) return 1;
     if (!r->ok_ring_scrub) { r->ok_ring_push = 0; return 0; }
+    ring->overwrite_count += 1u;
   }
 
   std::vector<unsigned char> host(ring->env_bytes, 0);
@@ -644,6 +693,63 @@ static int ring_hash_slot(PrivateRing *ring, unsigned slot, unsigned threads, Pr
   return 0;
 }
 
+/*
+ * Host-assisted drain: for up to N occupied slots from tail, GPU hash then scrub;
+ * host advances tail/count. Mirrors mailbox drain (producer never waits).
+ */
+static int ring_drain_n(PrivateRing *ring, unsigned n, unsigned threads, ProbeResult *r) {
+  unsigned drained = 0;
+  r->ok_ring_drain = 1;
+  r->ok_ring_hash = 1;
+  r->ok_ring_scrub = 1;
+  r->ring_drained = 0;
+  while (drained < n && ring->count > 0u) {
+    const unsigned slot = ring->tail;
+    if (ring_hash_slot(ring, slot, threads, r)) return 1;
+    if (!r->ok_ring_hash) {
+      r->ok_ring_drain = 0;
+      break;
+    }
+    if (ring_scrub_tail(ring, threads, r)) return 1;
+    if (!r->ok_ring_scrub) {
+      r->ok_ring_drain = 0;
+      break;
+    }
+    ring->drain_count += 1u;
+    drained += 1u;
+  }
+  r->ring_drained = drained;
+  if (drained == 0u && n > 0u && ring->count == 0u) {
+    /* Empty ring: drain of zero is ok (mailbox-style no-op). */
+    r->ok_ring_drain = 1;
+    r->ring_slot = 0xffffffffu;
+  }
+  return 0;
+}
+
+/*
+ * Host walks occupied indices (tail..); GPU hashes each chosen slot.
+ * Mismatch = device FNV != host FNV of D2H bytes. GPU MUST NOT list.
+ */
+static int ring_verify_occupied(PrivateRing *ring, unsigned threads, ProbeResult *r) {
+  unsigned checked = 0;
+  unsigned mismatches = 0;
+  unsigned idx = ring->tail;
+  r->ok_ring_verify = 1;
+  r->ok_ring_hash = 1;
+  for (unsigned i = 0; i < ring->count; i++) {
+    if (ring_hash_slot(ring, idx, threads, r)) return 1;
+    checked += 1u;
+    if (!r->ok_ring_hash) mismatches += 1u;
+    idx = ring_mod(idx + 1u, ring->slots);
+  }
+  r->ring_verify_checked = checked;
+  r->ring_verify_mismatches = mismatches;
+  r->ok_ring_verify = (mismatches == 0u) ? 1 : 0;
+  if (checked == 0u) r->ring_slot = 0xffffffffu;
+  return 0;
+}
+
 /* Run selected probes once. Returns 0 on CUDA API success (ok_* may still fail). */
 static int run_probes_once(const Options *opt, ProbeResult *r) {
   result_clear(r);
@@ -712,11 +818,29 @@ static int run_probes_once(const Options *opt, ProbeResult *r) {
       }
     }
 
+    if (opt->do_ring_drain) {
+      if (ring_drain_n(&g_ring, opt->ring_drain_n, threads, r)) {
+        r->ok_ring = 0;
+        r->ms = wall_ms_now() - t0;
+        return 2;
+      }
+    }
+
+    if (opt->do_ring_verify) {
+      if (ring_verify_occupied(&g_ring, threads, r)) {
+        r->ok_ring = 0;
+        r->ms = wall_ms_now() - t0;
+        return 2;
+      }
+    }
+
     ring_snapshot(&g_ring, r, opt->do_ring_push ? 1 : 0);
     r->ok_ring = 1;
     if (opt->do_ring_push && !r->ok_ring_push) r->ok_ring = 0;
     if (opt->do_ring_hash && !r->ok_ring_hash) r->ok_ring = 0;
     if (opt->do_ring_scrub && !r->ok_ring_scrub) r->ok_ring = 0;
+    if (opt->do_ring_drain && !r->ok_ring_drain) r->ok_ring = 0;
+    if (opt->do_ring_verify && !r->ok_ring_verify) r->ok_ring = 0;
 
     /* Ring-only invocation: skip legacy probes unless also requested. */
     if (!opt->do_copy && !opt->do_hash && !opt->do_scrub && !opt->do_seq) {
@@ -933,6 +1057,8 @@ static int result_all_ok(const Options *opt, const ProbeResult *r) {
   if (opt->do_ring_push && !r->ok_ring_push) return 0;
   if (opt->do_ring_hash && !r->ok_ring_hash) return 0;
   if (opt->do_ring_scrub && !r->ok_ring_scrub) return 0;
+  if (opt->do_ring_drain && !r->ok_ring_drain) return 0;
+  if (opt->do_ring_verify && !r->ok_ring_verify) return 0;
   return 1;
 }
 
@@ -971,21 +1097,32 @@ static void print_json_result(const Options *opt, const cudaDeviceProp &prop,
                 r->ok_ring ? "true" : "false", r->ring_slots, r->ring_env_bytes);
     std::printf("\"ring_slot\":%u,\"ring_head\":%u,\"ring_tail\":%u,\"ring_count\":%u,",
                 r->ring_slot, r->ring_head, r->ring_tail, r->ring_count);
-    std::printf("\"ring_push_count\":%u,\"ring_drop_count\":%u,",
-                r->ring_push_count, r->ring_drop_count);
+    std::printf("\"ring_occupancy\":%u,\"ring_push_count\":%u,\"ring_drop_count\":%u,",
+                r->ring_occupancy, r->ring_push_count, r->ring_drop_count);
+    std::printf("\"ring_overwrite_count\":%u,\"ring_drain_count\":%u,",
+                r->ring_overwrite_count, r->ring_drain_count);
     std::printf("\"ring_seq\":{\"hi\":%u,\"lo\":%u},", r->ring_seq.hi, r->ring_seq.lo);
     if (opt->do_ring_push) {
       std::printf("\"ring_push_ok\":%s,\"ring_cmp_ok\":%s,\"ring_cmp_mismatches\":%u,",
                   r->ok_ring_push ? "true" : "false",
                   r->ok_cmp ? "true" : "false", r->cmp_mismatches);
     }
-    if (opt->do_ring_push || opt->do_ring_hash) {
+    if (opt->do_ring_push || opt->do_ring_hash || opt->do_ring_drain) {
       std::printf("\"ring_hash_ok\":%s,\"ring_hash\":\"0x%016llx\",\"ring_expect\":\"0x%016llx\",",
                   r->ok_ring_hash ? "true" : "false",
                   (unsigned long long)r->ring_hash, (unsigned long long)r->ring_expect);
     }
     if (opt->do_ring_scrub) {
       std::printf("\"ring_scrub_ok\":%s,", r->ok_ring_scrub ? "true" : "false");
+    }
+    if (opt->do_ring_drain) {
+      std::printf("\"ring_drain_ok\":%s,\"ring_drained\":%u,",
+                  r->ok_ring_drain ? "true" : "false", r->ring_drained);
+    }
+    if (opt->do_ring_verify) {
+      std::printf("\"ring_verify_ok\":%s,\"ring_verify_checked\":%u,\"ring_verify_mismatches\":%u,",
+                  r->ok_ring_verify ? "true" : "false",
+                  r->ring_verify_checked, r->ring_verify_mismatches);
     }
   }
   std::printf("\"ms\":%.3f,", r->ms);
@@ -1016,20 +1153,28 @@ static void print_text_result(const Options *opt, const ProbeResult *r) {
                 r->ok_seq, r->seq_start.hi, r->seq_start.lo, r->seq_end.hi, r->seq_end.lo);
   }
   if (opt->ring_flag) {
-    std::printf("ring_ok=%d slots=%u env=%u slot=%u head=%u tail=%u count=%u push=%u drop=%u\n",
+    std::printf("ring_ok=%d slots=%u env=%u slot=%u head=%u tail=%u count=%u occ=%u push=%u drop=%u overwrite=%u drain=%u\n",
                 r->ok_ring, r->ring_slots, r->ring_env_bytes, r->ring_slot,
-                r->ring_head, r->ring_tail, r->ring_count, r->ring_push_count, r->ring_drop_count);
+                r->ring_head, r->ring_tail, r->ring_count, r->ring_occupancy,
+                r->ring_push_count, r->ring_drop_count, r->ring_overwrite_count, r->ring_drain_count);
     if (opt->do_ring_push) {
       std::printf("ring_push_ok=%d cmp_ok=%d cmp_mismatches=%u seq=%u:%u\n",
                   r->ok_ring_push, r->ok_cmp, r->cmp_mismatches, r->ring_seq.hi, r->ring_seq.lo);
     }
-    if (opt->do_ring_push || opt->do_ring_hash) {
+    if (opt->do_ring_push || opt->do_ring_hash || opt->do_ring_drain) {
       std::printf("ring_hash_ok=%d ring_hash=0x%016llx expect=0x%016llx\n",
                   r->ok_ring_hash,
                   (unsigned long long)r->ring_hash, (unsigned long long)r->ring_expect);
     }
     if (opt->do_ring_scrub) {
       std::printf("ring_scrub_ok=%d\n", r->ok_ring_scrub);
+    }
+    if (opt->do_ring_drain) {
+      std::printf("ring_drain_ok=%d drained=%u\n", r->ok_ring_drain, r->ring_drained);
+    }
+    if (opt->do_ring_verify) {
+      std::printf("ring_verify_ok=%d checked=%u mismatches=%u\n",
+                  r->ok_ring_verify, r->ring_verify_checked, r->ring_verify_mismatches);
     }
   }
   std::printf("ms=%.3f\n", r->ms);
