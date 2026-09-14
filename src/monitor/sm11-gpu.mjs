@@ -1038,6 +1038,10 @@ export function createSm11Assist(options = {}) {
       timeoutMs,
     }))
     : null;
+  // Prefer private-slot ring when --serve is up (GRZ_SM11=1 + exe); explicit preferRing overrides.
+  const preferRing = opts.preferRing !== undefined
+    ? opts.preferRing !== false
+    : Boolean(session);
   const runExe = opts.runExe
     ?? (session ? serveRunExeFactory(session, defaultRunExe) : defaultRunExe);
   const shared = { exePath, preferGpu, timeoutMs, runExe, exists };
@@ -1193,27 +1197,86 @@ export function createSm11Assist(options = {}) {
     }), 'ringScrub'));
   }
 
-  /** Hot-path: seq stamp assist after enqueue (no-op if hotPath disabled). */
-  function onEnqueue() {
-    if (!hotPath) return null;
-    return assistSeq(hotShared);
+  function ringOk(result, flag) {
+    return Boolean(result?.ok) && result?.[flag] !== false;
   }
 
-  /** Hot-path: scrub assist when a private slot is overwritten/cleared. */
+  /** Prefer ring probe; on failure run fallback. Whole chain stays in pending for flush(). */
+  function ringOrFallback(ringKind, startRing, flag, fallbackFn) {
+    return coalesce(ringKind, () => {
+      const p = startRing()
+        .then((result) => {
+          const recorded = record(result, ringKind);
+          if (ringOk(recorded, flag)) return recorded;
+          return fallbackFn();
+        })
+        .catch((error) => {
+          record({
+            ok: false,
+            backend: 'cpu',
+            fallback: 'error',
+            error: String(error?.message ?? error),
+          }, ringKind);
+          return fallbackFn();
+        })
+        .finally(() => { pending.delete(p); });
+      pending.add(p);
+      return p;
+    });
+  }
+
+  /**
+   * Hot-path: prefer ring push when serve/preferRing; fall back to seq probe.
+   * Non-blocking; CPU twin OK when CUDA/serve unavailable.
+   */
+  function onEnqueue(payload) {
+    if (!hotPath) return null;
+    if (!preferRing) return assistSeq(hotShared);
+    return ringOrFallback(
+      'ringPush',
+      () => verifyRingPush(payload ?? SM11_PROBE_PAYLOAD, {
+        ...ringShared,
+        state: cpuRing,
+      }),
+      'ring_push_ok',
+      () => assistSeq(hotShared),
+    );
+  }
+
+  /** Hot-path: prefer ring scrub on drop/clear; fall back to scrub probe. */
   function onDropOrClear() {
     if (!hotPath) return null;
-    return assistScrub(hotShared);
+    if (!preferRing) return assistScrub(hotShared);
+    return ringOrFallback(
+      'ringScrub',
+      () => verifyRingScrub({
+        ...ringShared,
+        state: cpuRing,
+      }),
+      'ring_scrub_ok',
+      () => assistScrub(hotShared),
+    );
   }
 
-  /** Hot-path: batch hash assist when draining one or more envelopes. */
+  /** Hot-path: prefer ring hash on drain; fall back to batch probe. */
   function onDrain(count) {
     if (!hotPath) return null;
     const n = Number(count);
     if (!Number.isFinite(n) || n < 1) return null;
-    return assistBatch({
+    const batchOpts = {
       ...hotShared,
       batch: clampBatch(n, hotShared.batch),
-    });
+    };
+    if (!preferRing) return assistBatch(batchOpts);
+    return ringOrFallback(
+      'ringHash',
+      () => verifyRingHash({
+        ...ringShared,
+        state: cpuRing,
+      }),
+      'ring_hash_ok',
+      () => assistBatch(batchOpts),
+    );
   }
 
   async function flush() {
@@ -1231,6 +1294,7 @@ export function createSm11Assist(options = {}) {
     exePath,
     preferGpu,
     hotPath,
+    preferRing,
     serve: Boolean(session),
     exePresent: () => exists(exePath),
     observeFat,

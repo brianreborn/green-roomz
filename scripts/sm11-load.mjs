@@ -104,16 +104,16 @@ const report = {
   ipc: is,
 };
 
-const need = {
+const needBase = {
   fat: WAVES * Math.floor(PER_WAVE / 2),
   verify: WAVES,
-  seq: WAVES,
-  scrub: 1,
-  batch: WAVES,
 };
+// Ring preferred when serve is up; probe path remains valid fallback/--cpu.
+const needRing = { ringPush: WAVES, ringScrub: 1, ringHash: WAVES };
+const needProbe = { seq: WAVES, scrub: 1, batch: WAVES };
 
 for (const [side, s] of [['mailbox', bs], ['ipc', is]]) {
-  for (const [k, min] of Object.entries(need)) {
+  for (const [k, min] of Object.entries(needBase)) {
     if (!s || (s[k] ?? 0) < min) {
       console.error(JSON.stringify({
         ok: false,
@@ -124,6 +124,26 @@ for (const [side, s] of [['mailbox', bs], ['ipc', is]]) {
       }, null, 2));
       process.exit(1);
     }
+  }
+  const ringOk = Object.entries(needRing).every(([k, min]) => (s?.[k] ?? 0) >= min);
+  const probeOk = Object.entries(needProbe).every(([k, min]) => (s?.[k] ?? 0) >= min);
+  if (!ringOk && !probeOk) {
+    console.error(JSON.stringify({
+      ok: false,
+      where: `${side}.hot_path`,
+      need_ring: needRing,
+      need_probe: needProbe,
+      got: {
+        ringPush: s?.ringPush ?? 0,
+        ringScrub: s?.ringScrub ?? 0,
+        ringHash: s?.ringHash ?? 0,
+        seq: s?.seq ?? 0,
+        scrub: s?.scrub ?? 0,
+        batch: s?.batch ?? 0,
+      },
+      report,
+    }, null, 2));
+    process.exit(1);
   }
   if ((s.coalesced ?? 0) < 1) {
     console.error(JSON.stringify({ ok: false, where: `${side}.coalesced`, report }, null, 2));

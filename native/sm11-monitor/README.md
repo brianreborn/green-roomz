@@ -94,8 +94,8 @@ Occasional multi-second outliers on scrub/seq are driver/context hiccups under c
 `src/monitor/sm11-gpu.mjs` spawns this exe with `--json` probes and falls back to CPU FNV-1a when the exe is missing or CUDA fails.
 
 - Default assist opens a persistent `--serve` session when the exe is present (`serve: false` to force one-shot).
-- `MonitorIpc` / `Mailbox` auto-wire assists (`GRZ_SM11=0` disables; `GRZ_SM11=1` enables fat verify + hot-path scrub/seq/batch).
-- Hot path (when enabled): enqueue → `assistSeq`, ring drop/clear → `assistScrub`, drain → `assistBatch` (coalesced, non-blocking).
+- `MonitorIpc` / `Mailbox` auto-wire assists (`GRZ_SM11=0` disables; `GRZ_SM11=1` enables fat verify + hot path).
+- Hot path (when enabled): with `--serve` up prefer enqueue → `assistRingPush`, drop/clear → `assistRingScrub`, drain → `assistRingHash`; on ring failure fall back to `assistSeq` / `assistScrub` / `assistBatch` (coalesced, non-blocking; CPU twin OK).
 - Private-slot ring assists: `assistRingPush` / `assistRingHash` / `assistRingScrub` (CPU twin when exe/CUDA unavailable).
 - Fat string payloads still store **sha256**; FNV-1a is the sm11 integrity twin / GPU probe.
 

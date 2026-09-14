@@ -23,8 +23,9 @@ import { resolveSm11Option, digestFatPayload } from './monitor/sm11-gpu.mjs';
  * Live hops keep numeric seq + string ticket. Monitor IPC may pass {hi,lo}.
  * Optional sm11 assist (GRZ_SM11=1 or { sm11: true }) verifies fat payloads via
  * CUDA FNV-1a/copy on the 8600 with CPU fallback — never blocks push().
- * Hot path (non-blocking, coalesced): push→assistSeq, drop→assistScrub,
- * drain→assistBatch (+ scrub clear).
+ * Hot path (non-blocking, coalesced): when --serve is up prefer
+ * push→assistRingPush, drop→assistRingScrub, drain→assistRingHash;
+ * otherwise / on ring failure: assistSeq / assistScrub / assistBatch.
  */
 
 function nextPow2(n) {

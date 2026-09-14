@@ -494,6 +494,157 @@ test('Mailbox hot path wires scrub/seq/batch without blocking push', async () =>
   assert.ok(s.batch >= 1);
 });
 
+test('Mailbox/MonitorIpc preferRing hot path uses ring push/hash/scrub (CPU mock)', async () => {
+  const box = new Mailbox({
+    capacity: 4,
+    autoDrain: false,
+    sm11: {
+      verifyOnFat: false,
+      hotPath: true,
+      preferGpu: false,
+      preferRing: true,
+      ringSlots: 16,
+      hotEnvBytes: 32,
+    },
+  });
+  const ipc = new MonitorIpc({
+    autoDrain: false,
+    sm11: {
+      verifyOnFat: false,
+      hotPath: true,
+      preferGpu: false,
+      preferRing: true,
+      ringSlots: 16,
+      hotEnvBytes: 32,
+    },
+  });
+  assert.equal(box.sm11.preferRing, true);
+  assert.equal(ipc.sm11.preferRing, true);
+
+  const t0 = performance.now();
+  for (let i = 0; i < 6; i += 1) {
+    box.push({ kind: 'success', source: 'ring', ticket: `b${i}`, payload: { i } });
+  }
+  // Fill MonitorIpc hot ring to force a drop → ringScrub.
+  for (let i = 0; i < HOT_RING_SLOTS + 1; i += 1) {
+    ipc.push({ kind: 'hop', source: 'ring', ticket: `i${i}`, payload: { i } });
+  }
+  assert.ok(performance.now() - t0 < 50);
+  assert.ok(box.stats().dropped >= 1);
+  assert.ok(ipc.stats().hot.dropped >= 1);
+  box.drain();
+  ipc.drain();
+  await box.sm11.flush();
+  await ipc.sm11.flush();
+
+  const bs = box.stats().sm11;
+  const is = ipc.stats().sm11;
+  assert.ok(bs.ringPush >= 1, `box ringPush=${bs.ringPush}`);
+  assert.ok(bs.ringScrub >= 1, `box ringScrub=${bs.ringScrub}`);
+  assert.ok(bs.ringHash >= 1, `box ringHash=${bs.ringHash}`);
+  assert.ok(is.ringPush >= 1, `ipc ringPush=${is.ringPush}`);
+  assert.ok(is.ringScrub >= 1, `ipc ringScrub=${is.ringScrub}`);
+  assert.ok(is.ringHash >= 1, `ipc ringHash=${is.ringHash}`);
+  // Probe path stayed idle when ring succeeded.
+  assert.equal(bs.seq, 0);
+  assert.equal(bs.scrub, 0);
+  assert.equal(bs.batch, 0);
+  assert.equal(is.seq, 0);
+  assert.equal(is.scrub, 0);
+  assert.equal(is.batch, 0);
+});
+
+test('preferRing hot path falls back to seq/scrub/batch when ring throws', async () => {
+  const runExe = async (_exe, args) => {
+    if (args.includes('--ring-push') || args.includes('--ring-hash') || args.includes('--ring-scrub')) {
+      throw new Error('ring_boom');
+    }
+    if (args.includes('--seq')) {
+      return {
+        code: 0,
+        stdout: '{"ok":true,"seq_ok":true,"device":"mock","sm":"11","batch":4,"seq_start":{"hi":0,"lo":1},"seq_end":{"hi":0,"lo":2}}\n',
+        stderr: '',
+      };
+    }
+    if (args.includes('--scrub')) {
+      return {
+        code: 0,
+        stdout: '{"ok":true,"scrub_ok":true,"device":"mock","sm":"11","batch":4,"env_bytes":16}\n',
+        stderr: '',
+      };
+    }
+    if (args.includes('--hash') && args.includes('--batch')) {
+      return {
+        code: 0,
+        stdout: `{"ok":true,"batch_ok":true,"hash_ok":true,"hash":"${KNOWN_HASH}","expect":"${KNOWN_HASH}","device":"mock","sm":"11"}\n`,
+        stderr: '',
+      };
+    }
+    return { code: 1, stdout: '{"ok":false}\n', stderr: 'unexpected' };
+  };
+  const box = new Mailbox({
+    capacity: 2,
+    autoDrain: false,
+    sm11: {
+      verifyOnFat: false,
+      hotPath: true,
+      preferGpu: true,
+      preferRing: true,
+      exists: () => true,
+      exePath: EXE,
+      runExe,
+      hotBatch: 4,
+      hotEnvBytes: 16,
+      ringSlots: 16,
+    },
+  });
+  assert.equal(box.sm11.preferRing, true);
+  box.push({ kind: 'success', source: 'a', payload: { i: 0 } });
+  box.push({ kind: 'success', source: 'a', payload: { i: 1 } });
+  box.push({ kind: 'success', source: 'a', payload: { i: 2 } }); // drop → ringScrub fail → scrub
+  box.drain();
+  await box.sm11.flush();
+  const s = box.stats().sm11;
+  assert.ok(s.ringPush >= 1, `ringPush=${s.ringPush}`);
+  assert.ok(s.seq >= 1, `seq fallback=${s.seq}`);
+  assert.ok(s.scrub >= 1, `scrub fallback=${s.scrub}`);
+  assert.ok(s.batch >= 1, `batch fallback=${s.batch}`);
+});
+
+test('live Mailbox ring hot-path under --serve when exe present', {
+  skip: HAS_EXE ? false : 'native/sm11-monitor/out/sm11_monitor.exe missing',
+  timeout: 90_000,
+}, async () => {
+  const box = new Mailbox({
+    capacity: 4,
+    autoDrain: false,
+    sm11: {
+      verifyOnFat: false,
+      hotPath: true,
+      preferGpu: true,
+      serve: true,
+      exePath: EXE,
+      ringSlots: 16,
+      hotEnvBytes: 64,
+    },
+  });
+  assert.equal(box.sm11.serve, true);
+  assert.equal(box.sm11.preferRing, true);
+  const t0 = performance.now();
+  const pub = box.push({ kind: 'success', source: 'live-ring', ticket: 'lr1', payload: { n: 1 } });
+  assert.equal(pub.ok, true);
+  assert.ok(performance.now() - t0 < 20);
+  box.drain();
+  await box.sm11.flush();
+  const s = box.stats().sm11;
+  assert.ok(s.ringPush >= 1, `ringPush=${s.ringPush} last=${JSON.stringify(s.last)}`);
+  assert.ok(s.ringHash >= 1, `ringHash=${s.ringHash}`);
+  if (s.last?.backend === 'cuda') {
+    assert.equal(s.last.ring_push_ok ?? s.last.ring_ok, true);
+  }
+  await box.sm11.close();
+});
+
 test('load hammer: Mailbox + MonitorIpc fat/thin pushes stay non-blocking; counters rise', async () => {
   const PUSH_BUDGET_MS = 10;
   const WAVES = 3;

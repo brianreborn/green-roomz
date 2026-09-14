@@ -266,7 +266,7 @@ export class MonitorIpc {
     this.mappedPinnedHostRing = false;
     this.sharedMapping = null;
     // Auto: CPU always; CUDA when exe present. GRZ_SM11=0 disables.
-    // Hot path: onEnqueue→assistSeq, drop/clear→assistScrub, drain→assistBatch.
+    // Hot path: prefer ring push/hash/scrub when --serve is up; else seq/scrub/batch.
     this.sm11 = resolveSm11Option(sm11 === undefined ? 'auto' : sm11, { mode: 'auto' });
   }
 
