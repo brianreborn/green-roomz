@@ -109,11 +109,8 @@ else
 fi
 # GOS-P7 slim torrent: prefer SLIM_TORRENT env, else newest green-roomz-beta-*-slim.torrent
 REVIEWS_DIR="${REVIEWS_DIR:-/workspace/reviews}"
-if [[ -n "${SLIM_TORRENT:-}" ]]; then
-  :
-elif [[ -f "$REVIEWS_DIR/green-roomz-beta-0.5.4-slim.torrent" ]]; then
-  SLIM_TORRENT="$REVIEWS_DIR/green-roomz-beta-0.5.4-slim.torrent"
-else
+if [[ -z "${SLIM_TORRENT:-}" ]]; then
+  # newest beta slim torrent (mtime); override with SLIM_TORRENT= for a pin
   SLIM_TORRENT=$(ls -1t "$REVIEWS_DIR"/green-roomz-beta-*-slim.torrent 2>/dev/null | head -1 || true)
 fi
 if [[ -n "${SLIM_TORRENT:-}" && -f "$SLIM_TORRENT" ]]; then
