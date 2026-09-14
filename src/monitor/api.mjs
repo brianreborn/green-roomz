@@ -27,6 +27,17 @@ export {
 } from './ids.mjs';
 
 export {
+  defaultExePath as sm11ExePath,
+  fnv1a64,
+  fnv1a64Hex,
+  digestFatPayload,
+  cpuVerify as sm11CpuVerify,
+  verifyPayload as sm11VerifyPayload,
+  probeSm11,
+  createSm11Assist,
+} from './sm11-gpu.mjs';
+
+export {
   ALLOWLISTED_OPS,
   ROLES,
   CALL_TABLE,

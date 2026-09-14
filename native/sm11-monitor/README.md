@@ -49,6 +49,19 @@ Expect text like `copy_ok=1 hash_ok=1` and `device0=GeForce 8600 GT sm_11`, plus
 
 **Live proof (qodesh):** `copy_ok=1 hash_ok=1` on the 8600 GT with CUDA 6.5 / sm_11.
 
+## Node wiring
+
+`src/monitor/sm11-gpu.mjs` spawns this exe with `--json --copy --hash` and falls back to CPU FNV-1a when the exe is missing or CUDA fails.
+
+- `MonitorIpc` auto-wires the assist (set `GRZ_SM11=0` to disable; `GRZ_SM11=1` also verifies fat payloads on push via CUDA).
+- `Mailbox` opts in with `{ sm11: true }` or `GRZ_SM11=1`.
+- Fat string payloads still store **sha256**; FNV-1a is the sm11 integrity twin / GPU probe.
+
+```bat
+set GRZ_SM11=1
+node --test test/monitor-sm11-gpu.test.mjs
+```
+
 ## Ship bar
 
-Landing this class of kernels (and wiring monitor ops through them next) is enough to call the 8600 **useful**. See `docs/fleet-targets.md` and GitHub issue #13.
+Landing this class of kernels and wiring monitor/mailbox hash+copy through them is enough to call the 8600 **useful**. See `docs/fleet-targets.md` and GitHub issue #13.

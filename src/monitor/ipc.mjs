@@ -10,7 +10,6 @@
  * Missing capability bit => reject envelope, never silent no-op.
  */
 
-import { createHash } from 'node:crypto';
 import {
   HOT_RING_SLOTS,
   UPCALL_SLOTS,
@@ -32,6 +31,7 @@ import {
   vote as apiVote,
   secureReboot as apiSecureReboot,
 } from './api.mjs';
+import { resolveSm11Option, digestFatPayload } from './sm11-gpu.mjs';
 
 export {
   HOT_RING_SLOTS,
@@ -143,17 +143,18 @@ function cloneId(id) {
   return id;
 }
 
-function clonePayload(payload) {
+function clonePayload(payload, sm11) {
   if (payload == null) return {};
   if (typeof payload === 'string') {
     if (payload.length <= 256) return payload;
-    return createHash('sha256').update(payload).digest('hex');
+    if (sm11) return sm11.observeFat(payload).stored;
+    return digestFatPayload(payload).stored;
   }
   if (typeof payload === 'object' && !Array.isArray(payload)) return { ...payload };
   return payload;
 }
 
-export function cloneEnvelope(env) {
+export function cloneEnvelope(env, sm11) {
   if (!env || typeof env !== 'object') return env;
   const out = {
     seq: cloneId(env.seq),
@@ -161,7 +162,7 @@ export function cloneEnvelope(env) {
     source: env.source,
     ticket: cloneId(env.ticket),
     ts: env.ts,
-    payload: clonePayload(env.payload),
+    payload: clonePayload(env.payload, sm11),
     target: env.target,
   };
   for (const extra of ['allowlisted', 'from', 'to', 'reason', 'voted']) {
@@ -244,6 +245,7 @@ export class MonitorIpc {
     role = 'ipc',
     seq = null,
     recentLimit = 64,
+    sm11,
   } = {}) {
     this.hot = new CopyRing(HOT_RING_SLOTS);
     this.upcalls = new CopyRing(UPCALL_SLOTS);
@@ -260,6 +262,8 @@ export class MonitorIpc {
     this.copyOnly = true;
     this.mappedPinnedHostRing = false;
     this.sharedMapping = null;
+    // Auto: CPU always; CUDA when exe present. GRZ_SM11=0 disables.
+    this.sm11 = resolveSm11Option(sm11 === undefined ? 'auto' : sm11, { mode: 'auto' });
   }
 
   onEvent(fn) {
@@ -288,6 +292,7 @@ export class MonitorIpc {
         pushed: this.upcalls.pushed,
         dropped: this.upcalls.dropped,
       },
+      sm11: this.sm11 ? this.sm11.stats() : null,
     };
   }
 
@@ -414,7 +419,7 @@ export class MonitorIpc {
         ...partial,
         kind,
         ticket: isU64Like(ticket) ? ticket : 0,
-        payload: clonePayload(partial.payload),
+        payload: clonePayload(partial.payload, this.sm11),
       });
       envelope.ticket = ticket;
     }
