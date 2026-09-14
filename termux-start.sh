@@ -2,6 +2,11 @@
 # Termux-side start. adb drop zone is /data/local/tmp/grz (shell can write; Termux cannot exec there).
 # Copy runtime into $HOME then serve. No root. Do not su. Do not trip Knox.
 set -uo pipefail
+# PF-M8: empty/unset HOME must not collapse paths to /grz-runtime
+if [[ -z "${HOME:-}" ]]; then
+  echo "ERROR: HOME is empty/unset; refusing /grz-runtime collapse (PF-M8 fail-closed)" >&2
+  exit 1
+fi
 SD=/sdcard/Download/grz
 SRC=/data/local/tmp/grz
 LOG=$HOME/grz-setup.log

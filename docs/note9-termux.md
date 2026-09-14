@@ -82,3 +82,14 @@ Push scripts with `adb push` to `/data/local/tmp/grz/` (`chmod 644`) and run **`
 - Specialist GGUFs on phone (code/text/embed) — RAM-tight.
 - qodesh still ping-timeout at last check (`192.168.1.40`).
 - Do not Magisk/root unless a later task truly cannot copy into `$HOME`.
+
+
+## GrapheneOS labeling (G1 / G3 / GOS-P3)
+
+See `/workspace/reviews/grapheneos-platform-matrix.md` and `docs/grapheneos.md`.
+
+- **G1** = isolation harness only — **no** Termux-in-Private-Space.
+- **G3** = Owner Termux only; **android-arm64** pack (this Note9 path).
+- **GOS-P3** staging: when pushing artifacts for a profile that cannot see owner `/data/local/tmp`, use `/sdcard/Download/grz` (or another per-user accessible path) — **not** for running Termux in Private Space.
+- **PF-M8:** empty/unset `$HOME` fail-closed (refuse `/grz-runtime` collapse).
+- **GOS-P7:** host deploy pushes `green-roomz-models.lock.json` into the adb drop for post-copy verify.

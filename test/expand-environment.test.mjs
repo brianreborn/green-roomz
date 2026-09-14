@@ -116,3 +116,32 @@ test('note9 after expand has no /data/local/tmp for command or resident model', 
   assert.ok(cmd.includes('grz-runtime'));
   assert.deepEqual(nexus.languages, ['en']);
 });
+
+test('PF-M8 empty HOME must not collapse note9 command to /grz-runtime (fail closed)', async () => {
+  await assert.rejects(
+    () => loadManifest(new URL('../config/agents.note9.json', import.meta.url), {
+      HOME: '',
+      GRZ_ROOT: '/tmp/grz-root',
+      GRZ_EXE: '',
+      GRZ_LLAMA: '/tmp/grz-root/runtime/llama-server',
+    }),
+    (err) => {
+      assert.equal(err.name, 'ValidationError');
+      const msg = `${err.message} ${(err.details || []).join('; ')}`;
+      assert.match(msg, /empty\/unset HOME|fail closed/i);
+      assert.match(msg, /\/grz-runtime/);
+      return true;
+    },
+  );
+});
+
+test('PF-M8 unset HOME key inherits process.env; explicit empty still fail-closed', async () => {
+  const out = expandEnvironment('${HOME}/grz-runtime/run-llama-server.sh', { HOME: '' });
+  assert.equal(out, '/grz-runtime/run-llama-server.sh');
+  // withDefaultGrzEnv copies process HOME only when key absent — note9 with real HOME still loads
+  if (process.env.HOME) {
+    const env = withDefaultGrzEnv({ GRZ_ROOT: '/tmp/grz-root' });
+    assert.equal(env.HOME, process.env.HOME);
+    assert.notEqual(env.HOME, '');
+  }
+});

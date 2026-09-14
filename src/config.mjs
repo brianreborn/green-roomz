@@ -102,8 +102,17 @@ export function withDefaultGrzEnv(env = process.env, root = packageRoot()) {
   if (!out.GRZ_LLAMA) {
     out.GRZ_LLAMA = path.join(out.GRZ_ROOT, 'runtime', `llama-server${out.GRZ_EXE || ''}`);
   }
-  if (!out.HOME && process.env.HOME) out.HOME = process.env.HOME;
+  // PF-M8: only inherit process HOME when key absent; empty string stays empty (fail closed on expand).
+  if (!Object.hasOwn(out, 'HOME') && process.env.HOME) out.HOME = process.env.HOME;
   return out;
+}
+
+/** True when empty/unset HOME expanded ${HOME}/grz-runtime → /grz-runtime (PF-M8). */
+function isCollapsedHomeGrzPath(value) {
+  const s = String(value ?? '');
+  if (s === '/grz-runtime' || s.startsWith('/grz-runtime/') || s.startsWith('/grz-runtime:')) return true;
+  // LD_LIBRARY_PATH-style: ...:/grz-runtime/... or leading /grz-runtime
+  return /(^|:)\/grz-runtime(\/|:|$)/.test(s);
 }
 
 function assertRuntimeCommands(manifest) {
@@ -120,6 +129,25 @@ function assertRuntimeCommands(manifest) {
     // Collapsed empty GRZ_ROOT historically produced "/runtime/llama-server"
     if (String(cmd) === '/runtime/llama-server' || String(cmd).startsWith('/runtime/llama-server')) {
       issues.push(`runtime ${name}: command collapsed to ${cmd} (unset GRZ_ROOT); fail closed`);
+    }
+    // PF-M8: empty/unset HOME → "${HOME}/grz-runtime/…" becomes "/grz-runtime/…"
+    if (isCollapsedHomeGrzPath(cmd)) {
+      issues.push(`runtime ${name}: command collapsed to ${cmd} (empty/unset HOME); fail closed`);
+    }
+    if (runtime.env && typeof runtime.env === 'object') {
+      for (const [k, v] of Object.entries(runtime.env)) {
+        if (typeof v === 'string' && isCollapsedHomeGrzPath(v)) {
+          issues.push(`runtime ${name}: env ${k} collapsed to ${v} (empty/unset HOME); fail closed`);
+        }
+      }
+    }
+  }
+  for (const agent of manifest.agents ?? []) {
+    for (const field of ['model', 'draft_model', 'projector', 'system_policy']) {
+      const v = agent?.[field];
+      if (typeof v === 'string' && isCollapsedHomeGrzPath(v)) {
+        issues.push(`agent ${agent.alias ?? '<unknown>'}.${field} collapsed to ${v} (empty/unset HOME); fail closed`);
+      }
     }
   }
   if (issues.length) throw new ValidationError('Invalid Green-Roomz manifest runtime commands', issues);

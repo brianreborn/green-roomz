@@ -2,6 +2,11 @@
 # Green-Roomz Note9 Termux setup — no root
 # Runtime is copied into $HOME because SELinux blocks executing /data/local/tmp.
 set -uo pipefail
+# PF-M8: empty/unset HOME must not collapse paths to /grz-runtime
+if [[ -z "${HOME:-}" ]]; then
+  echo "ERROR: HOME is empty/unset; refusing /grz-runtime collapse (PF-M8 fail-closed)" >&2
+  exit 1
+fi
 SD=/sdcard/Download/grz
 SRC_TMP=/data/local/tmp/grz
 LOG=$HOME/grz-setup.log

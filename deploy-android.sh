@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # One-shot ADB drop of Android arm64 runtime + all pack models + Termux start snippet.
 # No root. No su. No Knox/Magisk. Target /data/local/tmp/grz only.
-# Keep android-arm64 tar for Termux (G1/G3). Linux aarch64 llama for G2 AVF Terminal is MISSING
+# Keep android-arm64 tar for G3 Owner Termux only (G1 = isolation harness, not Termux-in-Private-Space).
+# Linux aarch64 llama for G2 AVF Terminal is MISSING
 # (do not reuse this android tar inside the VM; no fake binary).
 # Android pack excludes agents.windows.json / LocalAI paths (PF-M3 / pack recipe).
 set -euo pipefail
@@ -89,6 +90,35 @@ if [[ -f "$GRZ_ROOT/scripts/note9-termux-setup.sh" ]]; then
   adb push "$GRZ_ROOT/scripts/note9-termux-setup.sh" "$DEST/setup.sh"
 fi
 adb push "$GRZ_ROOT/docs" "$DEST/green-roomz/docs" 2>/dev/null || true
+
+# GOS-P7: push models lockfile (+ optional slim torrent note) beside models for Termux verify
+REVIEWS_DIR="${GRZ_REVIEWS:-}"
+if [[ -z "$REVIEWS_DIR" ]]; then
+  for cand in "$GRZ_ROOT/../reviews" "/workspace/reviews"; do
+    if [[ -f "$cand/green-roomz-models.lock.json" ]]; then
+      REVIEWS_DIR="$(cd "$cand" && pwd)"
+      break
+    fi
+  done
+fi
+if [[ -n "${REVIEWS_DIR:-}" && -f "$REVIEWS_DIR/green-roomz-models.lock.json" ]]; then
+  echo "GOS-P7: pushing green-roomz-models.lock.json → $DEST/"
+  adb push "$REVIEWS_DIR/green-roomz-models.lock.json" "$DEST/green-roomz-models.lock.json"
+else
+  echo "WARN: GOS-P7 lockfile not found (set GRZ_REVIEWS or place reviews/green-roomz-models.lock.json)"
+fi
+SLIM_TORRENT="${REVIEWS_DIR:-/workspace/reviews}/green-roomz-beta-0.5.2-slim.torrent"
+if [[ -f "$SLIM_TORRENT" ]]; then
+  echo "GOS-P7: pushing slim .torrent + note (infohash 74f859266f933588fdd32dffd9272f41f9ad6c7c)"
+  adb push "$SLIM_TORRENT" "$DEST/green-roomz-beta-0.5.2-slim.torrent"
+  note="$stage/slim-torrent-note.txt"
+  printf '%s\n' \
+    "green-roomz-beta-0.5.2-slim.torrent" \
+    "infohash 74f859266f933588fdd32dffd9272f41f9ad6c7c" \
+    "magnet:?xt=urn:btih:74f859266f933588fdd32dffd9272f41f9ad6c7c&dn=green-roomz-beta-0.5.2-slim.zip" \
+    >"$note"
+  adb push "$note" "$DEST/slim-torrent-note.txt"
+fi
 # 644 so Termux bash can *read* the snippet; SELinux blocks execute-from-tmp
 adb shell "chmod 644 $DEST/termux-start.sh $DEST/setup.sh $DEST/green-roomz/package.json" >/dev/null || true
 
