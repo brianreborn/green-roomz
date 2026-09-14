@@ -1,5 +1,11 @@
 # Note 9 Termux onboarding (2026-08-29, shalom USB)
 
+## Ops policy (USB / qodesh)
+
+- Plug USB into **qodesh** with phone **Wi-Fi OFF** (local-only). Prefer USB ADB over wireless.
+- After `adb devices` shows the Note9, optional: `adb shell svc wifi disable` (leave airplane/Wi-Fi off).
+- No Knox trip, no root wipe / secure_reboot.
+
 No root. Do not `adb push` into Termux private dirs. Do not `su`.
 
 ## Hardware
