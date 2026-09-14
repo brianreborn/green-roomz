@@ -155,12 +155,16 @@ test('kinds include monitor set plus gateway hop-class kinds', () => {
 });
 
 test('vote/lockdown/reboot/secure_reboot remain uncallable stubs', () => {
+  // Gateway/mailbox contract: stubs return reject envelopes (never throw, never execute).
   const ipc = new MonitorIpc({ autoDrain: false, rightsMask: CAP_DEFAULT | CAP.VOTE | CAP.LOCKDOWN | CAP.REBOOT | CAP.SECURE_REBOOT });
-  assert.throws(() => ipc.vote(), /complex-last/);
-  assert.throws(() => ipc.lockdown(), /complex-last/);
-  assert.throws(() => ipc.reboot(), /complex-last/);
-  assert.throws(() => ipc.secureReboot(), /complex-last/);
-  assert.throws(() => ipc.secure_reboot(), /complex-last/);
+  for (const name of ['vote', 'lockdown', 'reboot', 'secureReboot', 'secure_reboot']) {
+    const rejected = ipc[name]();
+    assert.equal(rejected.ok, false, name);
+    assert.equal(rejected.kind, 'reject', name);
+    assert.equal(rejected.voted, false, name);
+    assert.equal(rejected.executed, false, name);
+    assert.match(rejected.reason, /uncallable|complex-last/, name);
+  }
   const voted = ipc.push({ kind: 'vote', source: 'respond', ticket: u64(2, 2) });
   assert.equal(voted.ok, false);
   assert.equal(voted.reject.kind, 'reject');

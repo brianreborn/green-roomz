@@ -139,6 +139,17 @@ test('envelope kinds, upcall allowlist, and slot counts', () => {
   assert.equal(UPCALL_SLOTS, 16);
   assert.equal(HOT_RING_SLOTS, 256);
   assert.equal(SLOT_BYTES, 16);
-  assert.throws(() => vote(), /complex-last/);
-  assert.throws(() => secureReboot(), /complex-last/);
+  // API stubs return reject envelopes (never throw, never execute).
+  const voted = vote();
+  assert.equal(voted.ok, false);
+  assert.equal(voted.kind, 'reject');
+  assert.equal(voted.voted, false);
+  assert.equal(voted.executed, false);
+  assert.match(voted.reason, /uncallable|complex-last/);
+  const rebooted = secureReboot();
+  assert.equal(rebooted.ok, false);
+  assert.equal(rebooted.kind, 'reject');
+  assert.equal(rebooted.voted, false);
+  assert.equal(rebooted.executed, false);
+  assert.match(rebooted.reason, /uncallable|complex-last/);
 });
