@@ -93,11 +93,26 @@ Occasional multi-second outliers on scrub/seq are driver/context hiccups under c
 
 `src/monitor/sm11-gpu.mjs` spawns this exe with `--json` probes and falls back to CPU FNV-1a when the exe is missing or CUDA fails.
 
-- Default assist opens a persistent `--serve` session when the exe is present (`serve: false` to force one-shot).
-- `MonitorIpc` / `Mailbox` auto-wire assists (`GRZ_SM11=0` disables; `GRZ_SM11=1` enables fat verify + hot path).
-- Hot path (when enabled): with `--serve` up prefer enqueue → `assistRingPush`, drop/clear → `assistRingScrub`, drain → `assistRingHash`; on ring failure fall back to `assistSeq` / `assistScrub` / `assistBatch` (coalesced, non-blocking; CPU twin OK).
-- Private-slot ring assists: `assistRingPush` / `assistRingHash` / `assistRingScrub` (CPU twin when exe/CUDA unavailable).
+### When is Mailbox / MonitorIpc sm11 enabled?
+
+| Surface | Default | Enable | Disable |
+| --- | --- | --- | --- |
+| **Mailbox** | off | `GRZ_SM11=1` **or** `{ sm11: true }` / `{ sm11: {…} }` | `GRZ_SM11=0` or `{ sm11: false }` |
+| **MonitorIpc** | assist object auto-wired (quiet) | `GRZ_SM11=1` turns on fat verify + hot path; or pass `{ sm11: {…} }` | `GRZ_SM11=0` or `{ sm11: false }` |
+| **Logger** | same as Mailbox (explicit) | `GRZ_SM11=1` / `{ sm11: true }` | `GRZ_SM11=0` / `{ sm11: false }` |
+
+### When is `preferRing` on?
+
+- **Default on** whenever assist opens a persistent `--serve` session (exe present, `preferGpu` not false, `serve` not false). That is the normal `GRZ_SM11=1` / `{ sm11: true }` path when `out/sm11_monitor.exe` exists.
+- Explicit `{ preferRing: true|false }` always wins.
+- Without a serve session (no exe / `serve: false` / `preferGpu: false`), `preferRing` stays off and the hot path uses seq/scrub/batch probes only (CPU twin OK).
+
+### Hot path (when enabled via `verifyOnFat` / `hotPath`)
+
+- With `preferRing` / `--serve`: enqueue → `assistRingPush`, drop/clear → `assistRingScrub`, drain → `assistRingHash`.
+- On ring failure → fall back to `assistSeq` / `assistScrub` / `assistBatch` (coalesced, non-blocking; CPU twin OK).
 - Fat string payloads still store **sha256**; FNV-1a is the sm11 integrity twin / GPU probe.
+- Private-slot ring assists also available directly: `assistRingPush` / `assistRingHash` / `assistRingScrub`.
 
 ```bat
 set GRZ_SM11=1

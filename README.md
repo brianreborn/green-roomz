@@ -63,6 +63,18 @@ Artifacts for all ten aliases now live under `C:\LocalAI` (including `Qwen3-4B-e
 
 `tool-router-agent` is a resident CPU nexus (0.5B on :8187, `--device none --threads 2`) pre-warmed at serve start and kept loaded. Each chat turn POSTs the latest user message to that live kernel; specialists HANDOFF after a few tokens if the job is not theirs. Regex intent over the transcript is not the production router.
 
+## sm11 GPU assist (optional, qodesh 8600 GT)
+
+Optional CUDA 6.5 / sm_11 mailbox + monitor hot-path assists. Details: [native/sm11-monitor/README.md](native/sm11-monitor/README.md). CPU fallback always remains.
+
+| Knob | Effect |
+| --- | --- |
+| `GRZ_SM11=1` | **Mailbox:** enables sm11 (`verifyOnFat` + hot path). **MonitorIpc:** enables fat verify + hot path (assist is otherwise auto-wired but quiet). |
+| `GRZ_SM11=0` | Disables sm11 everywhere. |
+| `{ sm11: true }` / `{ sm11: {…} }` | Explicit enable (Mailbox / logger); object form can override `preferRing`, `serve`, etc. |
+
+**`preferRing` default:** when sm11 is on and `sm11_monitor.exe` is present, assist opens a persistent `--serve` session and **`preferRing` defaults on**. Hot path then prefers ring assists (enqueue → `assistRingPush`, drop/clear → `assistRingScrub`, drain → `assistRingHash`) and falls back to seq/scrub/batch (CPU twin OK) if ring fails. Override with `{ preferRing: false }` or `serve: false`. Without the exe, hot path uses the probe assists only (no serve session).
+
 ## McAfee on shalom
 
 McAfee Premium Real-Time Scanning false-positives operator PowerShell (serve bounce, elevated `netsh`). Do not disable it. Exclude `C:\LocalAI`, both Green-Roomz trees, and `C:\Program Files\nodejs`. Full click-path and the WLAN autoconfig fix: [docs/mcafee-shalom.md](docs/mcafee-shalom.md).
