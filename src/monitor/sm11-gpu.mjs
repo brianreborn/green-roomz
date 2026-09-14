@@ -1,7 +1,7 @@
 /**
  * sm_1.1 CUDA assist for mailbox/monitor hash + private-slot copy verify.
  * Spawns native/sm11-monitor/out/sm11_monitor.exe --json; CPU FNV-1a fallback.
- * Also exposes scrub / seq stamp / batch-hash probes (--scrub --seq --batch).
+ * Scrub / seq / batch probes; optional persistent --serve session (avoids ~100ms spawn).
  */
 
 import { existsSync } from 'node:fs';
@@ -241,13 +241,160 @@ export function defaultRunExe(exePath, args, { timeoutMs = 15_000 } = {}) {
   });
 }
 
-function buildCliArgs({ flags, batch, envBytes, payload }) {
+/**
+ * Persistent sm11_monitor --serve child. One JSON reply per stdin command line.
+ * Keeps CUDA context warm — in-process ops are ~2–15ms vs ~100ms cold spawn.
+ */
+export function createSm11ServeSession({
+  exePath = defaultExePath(),
+  spawnImpl = spawn,
+  timeoutMs = 15_000,
+} = {}) {
+  let child = null;
+  let buf = '';
+  let stderr = '';
+  let dead = false;
+  /** @type {{ resolve: Function, reject: Function, timer: NodeJS.Timeout }[]} */
+  const waiters = [];
+  let chain = Promise.resolve();
+
+  function rejectAll(err) {
+    while (waiters.length) {
+      const w = waiters.shift();
+      clearTimeout(w.timer);
+      w.reject(err);
+    }
+  }
+
+  function onChunk(chunk) {
+    buf += String(chunk);
+    let nl;
+    while ((nl = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, nl).replace(/\r$/, '').trim();
+      buf = buf.slice(nl + 1);
+      if (!line.startsWith('{')) continue;
+      let parsed;
+      try {
+        parsed = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      const w = waiters.shift();
+      if (!w) continue;
+      clearTimeout(w.timer);
+      const code = parsed.bye === true || parsed.ok === true ? 0 : (parsed.ok === false ? 1 : 0);
+      w.resolve({ code, stdout: `${line}\n`, stderr, parsed });
+    }
+  }
+
+  function attach(proc) {
+    child = proc;
+    dead = false;
+    buf = '';
+    stderr = '';
+    proc.stdout?.on('data', onChunk);
+    proc.stderr?.on('data', (d) => { stderr += d; });
+    proc.on('error', (error) => {
+      dead = true;
+      child = null;
+      rejectAll(error);
+    });
+    proc.on('close', () => {
+      dead = true;
+      child = null;
+      rejectAll(new Error('serve_closed'));
+    });
+  }
+
+  async function ensureStarted() {
+    if (child && !dead) return;
+    const proc = spawnImpl(exePath, ['--serve'], {
+      windowsHide: true,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    attach(proc);
+  }
+
+  function requestOnce(args, reqTimeoutMs) {
+    return new Promise((resolve, reject) => {
+      if (!child || dead) {
+        reject(new Error('serve_unavailable'));
+        return;
+      }
+      const line = Array.isArray(args)
+        ? args.map(String).join(' ')
+        : String(args);
+      const entry = { resolve, reject, timer: null };
+      entry.timer = setTimeout(() => {
+        const idx = waiters.indexOf(entry);
+        if (idx >= 0) waiters.splice(idx, 1);
+        reject(Object.assign(new Error('serve_timeout'), { code: 124 }));
+      }, reqTimeoutMs);
+      waiters.push(entry);
+      try {
+        child.stdin.write(`${line}\n`);
+      } catch (error) {
+        const idx = waiters.indexOf(entry);
+        if (idx >= 0) waiters.splice(idx, 1);
+        clearTimeout(entry.timer);
+        reject(error);
+      }
+    });
+  }
+
+  function request(args, { timeoutMs: reqTimeoutMs = timeoutMs } = {}) {
+    const job = chain.then(async () => {
+      await ensureStarted();
+      return requestOnce(args, reqTimeoutMs);
+    });
+    chain = job.then(() => {}, () => {});
+    return job;
+  }
+
+  async function close() {
+    if (!child) return;
+    try {
+      await requestOnce(['quit'], Math.min(timeoutMs, 5_000)).catch(() => {});
+    } catch {}
+    try { child.stdin?.end(); } catch {}
+    try { child.kill(); } catch {}
+    child = null;
+    dead = true;
+  }
+
+  return {
+    request,
+    close,
+    get alive() { return Boolean(child) && !dead; },
+  };
+}
+
+/** runExe-compatible wrapper over a serve session; falls back to oneShot on failure. */
+export function serveRunExeFactory(session, oneShot = defaultRunExe) {
+  return async function runViaServe(exePath, args, opts = {}) {
+    try {
+      const filtered = (args ?? []).filter((a) => a !== '--serve');
+      return await session.request(filtered, opts);
+    } catch (error) {
+      try { await session.close(); } catch {}
+      if (error?.code === 124 || String(error?.message ?? '').includes('timeout')) {
+        return { code: 124, stdout: '', stderr: String(error?.message ?? error) };
+      }
+      return oneShot(exePath, args, opts);
+    }
+  };
+}
+
+function buildCliArgs({ flags, batch, envBytes, payload, loops }) {
   const args = ['--json', ...flags];
   if (batch != null) {
     args.push('--batch', String(clampBatch(batch)));
   }
   if (envBytes != null) {
     args.push('--env-bytes', String(clampEnvBytes(envBytes)));
+  }
+  if (loops != null && Number(loops) > 1) {
+    args.push('--loops', String(Math.min(10_000, Math.max(1, Math.floor(Number(loops))))));
   }
   if (payload != null && payload !== '') {
     args.push(String(payload));
@@ -276,6 +423,7 @@ async function runAssistProbe({
   batch,
   envBytes,
   payload = SM11_PROBE_PAYLOAD,
+  loops,
   exePath,
   preferGpu = true,
   timeoutMs = 15_000,
@@ -290,7 +438,7 @@ async function runAssistProbe({
     return { ...cpuResult(), fallback: preferGpu ? 'exe_missing' : 'prefer_cpu' };
   }
 
-  const args = buildCliArgs({ flags, batch, envBytes, payload });
+  const args = buildCliArgs({ flags, batch, envBytes, payload, loops });
   const ran = await runExe(exePath, args, { timeoutMs });
   const parsed = parseJsonLine(ran.stdout);
   if (!parsed || ran.code === 127 || ran.code === 124) {
@@ -298,7 +446,16 @@ async function runAssistProbe({
   }
   const accepted = accept(parsed);
   if (accepted) {
-    return { ...cudaBase(parsed), ...accepted };
+    return {
+      ...cudaBase(parsed),
+      ...accepted,
+      ms: parsed.ms,
+      cmp_ok: parsed.cmp_ok,
+      loops: parsed.loops,
+      ms_min: parsed.ms_min,
+      ms_avg: parsed.ms_avg,
+      ms_max: parsed.ms_max,
+    };
   }
   return {
     ...cpuResult(),
@@ -321,6 +478,7 @@ export async function verifyPayload(payload, options = {}) {
     flags = ['--copy', '--hash'],
     batch,
     envBytes,
+    loops,
   } = options;
 
   const bytes = toBytes(payload);
@@ -339,7 +497,7 @@ export async function verifyPayload(payload, options = {}) {
     return { ...cpu(), fallback: 'non_cli_payload' };
   }
 
-  const args = buildCliArgs({ flags, batch, envBytes, payload: asText });
+  const args = buildCliArgs({ flags, batch, envBytes, payload: asText, loops });
   const ran = await runExe(exePath, args, { timeoutMs });
   const parsed = parseJsonLine(ran.stdout);
   if (!parsed || ran.code === 127 || ran.code === 124) {
@@ -353,6 +511,7 @@ export async function verifyPayload(payload, options = {}) {
       sm: parsed.sm ?? null,
       vram_mb: parsed.vram_mb ?? null,
       copy_ok: parsed.copy_ok === true,
+      cmp_ok: parsed.cmp_ok,
       hash_ok: parsed.hash_ok === true,
       hash: parsed.hash ?? null,
       expect: parsed.expect ?? fnv1a64Hex(bytes),
@@ -363,6 +522,11 @@ export async function verifyPayload(payload, options = {}) {
       seq_end: parsed.seq_end,
       batch: parsed.batch,
       env_bytes: parsed.env_bytes,
+      ms: parsed.ms,
+      loops: parsed.loops,
+      ms_min: parsed.ms_min,
+      ms_avg: parsed.ms_avg,
+      ms_max: parsed.ms_max,
       bytes: bytes.length,
       raw: parsed,
     };
@@ -501,11 +665,20 @@ export function createSm11Assist(options = {}) {
   const exists = opts.exists ?? existsSync;
   let preferGpu = opts.preferGpu !== false;
   if (opts.requireExe && !exists(exePath)) preferGpu = false;
-  const runExe = opts.runExe ?? defaultRunExe;
   const timeoutMs = opts.timeoutMs ?? 15_000;
   const verifyOnFat = opts.verifyOnFat !== false;
   // Follow verifyOnFat unless overridden: auto MonitorIpc stays quiet unless GRZ_SM11=1.
   const hotPath = opts.hotPath !== undefined ? opts.hotPath !== false : verifyOnFat;
+  const useServe = opts.serve !== false && opts.runExe == null && preferGpu && exists(exePath);
+  const session = useServe
+    ? (opts.session ?? createSm11ServeSession({
+      exePath,
+      spawnImpl: opts.spawnImpl ?? spawn,
+      timeoutMs,
+    }))
+    : null;
+  const runExe = opts.runExe
+    ?? (session ? serveRunExeFactory(session, defaultRunExe) : defaultRunExe);
   const shared = { exePath, preferGpu, timeoutMs, runExe, exists };
   const hotShared = {
     ...shared,
@@ -630,10 +803,18 @@ export function createSm11Assist(options = {}) {
     await Promise.allSettled([...pending]);
   }
 
+  async function close() {
+    await flush();
+    if (session) {
+      try { await session.close(); } catch {}
+    }
+  }
+
   return {
     exePath,
     preferGpu,
     hotPath,
+    serve: Boolean(session),
     exePresent: () => exists(exePath),
     observeFat,
     scheduleVerify,
@@ -648,7 +829,13 @@ export function createSm11Assist(options = {}) {
     verifySeq: (probeOpts) => verifySeq({ ...shared, ...probeOpts }).then((r) => record(r, 'seq')),
     verifyBatch: (probeOpts) => verifyBatch({ ...shared, ...probeOpts }).then((r) => record(r, 'batch')),
     flush,
-    stats: () => ({ ...stats, last: stats.last ? { ...stats.last } : null, pending: pending.size }),
+    close,
+    stats: () => ({
+      ...stats,
+      last: stats.last ? { ...stats.last } : null,
+      pending: pending.size,
+      serveAlive: session ? session.alive : false,
+    }),
   };
 }
 

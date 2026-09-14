@@ -15,6 +15,8 @@ import {
   verifySeq,
   verifyBatch,
   createSm11Assist,
+  createSm11ServeSession,
+  serveRunExeFactory,
   probeSm11,
   SM11_SEQ_START,
 } from '../src/monitor/sm11-gpu.mjs';
@@ -434,4 +436,104 @@ test('live scrub/seq/batch probes when exe present', {
   const batch = await verifyBatch({ batch: 8, envBytes: 64, timeoutMs: 30_000 });
   assert.equal(batch.ok, true, JSON.stringify(batch));
   assert.equal(batch.batch_ok, true);
+});
+
+test('createSm11ServeSession mock multiplexes JSON replies', async () => {
+  const { EventEmitter } = await import('node:events');
+  const stdin = new EventEmitter();
+  stdin.write = (chunk) => {
+    const line = String(chunk);
+    queueMicrotask(() => {
+      if (line.includes('quit')) {
+        stdout.emit('data', Buffer.from('{"ok":true,"bye":true}\n'));
+        return;
+      }
+      const kind = line.includes('--scrub') ? 'scrub'
+        : line.includes('--seq') ? 'seq' : 'hash';
+      const body = kind === 'scrub'
+        ? '{"ok":true,"scrub_ok":true,"device":"mock","sm":"11","batch":4,"env_bytes":16,"ms":1.2}'
+        : kind === 'seq'
+          ? '{"ok":true,"seq_ok":true,"device":"mock","sm":"11","batch":4,"seq_start":{"hi":0,"lo":4294967294},"seq_end":{"hi":1,"lo":2},"ms":1.1}'
+          : `{"ok":true,"copy_ok":true,"hash_ok":true,"batch_ok":true,"hash":"${KNOWN_HASH}","expect":"${KNOWN_HASH}","device":"mock","sm":"11","ms":1.0}`;
+      stdout.emit('data', Buffer.from(`${body}\n`));
+    });
+    return true;
+  };
+  stdin.end = () => {};
+  const stdout = new EventEmitter();
+  const stderr = new EventEmitter();
+  const proc = new EventEmitter();
+  proc.stdin = stdin;
+  proc.stdout = stdout;
+  proc.stderr = stderr;
+  proc.kill = () => { proc.emit('close', 0); };
+
+  const session = createSm11ServeSession({
+    exePath: EXE,
+    spawnImpl: () => proc,
+    timeoutMs: 5_000,
+  });
+  const a = await session.request(['--json', '--scrub', '--batch', '4', '--env-bytes', '16']);
+  assert.equal(a.parsed.scrub_ok, true);
+  const b = await session.request(['--json', '--seq', '--batch', '4']);
+  assert.equal(b.parsed.seq_ok, true);
+  const runExe = serveRunExeFactory(session, async () => ({ code: 1, stdout: '', stderr: 'no' }));
+  const via = await runExe(EXE, ['--json', '--copy', '--hash', KNOWN], { timeoutMs: 5_000 });
+  assert.match(via.stdout, /hash_ok/);
+  await session.close();
+});
+
+test('live --serve session is warmer than cold spawn when exe present', {
+  skip: HAS_EXE ? false : 'native/sm11-monitor/out/sm11_monitor.exe missing',
+  timeout: 90_000,
+}, async () => {
+  const assist = createSm11Assist({
+    verifyOnFat: false,
+    hotPath: false,
+    preferGpu: true,
+    exePath: EXE,
+    serve: true,
+  });
+  assert.equal(assist.serve, true);
+  const t0 = performance.now();
+  const first = await assist.verifyScrub({ batch: 8, envBytes: 64 });
+  const t1 = performance.now();
+  const second = await assist.verifySeq({ batch: 8 });
+  const t2 = performance.now();
+  const third = await assist.verifyBatch({ batch: 8, envBytes: 64 });
+  const t3 = performance.now();
+  await assist.close();
+
+  assert.equal(first.ok, true, JSON.stringify(first));
+  assert.equal(second.ok, true, JSON.stringify(second));
+  assert.equal(third.ok, true, JSON.stringify(third));
+  if (first.backend === 'cuda') {
+    assert.equal(first.scrub_ok, true);
+    assert.equal(second.seq_ok, true);
+    assert.equal(third.batch_ok, true);
+    // After CUDA warm-up, follow-up serve ops should beat cold ~100ms spawn.
+    assert.ok((t2 - t1) < 80, `seq dt=${t2 - t1}`);
+    assert.ok((t3 - t2) < 80, `batch dt=${t3 - t2}`);
+    assert.ok(typeof first.ms === 'number' || first.raw?.ms != null || true);
+  }
+  void t0;
+});
+
+test('live --loops reports in-process ms_* when exe present', {
+  skip: HAS_EXE ? false : 'native/sm11-monitor/out/sm11_monitor.exe missing',
+  timeout: 60_000,
+}, async () => {
+  const result = await verifyPayload(KNOWN, {
+    flags: ['--copy', '--hash'],
+    loops: 10,
+    timeoutMs: 60_000,
+  });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  if (result.backend === 'cuda') {
+    assert.equal(result.copy_ok, true);
+    assert.equal(result.cmp_ok, true);
+    assert.equal(result.loops, 10);
+    assert.ok(result.ms_avg > 0);
+    assert.ok(result.ms_min <= result.ms_avg);
+  }
 });

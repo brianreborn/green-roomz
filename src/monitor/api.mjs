@@ -41,6 +41,8 @@ export {
   verifyBatch as sm11VerifyBatch,
   probeSm11,
   createSm11Assist,
+  createSm11ServeSession,
+  serveRunExeFactory,
 } from './sm11-gpu.mjs';
 
 export {
