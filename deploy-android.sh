@@ -107,16 +107,33 @@ if [[ -n "${REVIEWS_DIR:-}" && -f "$REVIEWS_DIR/green-roomz-models.lock.json" ]]
 else
   echo "WARN: GOS-P7 lockfile not found (set GRZ_REVIEWS or place reviews/green-roomz-models.lock.json)"
 fi
-SLIM_TORRENT="${REVIEWS_DIR:-/workspace/reviews}/green-roomz-beta-0.5.3-slim.torrent"
-if [[ -f "$SLIM_TORRENT" ]]; then
-  echo "GOS-P7: pushing slim .torrent + note (infohash a2344816d2a5f8ff3ecb3d533ff36b096441843c)"
-  adb push "$SLIM_TORRENT" "$DEST/green-roomz-beta-0.5.3-slim.torrent"
+# GOS-P7 slim torrent: prefer SLIM_TORRENT env, else newest green-roomz-beta-*-slim.torrent
+REVIEWS_DIR="${REVIEWS_DIR:-/workspace/reviews}"
+if [[ -n "${SLIM_TORRENT:-}" ]]; then
+  :
+elif [[ -f "$REVIEWS_DIR/green-roomz-beta-0.5.4-slim.torrent" ]]; then
+  SLIM_TORRENT="$REVIEWS_DIR/green-roomz-beta-0.5.4-slim.torrent"
+else
+  SLIM_TORRENT=$(ls -1t "$REVIEWS_DIR"/green-roomz-beta-*-slim.torrent 2>/dev/null | head -1 || true)
+fi
+if [[ -n "${SLIM_TORRENT:-}" && -f "$SLIM_TORRENT" ]]; then
+  slim_base=$(basename "$SLIM_TORRENT")
+  slim_zip="${slim_base%.torrent}.zip"
+  if [[ -n "${SLIM_INFOHASH:-}" ]]; then
+    slim_ih="$SLIM_INFOHASH"
+  elif command -v aria2c >/dev/null 2>&1; then
+    slim_ih=$(aria2c -S "$SLIM_TORRENT" 2>/dev/null | awk -F': ' '/Info Hash:/ {print tolower($2); exit}')
+  else
+    slim_ih=""
+  fi
+  echo "GOS-P7: pushing slim .torrent + note (${slim_base}${slim_ih:+ infohash $slim_ih})"
+  adb push "$SLIM_TORRENT" "$DEST/$slim_base"
   note="$stage/slim-torrent-note.txt"
-  printf '%s\n' \
-    "green-roomz-beta-0.5.3-slim.torrent" \
-    "infohash a2344816d2a5f8ff3ecb3d533ff36b096441843c" \
-    "magnet:?xt=urn:btih:a2344816d2a5f8ff3ecb3d533ff36b096441843c&dn=green-roomz-beta-0.5.3-slim.zip" \
-    >"$note"
+  {
+    echo "$slim_base"
+    [[ -n "$slim_ih" ]] && echo "infohash $slim_ih"
+    [[ -n "$slim_ih" ]] && echo "magnet:?xt=urn:btih:${slim_ih}&dn=${slim_zip}"
+  } >"$note"
   adb push "$note" "$DEST/slim-torrent-note.txt"
 fi
 # 644 so Termux bash can *read* the snippet; SELinux blocks execute-from-tmp
