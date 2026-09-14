@@ -3,10 +3,12 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync, unlinkSync } from 'node:fs';
+import { FALLBACK_ALIAS, NEXUS_ALIAS } from './constants.mjs';
 import { UnavailableError } from './errors.mjs';
 import { sleep } from './util.mjs';
 import { agentFootprintBytes, headroomBytes, profileAdmitted } from './memory.mjs';
 import { CpuSetAllocator, defaultThreadCount } from './cpu-set.mjs';
+import { preferResidentChat } from './nexus.mjs';
 
 const MAX_LOG_CHARS = 64 * 1024;
 
@@ -126,6 +128,19 @@ export function shouldAttachDraft(agent) {
 
 export function isResidentAgent(agent) {
   return Boolean(agent?.resident) || agent?.alias === 'tool-router-agent';
+}
+
+/** Aliases to mmap at serve start. Skip Instruct when generic chat stays on the 0.5B. */
+export function servePrewarmAliases(registry, { gateway, env = process.env } = {}) {
+  const aliases = [];
+  if (registry?.agents?.has(NEXUS_ALIAS) && registry.status(NEXUS_ALIAS).state !== 'unavailable') {
+    aliases.push(NEXUS_ALIAS);
+  }
+  if (preferResidentChat(gateway, env)) return aliases;
+  if (registry?.agents?.has(FALLBACK_ALIAS) && registry.status(FALLBACK_ALIAS).state !== 'unavailable') {
+    aliases.push(FALLBACK_ALIAS);
+  }
+  return aliases;
 }
 
 

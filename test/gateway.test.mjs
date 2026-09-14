@@ -17,6 +17,7 @@ async function withServer(t, env = {}, extras = {}) {
   const previous = { ...process.env };
   Object.assign(process.env, env);
   const manifest = sampleManifest();
+  if (extras.gateway) Object.assign(manifest.gateway, extras.gateway);
   const registry = await new AgentRegistry(manifest).inspect();
   for (const alias of extras.ready ?? []) registry.setStatus(alias, 'ready');
   const hostAdapter = extras.hostAdapter ?? { sampleResources() { return { freeMemoryBytes: 1 }; } };
@@ -660,27 +661,34 @@ test('generic ChatGPT-compat hello skips nexus and answers on Instruct', async (
   assert.equal(urls.some((url) => url.includes(':18187')), false);
 });
 
-test('GRZ_OFFLINE_NEXUS generic chat stays on resident 0.5B, not Instruct or nexus consult', async (t) => {
+async function assertResidentGenericChat(t, env, extras, body) {
   const urls = [];
-  const { server } = await withServer(t, { GRZ_OFFLINE_NEXUS: '1' }, {
+  const ensured = [];
+  const { server, processes } = await withServer(t, env, {
     ready: ['tool-router-agent', 'general-text-speculator'],
     stubEnsure: true,
+    ...extras,
     fetchImpl: async (url, init) => {
       urls.push(String(url));
       const href = String(url);
       if (href.includes(':18184')) throw new Error('offline generic chat must not hit general-text :18184');
-      const body = JSON.parse(Buffer.from(init.body).toString());
-      if (JSON.stringify(body.messages ?? []).includes('AVAILABLE:')) {
+      const payload = JSON.parse(Buffer.from(init.body).toString());
+      if (JSON.stringify(payload.messages ?? []).includes('AVAILABLE:')) {
         throw new Error('offline generic chat must not consult nexus AVAILABLE prompt');
       }
       return jsonFetch({ choices: [{ message: { role: 'assistant', content: 'Hello from resident.' } }] });
     },
   });
+  const original = processes.ensure;
+  processes.ensure = async (agent) => {
+    ensured.push(agent.alias);
+    return original(agent);
+  };
   const result = await request(server, {
     path: '/v1/chat/completions',
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: { model: 'general-text-speculator', messages: [{ role: 'user', content: 'Say hello in one short sentence.' }] },
+    body,
   });
   assert.equal(result.status, 200);
   assert.equal(result.headers['x-green-roomz-effective-alias'], 'tool-router-agent');
@@ -688,6 +696,78 @@ test('GRZ_OFFLINE_NEXUS generic chat stays on resident 0.5B, not Instruct or nex
   assert.equal(result.body.choices[0].message.content, 'Hello from resident.');
   assert.equal(urls.some((url) => url.includes(':18184')), false);
   assert.equal(urls.some((url) => url.includes(':18187')), true);
+  assert.equal(ensured.includes('general-text-speculator'), false);
+  return { result, urls, ensured };
+}
+
+test('GRZ_OFFLINE_NEXUS generic chat stays on resident 0.5B, not Instruct or nexus consult', async (t) => {
+  await assertResidentGenericChat(
+    t,
+    { GRZ_OFFLINE_NEXUS: '1' },
+    {},
+    { model: 'general-text-speculator', messages: [{ role: 'user', content: 'Say hello in one short sentence.' }] },
+  );
+});
+
+test('GRZ_OFFLINE_NEXUS skips ready Instruct for auto-model generic chat', async (t) => {
+  await assertResidentGenericChat(
+    t,
+    { GRZ_OFFLINE_NEXUS: '1' },
+    {},
+    { messages: [{ role: 'user', content: 'Say hello in one short sentence.' }] },
+  );
+});
+
+test('gateway.nexus_consult=false generic chat stays on resident even if Instruct is ready', async (t) => {
+  await assertResidentGenericChat(
+    t,
+    {},
+    { gateway: { nexus_consult: false } },
+    { model: 'general-text-speculator', messages: [{ role: 'user', content: 'Say hello in one short sentence.' }] },
+  );
+});
+
+test('gateway.chat_default_alias=tool-router-agent generic chat stays on resident even if Instruct is ready', async (t) => {
+  await assertResidentGenericChat(
+    t,
+    {},
+    { gateway: { chat_default_alias: 'tool-router-agent' } },
+    { model: 'general-text-speculator', messages: [{ role: 'user', content: 'Say hello in one short sentence.' }] },
+  );
+});
+
+test('GRZ_OFFLINE_NEXUS does not text_fallback to ready Instruct when code is cold', async (t) => {
+  const urls = [];
+  const ensured = [];
+  const { server, processes } = await withServer(t, { GRZ_OFFLINE_NEXUS: '1' }, {
+    ready: ['tool-router-agent', 'general-text-speculator'],
+    stubEnsure: true,
+    fetchImpl: async (url, init) => {
+      urls.push(String(url));
+      if (String(url).includes(':18184')) throw new Error('offline chat must not hit general-text :18184');
+      const payload = JSON.parse(Buffer.from(init.body).toString());
+      if (JSON.stringify(payload.messages ?? []).includes('AVAILABLE:')) {
+        throw new Error('offline chat must not consult nexus AVAILABLE prompt');
+      }
+      return jsonFetch({ choices: [{ message: { role: 'assistant', content: 'resident-ok' } }] });
+    },
+  });
+  const original = processes.ensure;
+  processes.ensure = async (agent) => {
+    ensured.push(agent.alias);
+    return original(agent);
+  };
+  const result = await request(server, {
+    path: '/v1/chat/completions',
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: { messages: [{ role: 'user', content: 'write a python function named hello' }] },
+  });
+  assert.equal(result.status, 200);
+  assert.equal(result.headers['x-green-roomz-effective-alias'], 'tool-router-agent');
+  assert.equal(result.body.choices[0].message.content, 'resident-ok');
+  assert.equal(ensured.includes('general-text-speculator'), false);
+  assert.equal(urls.some((url) => url.includes(':18184')), false);
 });
 
 test('nexus-picked cold specialist is not started; chat falls back to resident', async (t) => {

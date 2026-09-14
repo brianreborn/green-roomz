@@ -130,6 +130,25 @@ export function buildNexusPrompt({ userText, aliases, visited, notes, constraint
   return lines.join('\n');
 }
 
+export function envFlagTrue(value) {
+  return /^(1|true|yes)$/i.test(String(value ?? '').trim());
+}
+
+/** Skip live nexus consult (Athlon / GRZ_OFFLINE_NEXUS). */
+export function offlineNexusEnabled(gateway = {}, env = process.env) {
+  return gateway?.nexus_consult === false || envFlagTrue(env?.GRZ_OFFLINE_NEXUS);
+}
+
+/**
+ * Generic chat should complete on the resident 0.5B, not mmap'd Instruct.
+ * True when GRZ_OFFLINE_NEXUS=1, gateway.nexus_consult===false, or
+ * gateway.chat_default_alias is the nexus (tool-router-agent).
+ */
+export function preferResidentChat(gateway = {}, env = process.env) {
+  return offlineNexusEnabled(gateway, env)
+    || gateway?.chat_default_alias === NEXUS_ALIAS;
+}
+
 export function offlinePlan(body, registry, visited = new Set()) {
   const stripped = stripSlashCommand(body ?? {});
   const slim = { messages: [{ role: 'user', content: latestUserMessageText(stripped) }] };
@@ -253,8 +272,7 @@ export async function consultNexus({ processes, registry, fetchImpl = fetch, bod
 
   const admitOk = (alias) => alias && aliasCanAdmit(registry, alias, processes);
 
-  const offlineNexus = processes?.manifest?.gateway?.nexus_consult === false
-    || /^(1|true|yes)$/i.test(String(process.env.GRZ_OFFLINE_NEXUS ?? '').trim());
+  const offlineNexus = offlineNexusEnabled(processes?.manifest?.gateway);
   const ask = async (constraint) => {
     if (!candidates.length) return { route: null, confidence: 0, reason: 'no_admittable_specialist' };
     if (!live || offlineNexus) return offlinePlan(stripped, registry, visited);

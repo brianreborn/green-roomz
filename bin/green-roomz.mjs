@@ -2,7 +2,8 @@
 import { loadManifest, loadDeclaredKernel } from '../src/config.mjs';
 import { compileManifestPrompts, compileStockPrompt, stockPromptLayers, sha256 } from '../src/compile-prompt.mjs';
 import { AgentRegistry } from '../src/registry.mjs';
-import { ProcessManager } from '../src/process-manager.mjs';
+import { ProcessManager, servePrewarmAliases } from '../src/process-manager.mjs';
+import { preferResidentChat } from '../src/nexus.mjs';
 import { PolicyGate } from '../src/scheduler.mjs';
 import { SessionLedger } from '../src/sessions.mjs';
 import { WindowsHostAdapter } from '../src/hosts/windows.mjs';
@@ -12,6 +13,7 @@ import { Gateway } from '../src/gateway.mjs';
 import { loadOptionalBrainz } from '../src/brainz.mjs';
 import { attachServeConsole } from '../src/serve-console.mjs';
 import { POLICIES, REQUIRED_ALIASES } from '../src/constants.mjs';
+import { isBenignSocketError } from '../src/util.mjs';
 import path from 'node:path';
 
 function argValue(args, flag, fallback) {
@@ -155,8 +157,9 @@ async function cmdServe(ctx, args) {
   const address = server.address();
   console.error(`green-roomz listening on http://${address.address}:${address.port}`);
   ctx.processes.startIdleSweeper();
+  const prewarm = servePrewarmAliases(ctx.registry, { gateway: ctx.manifest.gateway });
   const nexus = ctx.registry.agents.get('tool-router-agent');
-  if (nexus && ctx.registry.status(nexus.alias).state !== 'unavailable') {
+  if (prewarm.includes('tool-router-agent') && nexus && ctx.registry.status(nexus.alias).state !== 'unavailable') {
     try {
       await ctx.processes.ensure(nexus);
       console.error(`pre-warmed ${nexus.alias} on :${nexus.port} (resident cpu kernel)`);
@@ -165,7 +168,11 @@ async function cmdServe(ctx, args) {
     }
   }
   const chatAgent = ctx.registry.agents.get('general-text-speculator');
-  if (chatAgent && ctx.registry.status(chatAgent.alias).state !== 'unavailable') {
+  if (!prewarm.includes('general-text-speculator')) {
+    if (preferResidentChat(ctx.manifest.gateway)) {
+      console.error('skipping general-text-speculator pre-warm (resident chat / GRZ_OFFLINE_NEXUS)');
+    }
+  } else if (chatAgent && ctx.registry.status(chatAgent.alias).state !== 'unavailable') {
     try {
       await ctx.processes.ensure(chatAgent);
       console.error(`pre-warmed ${chatAgent.alias} on :${chatAgent.port} (pinned chat; generic clients skip mmap)`);
@@ -232,9 +239,10 @@ async function cmdServe(ctx, args) {
   process.on('unhandledRejection', (reason) => {
     console.error(`unhandledRejection (continuing): ${reason instanceof Error ? reason.stack : reason}`);
   });
-  // An uncaught exception may mean corrupt state: log, drain, let the supervisor restart.
+  // Abort/EPIPE/RST from one hung-up client must not drain the whole gateway.
   process.on('uncaughtException', (error) => {
     console.error(`uncaughtException: ${error?.stack ?? error}`);
+    if (isBenignSocketError(error)) return;
     shutdown(1);
     setTimeout(() => process.exit(1), 2000).unref();
   });

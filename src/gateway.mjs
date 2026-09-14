@@ -12,7 +12,7 @@ import { CAP, MonitorIpc } from './monitor/ipc.mjs';
 import { createLogger } from './monitor/logger.mjs';
 import { GreenRoomzError, UnavailableError, UpstreamProtocolError, UpstreamTimeoutError, ValidationError } from './errors.mjs';
 import { deliverPeek, peekSpecialist } from './handoff.mjs';
-import { consultNexus } from './nexus.mjs';
+import { consultNexus, preferResidentChat } from './nexus.mjs';
 import { planRoute } from './logical-router.mjs';
 import { proxyJson } from './proxy.mjs';
 import { aliasCanAdmit, audioDataFromBody, detectModalities, hardRuleRoute, isGenericChatRequest, isRoutableAlias, latestUserMessageText, NATIVE_CHAT, parseSlashCommand, stripSlashCommand } from './routing.mjs';
@@ -1200,6 +1200,7 @@ export class Gateway {
     const visited = new Set();
     const hops = [];
     const notes = [];
+    const preferResident = preferResidentChat(this.manifest?.gateway ?? this.processes?.manifest?.gateway);
     const hard = hardRuleRoute(body, this.registry);
     const issuedSession = session?.id ?? this.sessions.create({
       identity,
@@ -1249,18 +1250,19 @@ export class Gateway {
           }
         } else {
           const stripped = stripSlashCommand(body);
-          const chatDefault = isGenericChatRequest(body)
-            && planRoute(stripped)?.route === FALLBACK_ALIAS
+          const genericText = isGenericChatRequest(body)
+            && planRoute(stripped)?.route === FALLBACK_ALIAS;
+          const chatDefault = genericText
             && isRoutableAlias(this.registry, FALLBACK_ALIAS)
             && aliasCanAdmit(this.registry, FALLBACK_ALIAS, this.processes);
-          if (chatDefault) {
-            // Slow hosts (Athlon) set GRZ_OFFLINE_NEXUS=1: prefer resident 0.5B over
-            // mmap'd 4B Instruct, which can sit silent past client timeouts.
-            const preferResident = this.processes?.manifest?.gateway?.chat_default_alias === NEXUS_ALIAS
-              || this.processes?.manifest?.gateway?.nexus_consult === false
-              || /^(1|true|yes)$/i.test(String(process.env.GRZ_OFFLINE_NEXUS ?? '').trim());
-            alias = preferResident ? NEXUS_ALIAS : FALLBACK_ALIAS;
-            reason = preferResident ? 'chat_default_resident' : 'chat_default';
+          if (genericText && preferResident) {
+            // Slow hosts (Athlon) set GRZ_OFFLINE_NEXUS=1: stay on resident 0.5B even
+            // when Instruct is already ready from a pre-warm (chat_default would 150s).
+            alias = NEXUS_ALIAS;
+            reason = 'chat_default_resident';
+          } else if (chatDefault) {
+            alias = FALLBACK_ALIAS;
+            reason = 'chat_default';
           } else {
             const picked = await consultNexus({
               processes: this.processes,
@@ -1277,6 +1279,15 @@ export class Gateway {
           }
         }
 
+        const slashPinned = Boolean(hard.effectiveAlias && hard.effectiveAlias === alias);
+        if (
+          preferResident
+          && isGenericChatRequest(body)
+          && !slashPinned
+          && (alias === FALLBACK_ALIAS || (alias === NEXUS_ALIAS && reason === 'chat_default_resident'))
+        ) {
+          return await this.completeOnResident(request, response, body, issuedSession, cors, hops, 'chat_default_resident');
+        }
         if (alias === NEXUS_ALIAS && reason === 'chat_default_resident') {
           return await this.completeOnResident(request, response, body, issuedSession, cors, hops, reason);
         }
@@ -1318,7 +1329,7 @@ export class Gateway {
         // but still won't spontaneously mmap a 4B/7B code/vision model - those
         // stay opt-in via /code, /vision, etc. Idle eviction bounds the warm set.
         const alreadyReady = this.registry.status(alias).state === 'ready';
-        const mayColdStart = slashOrLock || alias === FALLBACK_ALIAS;
+        const mayColdStart = slashOrLock || (alias === FALLBACK_ALIAS && !preferResident);
         if (!mayColdStart && !alreadyReady && alias !== NEXUS_ALIAS) {
           visited.add(alias);
           hops.push(alias);
@@ -1355,6 +1366,9 @@ export class Gateway {
         const path = String((pathname ?? request.url.split('?')[0])).replace(/\/route$/, '') || '/v1/chat/completions';
         const target = `http://127.0.0.1:${agent.port}${path}`;
         if (reason === 'chat_default') {
+          if (preferResident) {
+            return await this.completeOnResident(request, response, body, issuedSession, cors, hops, 'chat_default_resident');
+          }
           const unpinChat = this.processes.pin(alias);
           try {
             this.sessions.setAgentAlias(issuedSession, alias);
@@ -1465,8 +1479,9 @@ export class Gateway {
       // a handoff with nowhere to go, a peek timeout, hop budget spent). The
       // general-text model is the safety net for ANY of those - a chat request
       // always gets a chat answer. This is unconditional: a prior peek/handoff
-      // does not disqualify the fallback.
-      if (!visited.has(FALLBACK_ALIAS) && isRoutableAlias(this.registry, FALLBACK_ALIAS)) {
+      // does not disqualify the fallback. Offline/Athlon hosts skip Instruct
+      // even when it is already ready — mmap'd 4B sits silent past client timeouts.
+      if (!preferResident && !visited.has(FALLBACK_ALIAS) && isRoutableAlias(this.registry, FALLBACK_ALIAS)) {
         try {
           hops.push(FALLBACK_ALIAS);
           const agent = this.registry.get(FALLBACK_ALIAS);

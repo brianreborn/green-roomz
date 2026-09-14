@@ -4,7 +4,7 @@ import { EventEmitter } from 'node:events';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, truncateSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { ProcessManager, orderProfiles, vulkanAllThreadCount, withVulkanAllThreads } from '../src/process-manager.mjs';
+import { ProcessManager, orderProfiles, servePrewarmAliases, vulkanAllThreadCount, withVulkanAllThreads } from '../src/process-manager.mjs';
 import { DEFAULT_THREADS, defaultThreadCount } from '../src/cpu-set.mjs';
 import { AgentRegistry } from '../src/registry.mjs';
 import { sampleManifest } from './helpers.mjs';
@@ -36,8 +36,8 @@ test('duplicate ensure calls share one start and only owned children are stopped
     manifest,
     registry,
     hostAdapter: { applyPriority() { return true; } },
-    spawnImpl: (command, args) => {
-      spawned.push({ command, args });
+    spawnImpl: (command, args, opts) => {
+      spawned.push({ command, args, opts });
       return child;
     },
     fetchImpl: async () => ({ ok: true }),
@@ -46,6 +46,9 @@ test('duplicate ensure calls share one start and only owned children are stopped
   assert.equal(first, second);
   assert.equal(spawned.length, 1);
   assert.ok(spawned[0].args.includes('--device'));
+  assert.equal(spawned[0].opts.detached, false);
+  assert.equal(spawned[0].opts.windowsHide, true);
+  assert.deepEqual(spawned[0].opts.stdio, ['ignore', 'pipe', 'pipe']);
   assert.equal(first.owned, true);
   await manager.stop(agent.alias);
   assert.deepEqual(child.killed, ['SIGTERM']);
@@ -258,6 +261,29 @@ test('C1 empty profiles stay valid but default threads cap to logical CPUs', () 
   });
   const capped = eight.buildLaunch(agent, { id: 'default', args: [] });
   assert.equal(capped.args[capped.args.indexOf('--threads') + 1], String(DEFAULT_THREADS));
+});
+
+test('servePrewarmAliases skips FALLBACK_ALIAS when GRZ_OFFLINE_NEXUS=1', async () => {
+  const manifest = sampleManifest();
+  const registry = await new AgentRegistry(manifest).inspect();
+  registry.setStatus('tool-router-agent', 'ready');
+  registry.setStatus('general-text-speculator', 'ready');
+  assert.deepEqual(
+    servePrewarmAliases(registry, { gateway: manifest.gateway, env: {} }),
+    ['tool-router-agent', 'general-text-speculator'],
+  );
+  assert.deepEqual(
+    servePrewarmAliases(registry, { gateway: manifest.gateway, env: { GRZ_OFFLINE_NEXUS: '1' } }),
+    ['tool-router-agent'],
+  );
+  assert.deepEqual(
+    servePrewarmAliases(registry, { gateway: { ...manifest.gateway, nexus_consult: false }, env: {} }),
+    ['tool-router-agent'],
+  );
+  assert.deepEqual(
+    servePrewarmAliases(registry, { gateway: { ...manifest.gateway, chat_default_alias: 'tool-router-agent' }, env: {} }),
+    ['tool-router-agent'],
+  );
 });
 
 test('H3 canParallelCouncil is false when specialists exceed maxWarmSpecialists', () => {
@@ -498,9 +524,4 @@ test('waitForReady tolerates whisper/sd-server which have no /health (404 on it)
   const manager = new ProcessManager({
     manifest, registry, hostAdapter: { applyPriority() {} },
     spawnImpl: () => child,
-    fetchImpl: async (url) => ({ status: url.endsWith('/health') ? 404 : 200, ok: !url.endsWith('/health') && true, async arrayBuffer() { return new ArrayBuffer(0); } }),
-  });
-  const rec = await manager.start(agent);
-  assert.equal(rec.state, 'ready');
-  await manager.stop(agent.alias);
-});
+    fetchImpl: async (url) => ({ status: url.endsWith('/health') ? 404 : 200, ok: !url.endsWith('/health') && true

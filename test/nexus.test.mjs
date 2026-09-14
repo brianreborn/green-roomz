@@ -8,7 +8,7 @@ import { PolicyGate } from '../src/scheduler.mjs';
 import { SessionLedger } from '../src/sessions.mjs';
 import { Gateway } from '../src/gateway.mjs';
 import { isHandoffContent, parseHandoffContent } from '../src/handoff.mjs';
-import { consultNexus, offlinePlan } from '../src/nexus.mjs';
+import { consultNexus, offlineNexusEnabled, offlinePlan, preferResidentChat } from '../src/nexus.mjs';
 import { sampleManifest } from './helpers.mjs';
 
 async function withServer(t, extras = {}) {
@@ -345,6 +345,18 @@ test('wrong security dispatch (/threatmodel on C buffer overflow) hands off to c
   assert.match(result.headers['x-green-roomz-hops'], /qwenstral-code-speculator/);
   assert.match(result.body.choices[0].message.content, /secure_copy/);
   assert.equal(specialistCalls, 2);
+});
+
+test('preferResidentChat honors GRZ_OFFLINE_NEXUS, nexus_consult, and chat_default_alias', () => {
+  assert.equal(preferResidentChat({}, {}), false);
+  assert.equal(offlineNexusEnabled({}, {}), false);
+  assert.equal(preferResidentChat({}, { GRZ_OFFLINE_NEXUS: '1' }), true);
+  assert.equal(preferResidentChat({}, { GRZ_OFFLINE_NEXUS: 'true' }), true);
+  assert.equal(preferResidentChat({ nexus_consult: false }, {}), true);
+  assert.equal(offlineNexusEnabled({ nexus_consult: false }, {}), true);
+  assert.equal(preferResidentChat({ chat_default_alias: 'tool-router-agent' }, {}), true);
+  assert.equal(offlineNexusEnabled({ chat_default_alias: 'tool-router-agent' }, {}), false);
+  assert.equal(preferResidentChat({ chat_default_alias: 'general-text-speculator' }, {}), false);
 });
 
 test('GRZ_OFFLINE_NEXUS consultNexus returns offlinePlan without calling fetchImpl', async (t) => {
