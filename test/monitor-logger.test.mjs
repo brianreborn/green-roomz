@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { assertCaller } from '../src/monitor/api.mjs';
 import { createLogger, verifyChain } from '../src/monitor/logger.mjs';
+import { defaultExePath, fnv1a64Hex } from '../src/monitor/sm11-gpu.mjs';
 
 test('emit then read order', async () => {
   const log = createLogger();
@@ -104,4 +105,51 @@ test('records omit passwords tokens keys', async () => {
   assert.equal('password' in rec.payload, false);
   assert.equal('token' in rec.payload, false);
   assert.equal('key' in rec.payload, false);
+});
+
+test('stats().sm11 is null without assist; chain fields unchanged', async () => {
+  const log = createLogger({ sm11: false });
+  await log.emit({ payload: { n: 1 } });
+  const s = log.stats();
+  assert.equal(s.emitted, 1);
+  assert.equal(s.dropped, 0);
+  assert.equal(s.chain, 1);
+  assert.equal(s.sm11, null);
+  assert.equal(verifyChain(log.read()), true);
+  assert.equal('gpu_fnv' in log.read()[0], false);
+});
+
+test('sm11 verify-assist schedules FNV without changing stored hash', async () => {
+  const calls = [];
+  const expectFnv = fnv1a64Hex('{"n":1}');
+  const log = createLogger({
+    sm11: {
+      verifyOnFat: true,
+      preferGpu: true,
+      exePath: defaultExePath(),
+      exists: () => true,
+      runExe: async (_exe, args) => {
+        calls.push(args);
+        return {
+          code: 0,
+          stdout: `{"ok":true,"copy_ok":true,"hash_ok":true,"hash":"${expectFnv}","expect":"${expectFnv}"}\n`,
+          stderr: '',
+        };
+      },
+    },
+  });
+  const before = await log.emit({ payload: { n: 1 } });
+  assert.equal(before.ok, true);
+  assert.match(before.hash, /^[0-9a-f]{64}$/);
+  await log.flush();
+  const sm = log.stats().sm11;
+  assert.ok(sm);
+  assert.ok(sm.verifyAttempts >= 1);
+  assert.equal(sm.gpuOk, 1);
+  assert.ok(calls.length >= 1);
+  assert.ok(calls[0].includes('--json'));
+  const recs = log.read();
+  assert.equal(verifyChain(recs), true);
+  assert.equal(recs[0].hash, before.hash);
+  assert.equal('gpu_fnv' in recs[0], false);
 });
