@@ -332,19 +332,27 @@ SKU confirmed: **Snapdragon, not Exynos.** GPU pack = OpenCL/Vulkan, not Mali.
 
 **Useful enough to ship the GPU story:** run **most of the security-monitor path on the 8600 GT** (CUDA 6.5 / sm_1.1). That alone counts. If we cannot do that, we failed the easy engineering proof.
 
-| Piece | Spec |
-|---|---|
-| Binary | Our CUDA **6.5 / compute_11** build (VS2013 + staged toolkit; careful Win11 driver story) |
-| Work | Majority of monitor/mailbox hot path on GPU: copy-engine or host-memcpy slot (**F3/F21**), seq `{hi,lo}`, push/drain assist, payload hash / ring scrub — **GPU MUST NOT list** (private slot, not a model roster) |
-| Useful = | Under load, most monitor ops hit the 8600; CPU fallback still correct if GPU absent |
+| Piece | Spec | Status (qodesh) |
+|---|---|---|
+| Binary | Our CUDA **6.5 / compute_11** build (VS2013 + staged toolkit; careful Win11 driver story) | **shipped** — Win32 fallback (`native/sm11-monitor`); see #16 for x64 |
+| Work | Majority of monitor/mailbox hot path on GPU: copy-engine or host-memcpy slot (**F3/F21**), seq `{hi,lo}`, push/drain assist, payload hash / ring scrub — **GPU MUST NOT list** (private slot, not a model roster) | **largely met** — warm `--serve`, private-slot ring, `preferRing` hot path |
+| Useful = | Under load, most monitor ops hit the 8600; CPU fallback still correct if GPU absent | **largely met** — `scripts/sm11-load.mjs` hammer; CPU twin when GPU absent |
 
-**Live proof (qodesh):** GeForce 8600 GT **sm_11** copy + FNV via `native/sm11-monitor` (`copy_ok=1 hash_ok=1`). Probe only — not yet wired into the JS mailbox/monitor path. Issue: https://github.com/brianreborn/green-roomz/issues/13
+**Usefulness bar (monitor-on-8600): largely met.** Live on qodesh tip `9722e60` / `8b19760`:
+
+- **Warm `--serve`** — persistent CUDA context + resident ring (cold spawn ~100 ms → warm ops ~sub-ms–2 ms)
+- **`preferRing` hot path** — with `GRZ_SM11=1` + exe, Mailbox/MonitorIpc enqueue→`assistRingPush`, drop→`assistRingScrub`, drain→`assistRingHash` (probe seq/scrub/batch fallback)
+- **Private-slot ring** — host 32-bit index; GPU hash/copy/scrub/cmp/seq only (**GPU MUST NOT list**)
+- **Load script** — `scripts/sm11-load.mjs` (`--waves` / `--per-wave`); rising `ringPush`/`ringHash`/`ringScrub`, `serveAlive`
+- **N-API wontfix** — #17 closed; Win32 CUDA vs x64 Node / missing `vcvars64` / VS2013 vs node-gyp → keep `--serve`
+
+Issue: https://github.com/brianreborn/green-roomz/issues/13 — stretch left: **CUDA-owned ring index** (host still owns head/tail today); Win32→x64 (#16); optional 0.5B offload (#14, **not** the usefulness bar).
 
 **Optional later (not required to call the GPU useful):** partial 0.5B Q4 `n-gpu-layers` offload on the same toolchain. Nice if tok/s >= CPU-only; not the usefulness bar.
 
 **Non-goals on 224 MB:** whole chat models in VRAM; Vulkan lighting up; vision/whisper/sd on this card.
 
-**Order:** CPU nexus stays live -> CUDA 6.5 toolchain -> **monitor-on-8600** -> (optional) 0.5B partial offload.
+**Order:** CPU nexus stays live -> CUDA 6.5 toolchain -> **monitor-on-8600** (done enough to ship) -> (optional) 0.5B partial offload.
 
 ## Block layouts (all considered)
 
