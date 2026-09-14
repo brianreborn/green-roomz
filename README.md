@@ -23,7 +23,9 @@ docker pull ghcr.io/brianreborn/green-roomz:try
 docker run --rm -p 8080:8080 ghcr.io/brianreborn/green-roomz:try
 ```
 
-Bearer token: `try-local`. GitHub Actions builds the image on `main`. A bootable qcow2/OVA is follow-up ([#19](https://github.com/brianreborn/green-roomz/issues/19)).
+Bearer token: `try-local`. GitHub Actions builds the image on `main`.
+
+**VM kit** (Debian qcow2 + seed ISO): release tag [`try-vm`](https://github.com/brianreborn/green-roomz/releases/tag/try-vm) — [packaging/vm/README.md](packaging/vm/README.md). ([#19](https://github.com/brianreborn/green-roomz/issues/19))
 
 ## Quick start on this host
 

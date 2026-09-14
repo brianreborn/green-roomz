@@ -1,12 +1,28 @@
 #cloud-config
-# Future qcow2/OVA first-boot: install Docker and run the try image.
-# Not applied on qodesh (no hypervisor toolchain there).
-
+hostname: green-roomz
+manage_etc_hosts: true
+ssh_pwauth: true
+users:
+  - name: grz
+    gecos: Green-Roomz try
+    groups: [sudo, docker]
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    lock_passwd: false
+chpasswd:
+  list: |
+    grz:greenroomz
+  expire: false
 package_update: true
 packages:
   - docker.io
   - curl
+  - qemu-guest-agent
 runcmd:
-  - [ sh, -c, "docker pull ghcr.io/brianreborn/green-roomz:try || true" ]
+  - [ sh, -c, "systemctl enable --now docker qemu-guest-agent || true" ]
+  - [ sh, -c, "docker pull ghcr.io/brianreborn/green-roomz:try" ]
   - [ sh, -c, "docker run -d --restart unless-stopped -p 8080:8080 --name green-roomz ghcr.io/brianreborn/green-roomz:try" ]
-final_message: "Green-Roomz try: http://this-host:8080  (Bearer try-local)"
+final_message: |
+  Green-Roomz try VM is up.
+  ssh grz@this-host  password: greenroomz
+  curl -H 'authorization: Bearer try-local' http://this-host:8080/health

@@ -39,9 +39,13 @@ gzip -dc green-roomz-try.tar.gz | docker load
 
 ## Disk image (VM)
 
-A bootable qcow2/OVA is **not built on qodesh yet** (no QEMU/Docker/WSL on that box). The Docker image above is the open artifact to try now.
+GitHub Actions (`.github/workflows/try-vm.yml`) builds **`green-roomz-vm-kit.tar.gz`**: Debian 12 genericcloud qcow2 + cloud-init seed ISO.
 
-Next (issue #18): Packer/QEMU Debian cloud image + `packaging/cloud-init/user-data` that installs Docker and runs `green-roomz:try`.
+- Release: https://github.com/brianreborn/green-roomz/releases/tag/try-vm
+- First boot pulls `ghcr.io/brianreborn/green-roomz:try` and serves **:8080**
+- ssh `grz` / `greenroomz` — see [packaging/vm/README.md](vm/README.md)
+
+qodesh cannot bake the kit (no QEMU); CI does.
 
 ## What is inside
 
