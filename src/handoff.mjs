@@ -184,6 +184,8 @@ export async function peekSpecialist({ fetchImpl = fetch, request, target, body,
     signal?.removeEventListener?.('abort', onParent);
     throw error;
   }
+  // Headers received: do not RST this generation if the client hangs up.
+  signal?.removeEventListener?.('abort', onParent);
 
   if (upstream.status >= 400) {
     signal?.removeEventListener?.('abort', onParent);

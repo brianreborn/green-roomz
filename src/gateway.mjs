@@ -595,6 +595,11 @@ export class Gateway {
       if (url.pathname === '/v1/images/generations') body.model = body.model ?? 'image-generation-agent';
       return await this.handleInference(request, response, body, identity, cors, url.pathname);
     } catch (error) {
+      if (request.abortSignal?.aborted || response.destroyed || response.writableEnded) return;
+      if (response.headersSent) {
+        try { if (!response.writableEnded) response.destroy(); } catch {}
+        return;
+      }
       const status = error instanceof GreenRoomzError ? error.status : 500;
       const retryAfter = (error instanceof UnavailableError || error instanceof UpstreamTimeoutError)
         ? { 'retry-after': '2' }
@@ -1536,7 +1541,9 @@ export class Gateway {
       // A dead client socket must not take the process down mid-write.
       req.on('error', () => {});
       res.on('error', () => {});
+      req.socket?.on('error', () => {});
       Promise.resolve(this.handle(req, res)).catch((error) => {
+        if (req.abortSignal?.aborted || res.destroyed || res.writableEnded) return;
         try {
           if (!res.headersSent) {
             jsonResponse(res, 500, { error: { message: redact(String(error?.message ?? error)), type: 'internal_error' } });
@@ -1561,8 +1568,15 @@ export class Gateway {
     server.headersTimeout = this.manifest.gateway.headers_timeout_ms ?? 30_000;
     server.requestTimeout = this.manifest.gateway.request_timeout_ms ?? 0;
     return new Promise((resolve, reject) => {
-      server.once('error', reject);
-      server.listen(listenPort, address, () => resolve(server));
+      const onListenError = (error) => reject(error);
+      server.once('error', onListenError);
+      server.listen(listenPort, address, () => {
+        server.off('error', onListenError);
+        server.on('error', (error) => {
+          try { console.error(`gateway server error: ${error?.message ?? error}`); } catch {}
+        });
+        resolve(server);
+      });
     });
   }
 }

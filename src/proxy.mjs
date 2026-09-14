@@ -150,15 +150,41 @@ export function sanitizeSseText(raw, { keepReasoning = false } = {}) {
 
 function writeSseFrame(response, framed) {
   if (!framed) return;
+  if (response?.writableEnded || response?.destroyed) return;
   if (typeof response.write === 'function') response.write(framed.frame);
+}
+
+function clientGone(response, signal) {
+  return Boolean(signal?.aborted) || Boolean(response?.writableEnded) || Boolean(response?.destroyed);
+}
+
+/** Consume an upstream body without cancel() — cancel RSTs llama-server (--parallel 1). */
+export async function drainUpstreamBody(body) {
+  if (!body) return;
+  try {
+    if (typeof body.getReader === 'function') {
+      const reader = body.getReader();
+      try {
+        for (;;) {
+          const { done } = await reader.read();
+          if (done) break;
+        }
+      } finally {
+        reader.releaseLock?.();
+      }
+      return;
+    }
+    if (typeof body.arrayBuffer === 'function') await body.arrayBuffer();
+    else if (typeof body.text === 'function') await body.text();
+  } catch {}
 }
 
 async function writeSanitizedSse(upstream, response, { keepReasoning, signal, callerSignal, inactivityTimeoutMs = 0 } = {}) {
   const headers = downstreamHeaders(upstream);
   delete headers['content-length'];
   let content = '';
-  if (response.writableEnded || response.destroyed) {
-    try { await upstream.body?.cancel?.(); } catch {}
+  if (clientGone(response, signal)) {
+    await drainUpstreamBody(upstream.body);
     return content;
   }
   const ct = String(headers['content-type'] ?? '').toLowerCase();
@@ -171,6 +197,7 @@ async function writeSanitizedSse(upstream, response, { keepReasoning, signal, ca
     } catch {
       raw = '';
     }
+    if (clientGone(response, signal)) return content;
     const sseHeaders = { ...headers, 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache' };
     response.writeHead(upstream.status, sseHeaders);
     const trimmed = raw.trim();
@@ -187,6 +214,10 @@ async function writeSanitizedSse(upstream, response, { keepReasoning, signal, ca
       if (typeof response.write === 'function') response.write(text || raw);
     }
     if (typeof response.end === 'function' && !response.writableEnded && !response.destroyed) response.end();
+    return content;
+  }
+  if (clientGone(response, signal)) {
+    await drainUpstreamBody(upstream.body);
     return content;
   }
   response.writeHead(upstream.status, { ...headers, 'content-type': headers['content-type'] || 'text/event-stream; charset=utf-8' });
@@ -225,9 +256,11 @@ async function writeSanitizedSse(upstream, response, { keepReasoning, signal, ca
   let carry = '';
   try {
     while (true) {
-      if (signal?.aborted) break;
       const { done, value } = await reader.read();
       if (done) break;
+      // Keep reading after the client hangs up so llama-server can finish the
+      // slot. Breaking/cancel() RSTs --parallel 1 and wedges the next smoke.
+      if (clientGone(response, signal)) continue;
       carry += decoder.decode(value, { stream: true });
       carry = carry.replace(/\r\n/g, '\n');
       let pos = 0;
@@ -243,33 +276,35 @@ async function writeSanitizedSse(upstream, response, { keepReasoning, signal, ca
       }
       carry = carry.slice(pos);
     }
-    carry += decoder.decode();
-    if (carry.trim()) {
-      const trimmed = carry.trim();
-      if (trimmed.startsWith('{') && !trimmed.startsWith('data:')) {
-        try {
-          const wrapped = sseFromJsonCompletion(JSON.parse(trimmed), keepReasoning);
-          content += wrapped.text;
-          if (typeof response.write === 'function') response.write(wrapped.sse);
-        } catch {
+    if (!clientGone(response, signal)) {
+      carry += decoder.decode();
+      if (carry.trim()) {
+        const trimmed = carry.trim();
+        if (trimmed.startsWith('{') && !trimmed.startsWith('data:')) {
+          try {
+            const wrapped = sseFromJsonCompletion(JSON.parse(trimmed), keepReasoning);
+            content += wrapped.text;
+            if (typeof response.write === 'function') response.write(wrapped.sse);
+          } catch {
+            const framed = frameFromParsed(parseSseBlock(carry), keepReasoning);
+            if (framed) {
+              content += framed.delta;
+              writeSseFrame(response, framed);
+            }
+          }
+        } else {
           const framed = frameFromParsed(parseSseBlock(carry), keepReasoning);
           if (framed) {
             content += framed.delta;
             writeSseFrame(response, framed);
           }
         }
-      } else {
-        const framed = frameFromParsed(parseSseBlock(carry), keepReasoning);
-        if (framed) {
-          content += framed.delta;
-          writeSseFrame(response, framed);
-        }
       }
     }
   } finally {
     reader.releaseLock?.();
   }
-  if (typeof response.end === 'function' && !response.writableEnded && !response.destroyed) response.end();
+  if (!clientGone(response, signal) && typeof response.end === 'function' && !response.writableEnded && !response.destroyed) response.end();
   return content;
 }
 
@@ -309,6 +344,11 @@ export async function proxyJson({ request, response, body, target, config, signa
 
       // Headers arrived: connection established, clear connection/retry timeout.
       clearTimeout(connectTimer);
+      // Stop forwarding client abort into undici — abort() RSTs llama-server.
+      if (forwardCallerAbort && signal) {
+        signal.removeEventListener('abort', forwardCallerAbort);
+        forwardCallerAbort = null;
+      }
 
       if (upstream.status === 503 && Date.now() < deadline) {
         try { await upstream.body?.cancel(); } catch {}
@@ -323,8 +363,10 @@ export async function proxyJson({ request, response, body, target, config, signa
           // Naive streaming: driven by active socket reader & client cancellation, no arbitrary cutoff
           content = await writeSanitizedSse(upstream, response, { keepReasoning, signal }) ?? '';
         } catch (streamError) {
+          if (signal?.aborted || response.destroyed || response.writableEnded) {
+            return { status: upstream.status, content: content ?? '', aborted: true };
+          }
           if (!response.writableEnded && !response.destroyed) response.destroy?.(streamError);
-          if (signal?.aborted) throw signal.reason ?? streamError;
           throw streamError;
         }
         return { status: upstream.status, content };
@@ -351,8 +393,9 @@ export async function proxyJson({ request, response, body, target, config, signa
         } catch {
           data = Buffer.from(raw);
         }
-        if (response.writableEnded || response.destroyed) return { status: upstream.status, content };
+        if (response.writableEnded || response.destroyed || signal?.aborted) return { status: upstream.status, content };
         if (beforeClientWrite) await beforeClientWrite();
+        if (response.writableEnded || response.destroyed || signal?.aborted) return { status: upstream.status, content };
         response.writeHead(upstream.status, { ...headers, 'content-length': data.length });
         response.end(data);
         return { status: upstream.status, content };

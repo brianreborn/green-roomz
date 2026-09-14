@@ -5,7 +5,7 @@ import path from 'node:path';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync, unlinkSync } from 'node:fs';
 import { FALLBACK_ALIAS, NEXUS_ALIAS } from './constants.mjs';
 import { UnavailableError } from './errors.mjs';
-import { sleep } from './util.mjs';
+import { awaitWithAbort, isAbortError, sleep } from './util.mjs';
 import { agentFootprintBytes, headroomBytes, profileAdmitted } from './memory.mjs';
 import { CpuSetAllocator, defaultThreadCount } from './cpu-set.mjs';
 import { preferResidentChat } from './nexus.mjs';
@@ -128,6 +128,34 @@ export function shouldAttachDraft(agent) {
 
 export function isResidentAgent(agent) {
   return Boolean(agent?.resident) || agent?.alias === 'tool-router-agent';
+}
+
+/**
+ * llama-server stays in the serve process tree so stopAll / children.json can reap it.
+ * Do not `detached: true` — that orphans a LISTEN backend after a Job Object kill.
+ * Launch the gateway itself via scripts/serve-window.cmd so *node* outlives the agent job.
+ */
+export function backendSpawnOptions({ cwd, env } = {}) {
+  return {
+    env,
+    cwd,
+    windowsHide: true,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    shell: false,
+    detached: false,
+  };
+}
+
+function attachChildIO(child, append) {
+  const swallow = () => {};
+  child.stdout?.on('data', append);
+  child.stderr?.on('data', append);
+  // A killed llama-server otherwise emits uncaught EPIPE on the pipes and takes down :8080.
+  child.stdout?.on('error', swallow);
+  child.stderr?.on('error', swallow);
+  child.on('error', (err) => {
+    try { append(err); } catch {}
+  });
 }
 
 /** Aliases to mmap at serve start. Skip Instruct when generic chat stays on the 0.5B. */
@@ -446,13 +474,17 @@ export class ProcessManager {
     // Resident CPU nexus (tool-router-agent) stays loaded for the life of serve.
     // Starting a specialist must never stop or unload it — two llama-server
     // processes at once is required (nexus :8187 CPU + specialist vulkan).
-    if (this.starting.has(agent.alias)) return this.starting.get(agent.alias);
+    if (this.starting.has(agent.alias)) {
+      return awaitWithAbort(this.starting.get(agent.alias), signal);
+    }
 
     const bringUp = async () => {
       // Make room before starting another specialist on a memory-tight box:
       // evict the LRU warm one now rather than waiting for the idle sweep.
       if (!isResidentAgent(agent)) await this.evictForNewSpecialist(agent);
-      return this.start(agent, { signal });
+      // Client abort must not cancel spawn / waitForReady — that SIGKILLs a
+      // llama-server that just started LISTEN and wedges --parallel 1.
+      return this.start(agent);
     };
     // The resident nexus starts immediately (it runs alongside everything).
     // Every other cold start is serialized on one chain - two big models
@@ -466,7 +498,7 @@ export class ProcessManager {
       this.coldStartChain = promise.catch(() => {});
     }
     this.starting.set(agent.alias, promise.finally(() => this.starting.delete(agent.alias)));
-    return this.starting.get(agent.alias);
+    return awaitWithAbort(this.starting.get(agent.alias), signal);
   }
 
   buildLaunch(agent, profile) {
@@ -615,13 +647,10 @@ export class ProcessManager {
       }
       if (failedThreads != null && wantThreads > failedThreads) continue;
       try {
-        return await this.startProfile(agent, profile, { signal });
+        return await this.startProfile(agent, profile);
       } catch (error) {
         lastError = error;
-        if (signal?.aborted || /abort/i.test(String(error.message))) {
-          this.registry.setStatus(agent.alias, 'cold', { lastError: error.message });
-          throw error;
-        }
+        if (isAbortError(error)) throw error;
         if (/health deadline|timed out|timeout|ENOMEM|OOM/i.test(String(error.message))) {
           failedThreads = wantThreads;
         }
@@ -640,13 +669,10 @@ export class ProcessManager {
     }
     let child;
     try {
-      child = this.spawn(launch.command, launch.args, {
+      child = this.spawn(launch.command, launch.args, backendSpawnOptions({
         env: launch.env,
         cwd: this.packRoot,
-        windowsHide: true,
-        stdio: ['ignore', 'pipe', 'pipe'],
-        shell: false,
-      });
+      }));
     } catch (error) {
       this.cpuAllocator.release(agent.alias);
       throw error;
@@ -671,8 +697,7 @@ export class ProcessManager {
     this.registry.setStatus(agent.alias, 'starting', { profileId: profile.id });
     this.hostAdapter?.applyPriority(child);
     const append = (chunk) => { record.logs = (record.logs + chunk.toString()).slice(-MAX_LOG_CHARS); };
-    child.stdout?.on('data', append);
-    child.stderr?.on('data', append);
+    attachChildIO(child, append);
     child.once('exit', (code, signalName) => {
       record.state = 'exited';
       record.exitCode = code;
@@ -683,15 +708,17 @@ export class ProcessManager {
         this.registry.setStatus(agent.alias, 'cold', { lastExitCode: code });
       }
     });
-    child.once('error', append);
     try {
-      await this.waitForReady(agent, record, signal);
+      await this.waitForReady(agent, record);
       record.state = 'ready';
       this.registry.setStatus(agent.alias, 'ready', { pid: child.pid, profileId: profile.id });
       this.writeChildrenFile();
       await this.maybeRestoreDefault(agent, record).catch(() => {});
       return record;
     } catch (error) {
+      // A client abort is handled by awaitWithAbort in ensure(); never SIGKILL a
+      // child that is still loading just because one smoke hung up.
+      if (isAbortError(error) && record.child?.exitCode == null) throw error;
       await this.stopRecord(record);
       this.cpuAllocator.release(agent.alias);
       if (this.processes.get(agent.alias) === record) this.processes.delete(agent.alias);
@@ -700,7 +727,7 @@ export class ProcessManager {
     }
   }
 
-  async waitForReady(agent, record, signal) {
+  async waitForReady(agent, record) {
     const timeoutMs = this.manifest.gateway.cold_start_timeout_ms;
     const deadline = Date.now() + timeoutMs;
     const runtimeKind = this.manifest.runtimes[agent.runtime]?.kind;
@@ -710,18 +737,19 @@ export class ProcessManager {
     const probe = READY_PROBE[runtimeKind] ?? READY_PROBE['llama-server'];
     while (Date.now() < deadline) {
       if (record.child.exitCode !== null) throw new Error(`process exited with ${record.child.exitCode}`);
+      const probeMs = Math.max(250, Math.min(5_000, deadline - Date.now()));
       try {
         const response = await this.fetch(`http://127.0.0.1:${agent.port}${probe.path}`, {
-          signal: AbortSignal.timeout(1500),
+          signal: AbortSignal.timeout(probeMs),
           headers: { connection: 'close' },
         });
         try {
           if (typeof response.arrayBuffer === 'function') await response.arrayBuffer();
-          else if (response.body?.cancel) await response.body.cancel();
+          else if (typeof response.text === 'function') await response.text();
         } catch {}
         if (probe.ready(response)) return;
       } catch {}
-      await sleep(200, signal);
+      await sleep(200);
     }
     throw new Error(`health deadline exceeded after ${timeoutMs} ms`);
   }

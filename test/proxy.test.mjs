@@ -321,6 +321,7 @@ test('caller cancel during streaming stops upstream reader cleanly', async () =>
             async read() {
               readCount += 1;
               caller.abort();
+              if (readCount > 2) return { done: true, value: undefined };
               return { done: false, value: new TextEncoder().encode(chunk) };
             },
             releaseLock() {},
@@ -331,5 +332,50 @@ test('caller cancel during streaming stops upstream reader cleanly', async () =>
     }),
   });
   assert.equal(proxied.status, 200);
-  assert.equal(proxied.content, 'hello');
+  assert.equal(cancelled, false);
+});
+
+test('client abort after headers drains upstream and does not RST fetch', async () => {
+  const response = new FakeResponse();
+  const caller = new AbortController();
+  let fetchSignal;
+  let cancelled = false;
+  let reads = 0;
+  const chunk = `data: ${JSON.stringify({ choices: [{ delta: { content: 'x' } }] })}\n\n`;
+  const proxied = await proxyJson({
+    request: { method: 'POST', headers: {} },
+    response,
+    body: { model: 'general-text-speculator', stream: true, messages: [] },
+    target: 'http://127.0.0.1:9/v1/chat/completions',
+    config: { retry_initial_ms: 5, retry_max_ms: 10, retry_deadline_ms: 500, upstream_timeout_ms: 5000 },
+    signal: caller.signal,
+    fetchImpl: (_url, init) => {
+      fetchSignal = init.signal;
+      return {
+        status: 200,
+        headers: new Headers({ 'content-type': 'text/event-stream' }),
+        body: {
+          getReader() {
+            return {
+              async read() {
+                reads += 1;
+                if (reads === 1) {
+                  caller.abort();
+                  return { done: false, value: new TextEncoder().encode(chunk) };
+                }
+                if (reads === 2) return { done: false, value: new TextEncoder().encode('data: [DONE]\n\n') };
+                return { done: true, value: undefined };
+              },
+              releaseLock() {},
+              async cancel() { cancelled = true; },
+            };
+          },
+        },
+      };
+    },
+  });
+  assert.equal(fetchSignal.aborted, false, 'must not abort undici after headers (RST wedges --parallel 1)');
+  assert.equal(cancelled, false);
+  assert.ok(reads >= 3, 'must drain remaining frames');
+  assert.equal(proxied.status, 200);
 });

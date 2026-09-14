@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { proxyJson } from '../src/proxy.mjs';
 import { peekSpecialist } from '../src/handoff.mjs';
-import { deadlineSignal, isTimeoutAbort, readCappedText } from '../src/util.mjs';
+import { awaitWithAbort, deadlineSignal, isAbortError, isBenignSocketError, isTimeoutAbort, readCappedText } from '../src/util.mjs';
 import { UpstreamProtocolError, UpstreamTimeoutError } from '../src/errors.mjs';
 
 class FakeResponse extends EventEmitter {
@@ -36,6 +36,26 @@ test('isTimeoutAbort distinguishes our timeout from a caller cancel', () => {
   assert.equal(isTimeoutAbort({ name: 'AbortError' }, undefined), true);
   caller.abort();
   assert.equal(isTimeoutAbort({ name: 'TimeoutError' }, caller.signal), false);
+});
+
+test('isAbortError and isBenignSocketError cover hangup noise', () => {
+  assert.equal(isAbortError({ name: 'AbortError' }), true);
+  assert.equal(isAbortError({ code: 'ABORT_ERR', message: 'aborted' }), true);
+  assert.equal(isBenignSocketError({ code: 'ECONNRESET' }), true);
+  assert.equal(isBenignSocketError({ code: 'EPIPE' }), true);
+  assert.equal(isBenignSocketError({ code: 'ERR_STREAM_DESTROYED' }), true);
+  assert.equal(isBenignSocketError({ message: 'disk full' }), false);
+});
+
+test('awaitWithAbort rejects the waiter without cancelling the work', async () => {
+  const ac = new AbortController();
+  let finished = false;
+  const work = new Promise((resolve) => setTimeout(() => { finished = true; resolve('ok'); }, 40));
+  const waiter = awaitWithAbort(work, ac.signal);
+  ac.abort(new Error('client hung up'));
+  await assert.rejects(() => waiter);
+  assert.equal(await work, 'ok');
+  assert.equal(finished, true);
 });
 
 test('readCappedText streams and enforces the byte cap', async () => {

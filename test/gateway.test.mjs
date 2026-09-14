@@ -353,6 +353,66 @@ test('TLS ClientHello is dropped instead of HTTP 400', async (t) => {
   assert.equal(data.length, 0, `expected RST/close, got ${data.toString('utf8')}`);
 });
 
+test('aborted streaming chat leaves the gateway listening', async (t) => {
+  let resumeRead;
+  const blocker = new Promise((resolve) => { resumeRead = resolve; });
+  t.after(() => { resumeRead?.(); });
+  const { server } = await withServer(t, {}, {
+    ready: ['general-text-speculator'],
+    stubEnsure: true,
+    fetchImpl: async () => ({
+      status: 200,
+      headers: new Headers({ 'content-type': 'text/event-stream' }),
+      body: {
+        getReader() {
+          let first = true;
+          return {
+            async read() {
+              if (first) {
+                first = false;
+                return {
+                  done: false,
+                  value: new TextEncoder().encode(`data: ${JSON.stringify({ choices: [{ delta: { content: 'Hi' } }] })}\n\n`),
+                };
+              }
+              await blocker;
+              return { done: true, value: undefined };
+            },
+            releaseLock() {},
+            async cancel() {},
+          };
+        },
+      },
+    }),
+  });
+  const { port } = server.address();
+  await new Promise((resolve) => {
+    const req = http.request({
+      hostname: '127.0.0.1',
+      port,
+      path: '/v1/chat/completions',
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      family: 4,
+    }, (res) => {
+      res.on('data', () => {});
+      res.on('end', resolve);
+      res.on('error', () => resolve());
+    });
+    req.on('error', () => resolve());
+    req.write(JSON.stringify({
+      model: 'general-text-speculator',
+      stream: true,
+      messages: [{ role: 'user', content: 'hello' }],
+    }));
+    req.end();
+    setTimeout(() => req.destroy(), 50);
+  });
+  const health = await request(server, { path: '/health' });
+  assert.equal(health.status, 200);
+  resumeRead();
+});
+
 test('general-text thinking is off by default including max_tokens 256; explicit true is preserved', () => {
   const agent = { alias: 'general-text-speculator' };
   const short = prepareInferenceBody({ max_tokens: 24, messages: [] }, agent);
