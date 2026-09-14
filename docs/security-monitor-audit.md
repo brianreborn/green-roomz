@@ -30,4 +30,4 @@ Replica/quorum, GPU ring choice, respond owner process, per-OS verb matrix, iden
 
 ## sm_1.1 probe progress
 
-`native/sm11-monitor` on the 8600 GT (CUDA 6.5 / sm_11, **Win32** VS2013 fallback): copy+cmp, FNV (+batch), scrub, seq `{hi,lo}`, `--loops` / `--serve`. JS `sm11-gpu.mjs` wires fat-hash + hot-path scrub/seq/batch with CPU fallback and a warm `--serve` session. Place/respond/logger launches stay off CUDA. See `native/sm11-monitor/README.md` latency numbers and issue #13.
+`native/sm11-monitor` on the 8600 GT (CUDA 6.5 / sm_11, **Win32** VS2013 fallback): copy+cmp, FNV (+batch), scrub, seq `{hi,lo}`, `--loops` / `--serve`. JS `sm11-gpu.mjs` wires fat-hash + hot-path scrub/seq/batch with CPU fallback and a warm `--serve` session. Place/respond/logger launches stay off CUDA. See `native/sm11-monitor/README.md` latency numbers and issue #13. **#17:** N-API/node-gyp in-process bridge spiked and rejected on this toolchain; persistent `--serve` remains the integration choice.

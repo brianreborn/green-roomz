@@ -94,6 +94,32 @@ set GRZ_SM11=1
 node --test test/monitor-sm11-gpu.test.mjs
 ```
 
+## N-API / node-gyp spike (#17) — blocked; keep `--serve`
+
+Spike (qodesh, 2026-09-14, ~45 min): is a tiny **node-gyp / N-API** addon that links CUDA 6.5 and calls `cudaGetDeviceProperties` realistic next to this Win32 `sm11_monitor.exe`?
+
+**Decision: no.** Keep the persistent **`--serve` stdin protocol** already wired in `src/monitor/sm11-gpu.mjs`. Do not scaffold `native/sm11-napi/`.
+
+### Exact blockers (this box)
+
+| # | Blocker | Evidence |
+|---|---|---|
+| 1 | **Arch mismatch** | Live `out\sm11_monitor.exe` is **Win32** (`PE machine=0x014C`). Node is **x64** (`process.arch=x64`, `C:\Program Files\nodejs`, engines `>=22`). A Win32 `.node` cannot load into x64 Node. |
+| 2 | **x64 CUDA host link broken** | `nvcc -m64 -arch=sm_11 -ccbin …\x86_amd64` fails: `vcvars64.bat could not be found` under VS2013. Only `x86` + `x86_amd64` cross exist; no `VC\bin\amd64`, no `vcvars64.bat`. `build.bat` already falls back to `-m32`. CUDA 6.5 ships both `lib\Win32` and `lib\x64` cudart — x64 libs are unused because the host toolchain cannot finish an x64 link. |
+| 3 | **node-gyp / Node 24 vs VS2013** | Node **v24.19.0** (N-API 10, `modules=137`). node-gyp for Node 24 expects **Visual Studio ≥ 2022**. VS2013 is only supported up to **Node 8**. This box has **only** VS 12.0 (no VS2015/2017/2019/2022; no `vswhere`). |
+| 4 | **CUDA 6.5 host-compiler lock** | nvcc 6.5 accepts VS2013 as `-ccbin`. Installing VS2022 for node-gyp would not make nvcc 6.5 compile `.cu` with that newer cl; mixing VS2013 CUDA objs with a VS2022 N-API wrapper is an unsupported CRT/ABI mash-up even if bitness matched. |
+| 5 | **No 32-bit Node escape hatch** | Only x64 Node is installed. Official Node 24 Windows builds are x64-focused; pinning a 32-bit Node just to dlopen a Win32 CUDA addon is out of bar vs warm `--serve`. |
+
+### What was already measured (makes N-API unnecessary for the hot path)
+
+Cold spawn ≈ **100 ms**; `--serve` warm probes ≈ **1.6–2.2 ms**. Spawn dominated CUDA work; persistent stdin already removes that cost without an in-process addon.
+
+### Recommendation
+
+- **Ship / keep:** long-lived `sm11_monitor.exe --serve` + JSON line protocol (CPU fallback unchanged).
+- **Do not:** invest in `native/sm11-napi`, dual-toolchain node-gyp, or a 32-bit Node sideload for the 8600.
+- Revisit only if this box gains a real **amd64** VS2013 layout (`vcvars64.bat`) *and* a supported path to build x64 sm_11 objs that a current Node can load — unlikely without dropping CUDA 6.5 or Node 24.
+
 ## ggml / LLM offload spike (optional, blocked)
 
 Tried only as a short spike. **Prefer monitor path** — monitor alone makes the 8600 useful (#13).
