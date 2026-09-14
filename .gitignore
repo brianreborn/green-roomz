@@ -26,3 +26,6 @@ _qodesh-size-probe.ps1
 *.gguf
 .DS_Store
 Thumbs.db
+
+native/sm11-monitor/out/
+
