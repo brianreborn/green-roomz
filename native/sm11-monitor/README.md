@@ -138,6 +138,8 @@ set GRZ_SM11=1
 node --test test/monitor-sm11-gpu.test.mjs
 ```
 
+**Soak+CI (qodesh, 2026-09-14, tip `ac90e9c`):** `sm11-soak --waves 30 --per-wave 64` → 3840 pushes, `fail=0`, mailbox/ipc `gpuOk=120`, `serveAlive`, `max_push_ms≈7.5`, `elapsed_ms≈860`; `sm11-ci.ps1` PASS; `monitor-sm11-gpu.test.mjs` 36/36.
+
 ## N-API / node-gyp spike (#17) — blocked; keep `--serve`
 
 Spike (qodesh, 2026-09-14, ~45 min): is a tiny **node-gyp / N-API** addon that links CUDA 6.5 and calls `cudaGetDeviceProperties` realistic next to this Win32 `sm11_monitor.exe`?
