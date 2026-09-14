@@ -1,11 +1,17 @@
 # sm11-monitor
 
-Minimal **CUDA 6.5 / sm_1.1** probe for qodesh **GeForce 8600 GT**.
+CUDA **6.5 / sm_1.1** security-monitor hot-path assist for qodesh **GeForce 8600 GT**.
 
-Proves the GPU can do the security-monitor floor work:
+Proves the GPU can do mailbox/monitor floor work without listing models (**GPU MUST NOT list**):
 
-- device **copy** (mailbox private slot / F3–F21)
-- **FNV-1a** payload hash
+| Kernel / helper | Spec tie-in |
+|---|---|
+| device **copy** | private slot / F3–F21 (one copy engine on 8600) |
+| **FNV-1a** (+ batch of N envelopes) | fat-payload hash assist |
+| **seq `{hi,lo}`** stamp | logical 64-bit seq on sm_1.1 (matches `ids.mjs` `u64Inc`) |
+| ring **scrub** (zero / XOR) | clear or mask private-slot bytes |
+
+Host may own the 32-bit lock-free ring; GPU assists hash/copy/scrub/seq only. No replica quorum here.
 
 ## Build (qodesh)
 
@@ -27,12 +33,22 @@ On qodesh, VS2013 has no native amd64 `vcvars64.bat`, so the script falls back t
 ```bat
 native\sm11-monitor\out\sm11_monitor.exe
 native\sm11-monitor\out\sm11_monitor.exe some-payload
+native\sm11-monitor\out\sm11_monitor.exe --json
+native\sm11-monitor\out\sm11_monitor.exe --copy --hash
+native\sm11-monitor\out\sm11_monitor.exe --scrub --seq --batch 64 --env-bytes 256
 ```
 
-Expect `copy_ok=1 hash_ok=1` and `device0=GeForce 8600 GT sm_11`.
+Flags:
+
+- `--json` — machine-readable one-line JSON
+- `--copy` / `--hash` / `--scrub` / `--seq` — run only those probes (default: all)
+- `--batch N` — envelope count for batch hash / seq sample (default 64, max 4096)
+- `--env-bytes B` — bytes per envelope for batch/scrub (default 256, max 4096)
+
+Expect text like `copy_ok=1 hash_ok=1` and `device0=GeForce 8600 GT sm_11`, plus `scrub_ok=1` / `seq_ok=1` when those probes run.
 
 **Live proof (qodesh):** `copy_ok=1 hash_ok=1` on the 8600 GT with CUDA 6.5 / sm_11.
 
 ## Ship bar
 
-Landing this (and wiring most monitor ops through the same class of kernels) is enough to call the 8600 **useful**. See `docs/fleet-targets.md` and GitHub issue #13.
+Landing this class of kernels (and wiring monitor ops through them next) is enough to call the 8600 **useful**. See `docs/fleet-targets.md` and GitHub issue #13.
