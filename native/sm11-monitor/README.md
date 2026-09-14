@@ -10,8 +10,9 @@ Proves the GPU can do mailbox/monitor floor work without listing models (**GPU M
 | **FNV-1a** (+ batch of N envelopes) | fat-payload hash assist |
 | **seq `{hi,lo}`** stamp | logical 64-bit seq on sm_1.1 (matches `ids.mjs` `u64Inc`) |
 | ring **scrub** (zero / XOR) | clear or mask private-slot bytes |
+| **private-slot ring** (16–64 × env_bytes) | host 32-bit index; H2D→device copy into slot; stamp seq; hash; scrub on drop |
 
-Host may own the 32-bit lock-free ring; GPU assists hash/copy/scrub/seq only. No replica quorum here. Place / respond / logger launches stay off CUDA.
+Host owns the 32-bit lock-free ring index; GPU assists hash/copy/scrub/cmp/seq only (**GPU MUST NOT list**). No replica quorum here. Place / respond / logger launches stay off CUDA.
 
 ## Build (qodesh)
 
@@ -37,6 +38,7 @@ native\sm11-monitor\out\sm11_monitor.exe --json
 native\sm11-monitor\out\sm11_monitor.exe --copy --hash
 native\sm11-monitor\out\sm11_monitor.exe --scrub --seq --batch 64 --env-bytes 256
 native\sm11-monitor\out\sm11_monitor.exe --json --copy --hash --loops 20
+native\sm11-monitor\out\sm11_monitor.exe --json --ring-push --ring-slots 32 --env-bytes 64
 native\sm11-monitor\out\sm11_monitor.exe --serve
 ```
 
@@ -44,14 +46,17 @@ Flags:
 
 - `--json` — machine-readable one-line JSON
 - `--copy` / `--hash` / `--scrub` / `--seq` — run only those probes (default: all)
+- `--ring-push` / `--ring-hash` / `--ring-scrub` — fixed private-slot ring ops (host index; GPU assist)
+- `--ring-slots N` — ring capacity (default 32, range 16..64)
+- `--ring-slot I` — target slot for hash/scrub (default: last push / tail drop)
 - `--batch N` — envelope count for batch hash / seq sample (default 64, max 4096)
-- `--env-bytes B` — bytes per envelope for batch/scrub (default 256, max 4096)
+- `--env-bytes B` — bytes per envelope for batch/scrub/ring (default 256, max 4096)
 - `--loops N` — repeat probes in-process; JSON adds `ms_min` / `ms_avg` / `ms_max` / `loop_fail`
-- `--serve` — keep CUDA context warm; each stdin line is a CLI arg list; one JSON reply per line; `quit` ends
+- `--serve` — keep CUDA context + ring warm; each stdin line is a CLI arg list; one JSON reply per line; `quit` ends
 
-Expect text like `copy_ok=1 hash_ok=1` and `device0=GeForce 8600 GT sm_11`, plus `scrub_ok=1` / `seq_ok=1` / `cmp_ok=1` when those probes run.
+Expect text like `copy_ok=1 hash_ok=1` and `device0=GeForce 8600 GT sm_11`, plus `scrub_ok=1` / `seq_ok=1` / `cmp_ok=1` / `ring_ok=1` when those probes run.
 
-**Live proof (qodesh):** `copy_ok=1 hash_ok=1 cmp_ok=1 scrub_ok=1 seq_ok=1` on the 8600 GT with CUDA 6.5 / sm_11.
+**Live proof (qodesh):** `copy_ok=1 hash_ok=1 cmp_ok=1 scrub_ok=1 seq_ok=1 ring_ok=1` on the 8600 GT with CUDA 6.5 / sm_11.
 
 ## Stress / latency (qodesh, 2026-09-14)
 
@@ -77,8 +82,12 @@ Occasional multi-second outliers on scrub/seq are driver/context hiccups under c
 | `--json --loops 20` (all probes) | `loop_fail=0`, `ms_min≈9.3`, `ms_avg≈18.7`, `ms_max≈71` |
 | `--serve` then `--json --scrub --batch 8 --env-bytes 64` | ≈1.6 ms |
 | `--serve` then `--json --seq --batch 8` | ≈2.2 ms |
+| `--serve` then `--json --ring-push --ring-slots 16 --env-bytes 64` | first ≈38 ms (alloc); follow-ups ≈0.37–0.45 ms |
+| `--serve` then `--json --ring-hash --ring-slot 1` | ≈1.1 ms |
+| `--serve` then `--json --ring-scrub` | ≈0.14 ms |
+| `--serve` then `--json --ring-push … --loops 20` | `loop_fail=0`, `ms_avg≈0.42`, `ms_max≈0.68` |
 
-**Implication:** mailbox/monitor hot path must prefer `--serve` (or another persistent bridge). Per-op spawn cannot carry load.
+**Implication:** mailbox/monitor hot path must prefer `--serve` (or another persistent bridge). Per-op spawn cannot carry load. The private-slot ring stays resident across serve commands (host index; GPU never lists).
 
 ## Node wiring
 
@@ -87,6 +96,7 @@ Occasional multi-second outliers on scrub/seq are driver/context hiccups under c
 - Default assist opens a persistent `--serve` session when the exe is present (`serve: false` to force one-shot).
 - `MonitorIpc` / `Mailbox` auto-wire assists (`GRZ_SM11=0` disables; `GRZ_SM11=1` enables fat verify + hot-path scrub/seq/batch).
 - Hot path (when enabled): enqueue → `assistSeq`, ring drop/clear → `assistScrub`, drain → `assistBatch` (coalesced, non-blocking).
+- Private-slot ring assists: `assistRingPush` / `assistRingHash` / `assistRingScrub` (CPU twin when exe/CUDA unavailable).
 - Fat string payloads still store **sha256**; FNV-1a is the sm11 integrity twin / GPU probe.
 
 ```bat

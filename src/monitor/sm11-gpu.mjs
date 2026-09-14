@@ -1,7 +1,7 @@
 /**
  * sm_1.1 CUDA assist for mailbox/monitor hash + private-slot copy verify.
  * Spawns native/sm11-monitor/out/sm11_monitor.exe --json; CPU FNV-1a fallback.
- * Scrub / seq / batch probes; optional persistent --serve session (avoids ~100ms spawn).
+ * Scrub / seq / batch / private-slot ring probes; optional persistent --serve session.
  */
 
 import { existsSync } from 'node:fs';
@@ -24,6 +24,9 @@ export const SM11_SEQ_START = Object.freeze({ hi: 0, lo: 0xfffffffe });
 /** Small probe sizes for mailbox/monitor hot-path assists (avoid 8600 VRAM spikes). */
 export const SM11_HOT_BATCH = 8;
 export const SM11_HOT_ENV_BYTES = 64;
+export const SM11_DEFAULT_RING_SLOTS = 32;
+export const SM11_MIN_RING_SLOTS = 16;
+export const SM11_MAX_RING_SLOTS = 64;
 
 const REPO_ROOT = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
 
@@ -87,6 +90,197 @@ export function clampEnvBytes(n, fallback = SM11_DEFAULT_ENV_BYTES) {
   const v = Number(n);
   if (!Number.isFinite(v) || v < 1) return fallback;
   return Math.min(SM11_MAX_BYTES, Math.floor(v));
+}
+
+export function clampRingSlots(n, fallback = SM11_DEFAULT_RING_SLOTS) {
+  const v = Number(n);
+  if (!Number.isFinite(v) || v < SM11_MIN_RING_SLOTS) return fallback;
+  return Math.min(SM11_MAX_RING_SLOTS, Math.floor(v));
+}
+
+/** Host-side private-slot ring twin (32-bit index; GPU never lists). */
+export function createCpuRingState({
+  slots = SM11_DEFAULT_RING_SLOTS,
+  envBytes = SM11_HOT_ENV_BYTES,
+} = {}) {
+  const n = clampRingSlots(slots);
+  const e = clampEnvBytes(envBytes, SM11_HOT_ENV_BYTES);
+  return {
+    slots: n,
+    envBytes: e,
+    head: 0,
+    tail: 0,
+    count: 0,
+    pushCount: 0,
+    dropCount: 0,
+    seq: u64(0, 0),
+    slotsData: Array.from({ length: n }, () => Buffer.alloc(e, 0)),
+  };
+}
+
+function ringMod(idx, slots) {
+  return slots ? (idx % slots) : 0;
+}
+
+function cpuRingScrubTail(state) {
+  if (state.count === 0) {
+    return { ok: true, scrub_ok: true, ring_slot: 0xffffffff };
+  }
+  const slot = state.tail;
+  state.slotsData[slot].fill(0);
+  state.tail = ringMod(state.tail + 1, state.slots);
+  state.count -= 1;
+  state.dropCount += 1;
+  return { ok: true, scrub_ok: true, ring_slot: slot };
+}
+
+/** CPU twin of --ring-push (H2D+copy+seq+hash contract). */
+export function cpuRingPush(payload, {
+  state,
+  slots = SM11_DEFAULT_RING_SLOTS,
+  envBytes = SM11_HOT_ENV_BYTES,
+} = {}) {
+  const ring = state ?? createCpuRingState({ slots, envBytes });
+  let scrub = null;
+  if (ring.count >= ring.slots) scrub = cpuRingScrubTail(ring);
+
+  const host = Buffer.alloc(ring.envBytes, 0);
+  const bytes = toBytes(payload);
+  bytes.copy(host, 0, 0, Math.min(bytes.length, ring.envBytes));
+
+  const slot = ring.head;
+  const stamped = u64(ring.seq.hi, ring.seq.lo);
+  host.copy(ring.slotsData[slot]);
+  const hash = fnv1a64Hex(host);
+
+  ring.seq = u64Inc(ring.seq);
+  ring.head = ringMod(ring.head + 1, ring.slots);
+  ring.count += 1;
+  ring.pushCount += 1;
+
+  return {
+    ok: true,
+    backend: 'cpu',
+    ring_ok: true,
+    ring_push_ok: true,
+    ring_hash_ok: true,
+    ring_cmp_ok: true,
+    ring_cmp_mismatches: 0,
+    ring_slots: ring.slots,
+    ring_env_bytes: ring.envBytes,
+    ring_slot: slot,
+    ring_head: ring.head,
+    ring_tail: ring.tail,
+    ring_count: ring.count,
+    ring_push_count: ring.pushCount,
+    ring_drop_count: ring.dropCount,
+    ring_seq: stamped,
+    ring_hash: hash,
+    ring_expect: hash,
+    ring_scrub_ok: scrub ? scrub.scrub_ok : undefined,
+    state: ring,
+  };
+}
+
+/** CPU twin of --ring-hash. */
+export function cpuRingHash({
+  state,
+  slot,
+  slots = SM11_DEFAULT_RING_SLOTS,
+  envBytes = SM11_HOT_ENV_BYTES,
+} = {}) {
+  const ring = state ?? createCpuRingState({ slots, envBytes });
+  let idx = slot;
+  if (idx == null || idx === 0xffffffff) {
+    idx = ring.count
+      ? ringMod(ring.head + ring.slots - 1, ring.slots)
+      : 0;
+  }
+  idx = Number(idx) >>> 0;
+  if (idx >= ring.slots) {
+    return {
+      ok: false,
+      backend: 'cpu',
+      ring_ok: false,
+      ring_hash_ok: false,
+      state: ring,
+    };
+  }
+  const hash = fnv1a64Hex(ring.slotsData[idx]);
+  return {
+    ok: true,
+    backend: 'cpu',
+    ring_ok: true,
+    ring_hash_ok: true,
+    ring_slots: ring.slots,
+    ring_env_bytes: ring.envBytes,
+    ring_slot: idx,
+    ring_head: ring.head,
+    ring_tail: ring.tail,
+    ring_count: ring.count,
+    ring_push_count: ring.pushCount,
+    ring_drop_count: ring.dropCount,
+    ring_seq: u64(ring.seq.hi, ring.seq.lo),
+    ring_hash: hash,
+    ring_expect: hash,
+    state: ring,
+  };
+}
+
+/** CPU twin of --ring-scrub (tail drop or explicit slot zero). */
+export function cpuRingScrub({
+  state,
+  slot,
+  slots = SM11_DEFAULT_RING_SLOTS,
+  envBytes = SM11_HOT_ENV_BYTES,
+} = {}) {
+  const ring = state ?? createCpuRingState({ slots, envBytes });
+  if (slot != null && slot !== 0xffffffff) {
+    const idx = Number(slot) >>> 0;
+    if (idx >= ring.slots) {
+      return {
+        ok: false,
+        backend: 'cpu',
+        ring_ok: false,
+        ring_scrub_ok: false,
+        state: ring,
+      };
+    }
+    ring.slotsData[idx].fill(0);
+    return {
+      ok: true,
+      backend: 'cpu',
+      ring_ok: true,
+      ring_scrub_ok: true,
+      ring_slots: ring.slots,
+      ring_env_bytes: ring.envBytes,
+      ring_slot: idx,
+      ring_head: ring.head,
+      ring_tail: ring.tail,
+      ring_count: ring.count,
+      ring_push_count: ring.pushCount,
+      ring_drop_count: ring.dropCount,
+      ring_seq: u64(ring.seq.hi, ring.seq.lo),
+      state: ring,
+    };
+  }
+  const scrub = cpuRingScrubTail(ring);
+  return {
+    ok: scrub.ok,
+    backend: 'cpu',
+    ring_ok: scrub.ok,
+    ring_scrub_ok: scrub.scrub_ok,
+    ring_slots: ring.slots,
+    ring_env_bytes: ring.envBytes,
+    ring_slot: scrub.ring_slot,
+    ring_head: ring.head,
+    ring_tail: ring.tail,
+    ring_count: ring.count,
+    ring_push_count: ring.pushCount,
+    ring_drop_count: ring.dropCount,
+    ring_seq: u64(ring.seq.hi, ring.seq.lo),
+    state: ring,
+  };
 }
 
 export function cpuVerify(payload) {
@@ -266,6 +460,11 @@ export function createSm11ServeSession({
     }
   }
 
+  function resetBuffers() {
+    buf = '';
+    stderr = '';
+  }
+
   function onChunk(chunk) {
     buf += String(chunk);
     let nl;
@@ -290,16 +489,25 @@ export function createSm11ServeSession({
   function attach(proc) {
     child = proc;
     dead = false;
-    buf = '';
-    stderr = '';
-    proc.stdout?.on('data', onChunk);
-    proc.stderr?.on('data', (d) => { stderr += d; });
+    resetBuffers();
+    // Gate all handlers on child === proc so a prior kill's late close/data
+    // cannot clobber a respawned --serve session under load.
+    proc.stdout?.on('data', (chunk) => {
+      if (child !== proc) return;
+      onChunk(chunk);
+    });
+    proc.stderr?.on('data', (d) => {
+      if (child !== proc) return;
+      stderr += d;
+    });
     proc.on('error', (error) => {
+      if (child !== proc) return;
       dead = true;
       child = null;
       rejectAll(error);
     });
     proc.on('close', () => {
+      if (child !== proc) return;
       dead = true;
       child = null;
       rejectAll(new Error('serve_closed'));
@@ -308,6 +516,13 @@ export function createSm11ServeSession({
 
   async function ensureStarted() {
     if (child && !dead) return;
+    // Prior close()/crash left dead=true; respawn a fresh --serve child.
+    if (child) {
+      try { child.kill(); } catch { /* ignore */ }
+      child = null;
+    }
+    dead = false;
+    resetBuffers();
     const proc = spawnImpl(exePath, ['--serve'], {
       windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -352,14 +567,20 @@ export function createSm11ServeSession({
   }
 
   async function close() {
-    if (!child) return;
+    // Drop in-flight waiters first so quit/kill cannot mis-attribute JSON lines.
+    rejectAll(new Error('serve_closed'));
+    if (!child) {
+      dead = true;
+      return;
+    }
     try {
-      await requestOnce(['quit'], Math.min(timeoutMs, 5_000)).catch(() => {});
-    } catch {}
-    try { child.stdin?.end(); } catch {}
-    try { child.kill(); } catch {}
+      child.stdin.write('quit\n');
+    } catch { /* ignore */ }
+    try { child.stdin?.end(); } catch { /* ignore */ }
+    try { child.kill(); } catch { /* ignore */ }
     child = null;
     dead = true;
+    resetBuffers();
   }
 
   return {
@@ -376,22 +597,36 @@ export function serveRunExeFactory(session, oneShot = defaultRunExe) {
       const filtered = (args ?? []).filter((a) => a !== '--serve');
       return await session.request(filtered, opts);
     } catch (error) {
-      try { await session.close(); } catch {}
-      if (error?.code === 124 || String(error?.message ?? '').includes('timeout')) {
-        return { code: 124, stdout: '', stderr: String(error?.message ?? error) };
+      const msg = String(error?.message ?? error);
+      const fatal = error?.code === 124
+        || msg.includes('timeout')
+        || msg.includes('serve_closed')
+        || msg.includes('serve_unavailable');
+      // Only tear down on fatal serve faults; leave the session up for reuse otherwise.
+      if (fatal) {
+        try { await session.close(); } catch { /* ignore */ }
+      }
+      if (error?.code === 124 || msg.includes('timeout')) {
+        return { code: 124, stdout: '', stderr: msg };
       }
       return oneShot(exePath, args, opts);
     }
   };
 }
 
-function buildCliArgs({ flags, batch, envBytes, payload, loops }) {
+function buildCliArgs({ flags, batch, envBytes, ringSlots, ringSlot, payload, loops }) {
   const args = ['--json', ...flags];
   if (batch != null) {
     args.push('--batch', String(clampBatch(batch)));
   }
   if (envBytes != null) {
     args.push('--env-bytes', String(clampEnvBytes(envBytes)));
+  }
+  if (ringSlots != null) {
+    args.push('--ring-slots', String(clampRingSlots(ringSlots)));
+  }
+  if (ringSlot != null && ringSlot !== 0xffffffff) {
+    args.push('--ring-slot', String(Number(ringSlot) >>> 0));
   }
   if (loops != null && Number(loops) > 1) {
     args.push('--loops', String(Math.min(10_000, Math.max(1, Math.floor(Number(loops))))));
@@ -422,6 +657,8 @@ async function runAssistProbe({
   flags,
   batch,
   envBytes,
+  ringSlots,
+  ringSlot,
   payload = SM11_PROBE_PAYLOAD,
   loops,
   exePath,
@@ -438,7 +675,7 @@ async function runAssistProbe({
     return { ...cpuResult(), fallback: preferGpu ? 'exe_missing' : 'prefer_cpu' };
   }
 
-  const args = buildCliArgs({ flags, batch, envBytes, payload, loops });
+  const args = buildCliArgs({ flags, batch, envBytes, ringSlots, ringSlot, payload, loops });
   const ran = await runExe(exePath, args, { timeoutMs });
   const parsed = parseJsonLine(ran.stdout);
   if (!parsed || ran.code === 127 || ran.code === 124) {
@@ -463,6 +700,130 @@ async function runAssistProbe({
     cuda: parsed,
     stderr: ran.stderr,
   };
+}
+
+function ringFieldsFromParsed(parsed) {
+  return {
+    ring_ok: parsed.ring_ok === true,
+    ring_slots: parsed.ring_slots,
+    ring_env_bytes: parsed.ring_env_bytes,
+    ring_slot: parsed.ring_slot,
+    ring_head: parsed.ring_head,
+    ring_tail: parsed.ring_tail,
+    ring_count: parsed.ring_count,
+    ring_push_count: parsed.ring_push_count,
+    ring_drop_count: parsed.ring_drop_count,
+    ring_seq: parsed.ring_seq ?? null,
+    ring_hash: parsed.ring_hash ?? null,
+    ring_expect: parsed.ring_expect ?? null,
+    ring_push_ok: parsed.ring_push_ok,
+    ring_hash_ok: parsed.ring_hash_ok,
+    ring_scrub_ok: parsed.ring_scrub_ok,
+    ring_cmp_ok: parsed.ring_cmp_ok,
+    ring_cmp_mismatches: parsed.ring_cmp_mismatches,
+  };
+}
+
+export async function verifyRingPush(payload = SM11_PROBE_PAYLOAD, options = {}) {
+  const {
+    exePath = defaultExePath(),
+    preferGpu = true,
+    timeoutMs = 15_000,
+    runExe = defaultRunExe,
+    exists = existsSync,
+    ringSlots = SM11_DEFAULT_RING_SLOTS,
+    envBytes = SM11_HOT_ENV_BYTES,
+    state,
+  } = options;
+
+  return runAssistProbe({
+    flags: ['--ring-push'],
+    ringSlots,
+    envBytes,
+    payload,
+    exePath,
+    preferGpu,
+    timeoutMs,
+    runExe,
+    exists,
+    cpu: () => cpuRingPush(payload, { state, slots: ringSlots, envBytes }),
+    accept: (parsed) => {
+      if (parsed.ok === true && parsed.ring_ok === true && parsed.ring_push_ok === true) {
+        return ringFieldsFromParsed(parsed);
+      }
+      return null;
+    },
+  });
+}
+
+export async function verifyRingHash(options = {}) {
+  const {
+    exePath = defaultExePath(),
+    preferGpu = true,
+    timeoutMs = 15_000,
+    runExe = defaultRunExe,
+    exists = existsSync,
+    ringSlots = SM11_DEFAULT_RING_SLOTS,
+    envBytes = SM11_HOT_ENV_BYTES,
+    ringSlot,
+    state,
+    payload = SM11_PROBE_PAYLOAD,
+  } = options;
+
+  return runAssistProbe({
+    flags: ['--ring-hash'],
+    ringSlots,
+    ringSlot,
+    envBytes,
+    payload,
+    exePath,
+    preferGpu,
+    timeoutMs,
+    runExe,
+    exists,
+    cpu: () => cpuRingHash({ state, slot: ringSlot, slots: ringSlots, envBytes }),
+    accept: (parsed) => {
+      if (parsed.ok === true && parsed.ring_ok === true && parsed.ring_hash_ok === true) {
+        return ringFieldsFromParsed(parsed);
+      }
+      return null;
+    },
+  });
+}
+
+export async function verifyRingScrub(options = {}) {
+  const {
+    exePath = defaultExePath(),
+    preferGpu = true,
+    timeoutMs = 15_000,
+    runExe = defaultRunExe,
+    exists = existsSync,
+    ringSlots = SM11_DEFAULT_RING_SLOTS,
+    envBytes = SM11_HOT_ENV_BYTES,
+    ringSlot,
+    state,
+    payload = SM11_PROBE_PAYLOAD,
+  } = options;
+
+  return runAssistProbe({
+    flags: ['--ring-scrub'],
+    ringSlots,
+    ringSlot,
+    envBytes,
+    payload,
+    exePath,
+    preferGpu,
+    timeoutMs,
+    runExe,
+    exists,
+    cpu: () => cpuRingScrub({ state, slot: ringSlot, slots: ringSlots, envBytes }),
+    accept: (parsed) => {
+      if (parsed.ok === true && parsed.ring_ok === true && parsed.ring_scrub_ok === true) {
+        return ringFieldsFromParsed(parsed);
+      }
+      return null;
+    },
+  });
 }
 
 /**
@@ -685,13 +1046,24 @@ export function createSm11Assist(options = {}) {
     batch: opts.hotBatch ?? SM11_HOT_BATCH,
     envBytes: opts.hotEnvBytes ?? SM11_HOT_ENV_BYTES,
   };
+  const ringShared = {
+    ...shared,
+    ringSlots: opts.ringSlots ?? SM11_DEFAULT_RING_SLOTS,
+    envBytes: opts.hotEnvBytes ?? SM11_HOT_ENV_BYTES,
+  };
+  /** CPU ring state used when CUDA path falls back or preferGpu=false. */
+  let cpuRing = opts.cpuRingState ?? null;
 
   const stats = {
     fat: 0,
     verifyAttempts: 0,
+    verify: 0,
     scrub: 0,
     seq: 0,
     batch: 0,
+    ringPush: 0,
+    ringHash: 0,
+    ringScrub: 0,
     coalesced: 0,
     gpuOk: 0,
     cpuFallback: 0,
@@ -700,22 +1072,39 @@ export function createSm11Assist(options = {}) {
   };
   const pending = new Set();
   /** One in-flight probe per kind — hot path must not spawn-storm under load. */
-  const inflight = { scrub: null, seq: null, batch: null };
+  const inflight = {
+    scrub: null,
+    seq: null,
+    batch: null,
+    verify: null,
+    ringPush: null,
+    ringHash: null,
+    ringScrub: null,
+  };
 
   function record(result, kind = 'verify') {
     stats.verifyAttempts += 1;
+    if (kind === 'verify') stats.verify += 1;
     if (kind === 'scrub') stats.scrub += 1;
     if (kind === 'seq') stats.seq += 1;
     if (kind === 'batch') stats.batch += 1;
+    if (kind === 'ringPush') stats.ringPush += 1;
+    if (kind === 'ringHash') stats.ringHash += 1;
+    if (kind === 'ringScrub') stats.ringScrub += 1;
+    if (result.state) cpuRing = result.state;
     stats.last = {
       backend: result.backend,
       ok: result.ok,
       fallback: result.fallback ?? null,
-      hash: result.hash ?? null,
+      hash: result.hash ?? result.ring_hash ?? null,
       kind,
       scrub_ok: result.scrub_ok,
       seq_ok: result.seq_ok,
       batch_ok: result.batch_ok,
+      ring_ok: result.ring_ok,
+      ring_push_ok: result.ring_push_ok,
+      ring_hash_ok: result.ring_hash_ok,
+      ring_scrub_ok: result.ring_scrub_ok,
     };
     if (result.backend === 'cuda' && result.ok) stats.gpuOk += 1;
     else if (result.fallback) stats.cpuFallback += 1;
@@ -758,7 +1147,8 @@ export function createSm11Assist(options = {}) {
   }
 
   function scheduleVerify(payload) {
-    return track(verifyPayload(payload, shared), 'verify');
+    // Coalesce fat verifies under load — one CUDA/CPU probe at a time, never spawn-storm.
+    return coalesce('verify', () => track(verifyPayload(payload, shared), 'verify'));
   }
 
   /** Non-blocking scrub probe; CPU fallback when exe missing/fails. */
@@ -774,6 +1164,33 @@ export function createSm11Assist(options = {}) {
   /** Non-blocking batch envelope hash; CPU fallback when exe missing/fails. */
   function assistBatch(probeOpts = {}) {
     return coalesce('batch', () => track(verifyBatch({ ...shared, ...probeOpts }), 'batch'));
+  }
+
+  /** Non-blocking private-slot ring push (H2D + device copy + seq + hash). */
+  function assistRingPush(payload = SM11_PROBE_PAYLOAD, probeOpts = {}) {
+    return coalesce('ringPush', () => track(verifyRingPush(payload, {
+      ...ringShared,
+      state: cpuRing,
+      ...probeOpts,
+    }), 'ringPush'));
+  }
+
+  /** Non-blocking hash of a ring slot. */
+  function assistRingHash(probeOpts = {}) {
+    return coalesce('ringHash', () => track(verifyRingHash({
+      ...ringShared,
+      state: cpuRing,
+      ...probeOpts,
+    }), 'ringHash'));
+  }
+
+  /** Non-blocking scrub/drop of a ring slot. */
+  function assistRingScrub(probeOpts = {}) {
+    return coalesce('ringScrub', () => track(verifyRingScrub({
+      ...ringShared,
+      state: cpuRing,
+      ...probeOpts,
+    }), 'ringScrub'));
   }
 
   /** Hot-path: seq stamp assist after enqueue (no-op if hotPath disabled). */
@@ -821,6 +1238,9 @@ export function createSm11Assist(options = {}) {
     assistScrub,
     assistSeq,
     assistBatch,
+    assistRingPush,
+    assistRingHash,
+    assistRingScrub,
     onEnqueue,
     onDropOrClear,
     onDrain,
@@ -828,6 +1248,21 @@ export function createSm11Assist(options = {}) {
     verifyScrub: (probeOpts) => verifyScrub({ ...shared, ...probeOpts }).then((r) => record(r, 'scrub')),
     verifySeq: (probeOpts) => verifySeq({ ...shared, ...probeOpts }).then((r) => record(r, 'seq')),
     verifyBatch: (probeOpts) => verifyBatch({ ...shared, ...probeOpts }).then((r) => record(r, 'batch')),
+    verifyRingPush: (payload, probeOpts) => verifyRingPush(payload, {
+      ...ringShared,
+      state: cpuRing,
+      ...probeOpts,
+    }).then((r) => record(r, 'ringPush')),
+    verifyRingHash: (probeOpts) => verifyRingHash({
+      ...ringShared,
+      state: cpuRing,
+      ...probeOpts,
+    }).then((r) => record(r, 'ringHash')),
+    verifyRingScrub: (probeOpts) => verifyRingScrub({
+      ...ringShared,
+      state: cpuRing,
+      ...probeOpts,
+    }).then((r) => record(r, 'ringScrub')),
     flush,
     close,
     stats: () => ({

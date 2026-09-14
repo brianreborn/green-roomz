@@ -1,10 +1,12 @@
 /*
  * sm11_monitor.cu — 8600 GT (sm_1.1) security-monitor hot-path assist.
  * CUDA 6.5 / compute_11: private-slot copy (F3/F21), FNV-1a, seq {hi,lo},
- * batch envelope hash, ring scrub, device cmp. GPU MUST NOT list.
- * Host may own the ring. Build: native/sm11-monitor/build.bat
+ * batch envelope hash, ring scrub, device cmp, fixed private-slot ring.
+ * GPU MUST NOT list. Host owns 32-bit ring index; GPU assists hash/copy/scrub/cmp.
+ * Place/respond/logger are never CUDA launches. Build: native/sm11-monitor/build.bat
  *
  * Modes: one-shot CLI; --loops N (in-process stress); --serve (stdin cmds).
+ * Ring persists across --serve commands (device slots stay allocated).
  */
 #include <cuda_runtime.h>
 #include <cstdio>
@@ -29,6 +31,18 @@
 
 #ifndef SM11_DEFAULT_BATCH
 #define SM11_DEFAULT_BATCH 64
+#endif
+
+#ifndef SM11_DEFAULT_RING_SLOTS
+#define SM11_DEFAULT_RING_SLOTS 32
+#endif
+
+#ifndef SM11_MIN_RING_SLOTS
+#define SM11_MIN_RING_SLOTS 16
+#endif
+
+#ifndef SM11_MAX_RING_SLOTS
+#define SM11_MAX_RING_SLOTS 64
 #endif
 
 #ifndef SM11_SERVE_LINE
@@ -153,16 +167,46 @@ static double wall_ms_now(void) {
 #endif
 }
 
+/*
+ * Fixed private-slot ring in device memory.
+ * Host owns head/tail/count (32-bit lock-free style for single producer probe).
+ * GPU never enumerates/list slots; only copy/hash/scrub/cmp on host-chosen indices.
+ */
+struct PrivateRing {
+  unsigned char *d_slots;   /* slots * env_bytes */
+  unsigned char *d_scratch; /* one envelope staging (H2D then device copy — F3) */
+  unsigned *d_mis;
+  unsigned long long *d_hash;
+  unsigned slots;
+  unsigned env_bytes;
+  unsigned head;       /* next push index */
+  unsigned tail;       /* next drop index */
+  unsigned count;      /* occupied */
+  unsigned push_count; /* total pushes (u32 wrap ok) */
+  unsigned drop_count;
+  Seq64 seq;
+  int live;
+};
+
+static PrivateRing g_ring;
+
 struct Options {
   int json;
   int do_copy;
   int do_hash;
   int do_scrub;
   int do_seq;
+  int do_ring_push;
+  int do_ring_hash;
+  int do_ring_scrub;
   int any_flag;
+  int ring_flag;
   int serve;
   unsigned batch;
   unsigned env_bytes;
+  unsigned ring_slots;
+  unsigned ring_slot; /* UINT_MAX = auto (last push / tail) */
+  int ring_slot_set;
   unsigned loops;
   const char *payload;
 };
@@ -174,12 +218,27 @@ struct ProbeResult {
   int ok_batch;
   int ok_scrub;
   int ok_seq;
+  int ok_ring_push;
+  int ok_ring_hash;
+  int ok_ring_scrub;
+  int ok_ring;
   unsigned long long h_hash;
   unsigned long long expect_hash;
+  unsigned long long ring_hash;
+  unsigned long long ring_expect;
   Seq64 seq_start;
   Seq64 seq_end;
+  Seq64 ring_seq;
   unsigned scrub_bytes;
   unsigned cmp_mismatches;
+  unsigned ring_slots;
+  unsigned ring_env_bytes;
+  unsigned ring_slot;
+  unsigned ring_head;
+  unsigned ring_tail;
+  unsigned ring_count;
+  unsigned ring_push_count;
+  unsigned ring_drop_count;
   double ms;
   int cuda_err;
 };
@@ -187,12 +246,79 @@ struct ProbeResult {
 static void usage(const char *argv0) {
   std::fprintf(stderr,
     "usage: %s [--json] [--copy] [--hash] [--scrub] [--seq]\n"
+    "          [--ring-push] [--ring-hash] [--ring-scrub]\n"
+    "          [--ring-slots N] [--ring-slot I]\n"
     "          [--batch N] [--env-bytes B] [--loops N] [--serve] [payload]\n"
     "  default: all probes (copy+hash+scrub+seq)\n"
+    "  --ring-*  fixed private-slot ring (host index; GPU hash/copy/scrub/cmp)\n"
     "  --loops N  repeat probes in-process (reports ms_*); N>=1\n"
     "  --serve    stdin lines of CLI args; one JSON reply per line; 'quit' ends\n"
     "  GPU private-slot assist only; does not list models\n",
     argv0 ? argv0 : "sm11_monitor");
+}
+
+static unsigned ring_mod(unsigned idx, unsigned slots) {
+  return slots ? (idx % slots) : 0u;
+}
+
+static void ring_reset_host_counters(PrivateRing *r) {
+  r->head = 0;
+  r->tail = 0;
+  r->count = 0;
+  r->push_count = 0;
+  r->drop_count = 0;
+  r->seq.hi = 0;
+  r->seq.lo = 0;
+}
+
+static void ring_free(PrivateRing *r) {
+  if (!r) return;
+  if (r->d_slots) cudaFree(r->d_slots);
+  if (r->d_scratch) cudaFree(r->d_scratch);
+  if (r->d_mis) cudaFree(r->d_mis);
+  if (r->d_hash) cudaFree(r->d_hash);
+  std::memset(r, 0, sizeof(*r));
+}
+
+/* Ensure device ring matches slots×env_bytes. Reallocates if geometry changes. */
+static int ring_ensure(PrivateRing *r, unsigned slots, unsigned env_bytes) {
+  if (r->live && r->slots == slots && r->env_bytes == env_bytes) return 0;
+  ring_free(r);
+  const size_t bytes = (size_t)slots * (size_t)env_bytes;
+  if (check(cudaMalloc((void **)&r->d_slots, bytes), "Malloc ring slots")) return 1;
+  if (check(cudaMalloc((void **)&r->d_scratch, env_bytes), "Malloc ring scratch")) {
+    ring_free(r);
+    return 1;
+  }
+  if (check(cudaMalloc((void **)&r->d_mis, sizeof(unsigned)), "Malloc ring cmp")) {
+    ring_free(r);
+    return 1;
+  }
+  if (check(cudaMalloc((void **)&r->d_hash, sizeof(unsigned long long)), "Malloc ring hash")) {
+    ring_free(r);
+    return 1;
+  }
+  if (check(cudaMemset(r->d_slots, 0, bytes), "Memset ring")) {
+    ring_free(r);
+    return 1;
+  }
+  r->slots = slots;
+  r->env_bytes = env_bytes;
+  ring_reset_host_counters(r);
+  r->live = 1;
+  return 0;
+}
+
+static void ring_snapshot(const PrivateRing *ring, ProbeResult *r, int keep_seq) {
+  r->ring_slots = ring->slots;
+  r->ring_env_bytes = ring->env_bytes;
+  r->ring_head = ring->head;
+  r->ring_tail = ring->tail;
+  r->ring_count = ring->count;
+  r->ring_push_count = ring->push_count;
+  r->ring_drop_count = ring->drop_count;
+  /* Push already stamped r->ring_seq; otherwise expose next seq. */
+  if (!keep_seq) r->ring_seq = ring->seq;
 }
 
 static int parse_u(const char *s, unsigned *out) {
@@ -210,10 +336,17 @@ static void options_defaults(Options *opt) {
   opt->do_hash = 0;
   opt->do_scrub = 0;
   opt->do_seq = 0;
+  opt->do_ring_push = 0;
+  opt->do_ring_hash = 0;
+  opt->do_ring_scrub = 0;
   opt->any_flag = 0;
+  opt->ring_flag = 0;
   opt->serve = 0;
   opt->batch = SM11_DEFAULT_BATCH;
   opt->env_bytes = SM11_DEFAULT_ENV_BYTES;
+  opt->ring_slots = SM11_DEFAULT_RING_SLOTS;
+  opt->ring_slot = 0xffffffffu;
+  opt->ring_slot_set = 0;
   opt->loops = 1;
   opt->payload = "green-roomz-mailbox-probe";
 }
@@ -256,6 +389,24 @@ static int parse_args(int argc, char **argv, Options *opt) {
       opt->any_flag = 1;
       continue;
     }
+    if (std::strcmp(a, "--ring-push") == 0) {
+      opt->do_ring_push = 1;
+      opt->any_flag = 1;
+      opt->ring_flag = 1;
+      continue;
+    }
+    if (std::strcmp(a, "--ring-hash") == 0) {
+      opt->do_ring_hash = 1;
+      opt->any_flag = 1;
+      opt->ring_flag = 1;
+      continue;
+    }
+    if (std::strcmp(a, "--ring-scrub") == 0) {
+      opt->do_ring_scrub = 1;
+      opt->any_flag = 1;
+      opt->ring_flag = 1;
+      continue;
+    }
     if (std::strcmp(a, "--batch") == 0) {
       if (i + 1 >= argc || parse_u(argv[++i], &opt->batch)) {
         std::fprintf(stderr, "bad --batch\n");
@@ -268,6 +419,21 @@ static int parse_args(int argc, char **argv, Options *opt) {
         std::fprintf(stderr, "bad --env-bytes\n");
         return 1;
       }
+      continue;
+    }
+    if (std::strcmp(a, "--ring-slots") == 0) {
+      if (i + 1 >= argc || parse_u(argv[++i], &opt->ring_slots)) {
+        std::fprintf(stderr, "bad --ring-slots\n");
+        return 1;
+      }
+      continue;
+    }
+    if (std::strcmp(a, "--ring-slot") == 0) {
+      if (i + 1 >= argc || parse_u(argv[++i], &opt->ring_slot)) {
+        std::fprintf(stderr, "bad --ring-slot\n");
+        return 1;
+      }
+      opt->ring_slot_set = 1;
       continue;
     }
     if (std::strcmp(a, "--loops") == 0) {
@@ -291,6 +457,8 @@ static int parse_args(int argc, char **argv, Options *opt) {
     opt->do_scrub = 1;
     opt->do_seq = 1;
   }
+  /* Ring-only commands skip legacy default probe set when mixed with nothing else —
+   * ring_flag already set any_flag so defaults above are skipped. */
   return 0;
 }
 
@@ -303,9 +471,19 @@ static int validate_options(const Options *opt) {
     std::fprintf(stderr, "env-bytes %u out of range\n", opt->env_bytes);
     return 5;
   }
+  if (opt->ring_slots < SM11_MIN_RING_SLOTS || opt->ring_slots > SM11_MAX_RING_SLOTS) {
+    std::fprintf(stderr, "ring-slots %u out of range (%u..%u)\n",
+                 opt->ring_slots, SM11_MIN_RING_SLOTS, SM11_MAX_RING_SLOTS);
+    return 5;
+  }
+  if (opt->ring_slot_set && opt->ring_slot >= opt->ring_slots) {
+    std::fprintf(stderr, "ring-slot %u >= ring-slots %u\n", opt->ring_slot, opt->ring_slots);
+    return 5;
+  }
   const size_t batch_bytes = (size_t)opt->batch * (size_t)opt->env_bytes;
-  if (batch_bytes > 32u * 1024u * 1024u) {
-    std::fprintf(stderr, "batch*env-bytes too large for 8600 probe\n");
+  const size_t ring_bytes = (size_t)opt->ring_slots * (size_t)opt->env_bytes;
+  if (batch_bytes > 32u * 1024u * 1024u || ring_bytes > 16u * 1024u * 1024u) {
+    std::fprintf(stderr, "batch/ring footprint too large for 8600 probe\n");
     return 5;
   }
   unsigned n_payload = (unsigned)std::strlen(opt->payload);
@@ -329,16 +507,141 @@ static void result_clear(ProbeResult *r) {
   r->ok_batch = 1;
   r->ok_scrub = 1;
   r->ok_seq = 1;
+  r->ok_ring_push = 1;
+  r->ok_ring_hash = 1;
+  r->ok_ring_scrub = 1;
+  r->ok_ring = 1;
   r->h_hash = 0;
   r->expect_hash = 0;
+  r->ring_hash = 0;
+  r->ring_expect = 0;
   r->seq_start.hi = 0;
   r->seq_start.lo = 0xfffffffeu;
   r->seq_end.hi = 0;
   r->seq_end.lo = 0;
+  r->ring_seq.hi = 0;
+  r->ring_seq.lo = 0;
   r->scrub_bytes = 0;
   r->cmp_mismatches = 0;
+  r->ring_slots = 0;
+  r->ring_env_bytes = 0;
+  r->ring_slot = 0xffffffffu;
+  r->ring_head = 0;
+  r->ring_tail = 0;
+  r->ring_count = 0;
+  r->ring_push_count = 0;
+  r->ring_drop_count = 0;
   r->ms = 0;
   r->cuda_err = 0;
+}
+
+/* Scrub one occupied slot at tail (drop). Host advances index; GPU zeros bytes. */
+static int ring_scrub_tail(PrivateRing *ring, unsigned threads, ProbeResult *r) {
+  if (ring->count == 0u) {
+    r->ok_ring_scrub = 1;
+    r->ring_slot = 0xffffffffu;
+    return 0;
+  }
+  const unsigned slot = ring->tail;
+  unsigned char *d_slot = ring->d_slots + (size_t)slot * ring->env_bytes;
+  k_scrub_zero<<<blocks_for(ring->env_bytes, threads), threads>>>(d_slot, ring->env_bytes);
+  if (check(cudaDeviceSynchronize(), "sync ring scrub")) { r->cuda_err = 1; return 1; }
+
+  std::vector<unsigned char> back(ring->env_bytes);
+  if (check(cudaMemcpy(back.data(), d_slot, ring->env_bytes, cudaMemcpyDeviceToHost), "D2H ring scrub")) {
+    r->cuda_err = 1; return 1;
+  }
+  int zero_ok = 1;
+  for (unsigned i = 0; i < ring->env_bytes; i++) {
+    if (back[i] != 0) { zero_ok = 0; break; }
+  }
+  r->ok_ring_scrub = zero_ok ? 1 : 0;
+  r->ring_slot = slot;
+  ring->tail = ring_mod(ring->tail + 1u, ring->slots);
+  ring->count -= 1u;
+  ring->drop_count += 1u;
+  return 0;
+}
+
+/*
+ * Push envelope: H2D into scratch, device copy into private slot (F3/F21),
+ * stamp seq on host, hash slot. If full, scrub oldest first.
+ */
+static int ring_push_once(PrivateRing *ring, const unsigned char *payload, unsigned n_payload,
+                          unsigned threads, ProbeResult *r) {
+  if (ring->count >= ring->slots) {
+    if (ring_scrub_tail(ring, threads, r)) return 1;
+    if (!r->ok_ring_scrub) { r->ok_ring_push = 0; return 0; }
+  }
+
+  std::vector<unsigned char> host(ring->env_bytes, 0);
+  const unsigned copy_n = n_payload < ring->env_bytes ? n_payload : ring->env_bytes;
+  if (copy_n) std::memcpy(host.data(), payload, copy_n);
+
+  if (check(cudaMemcpy(ring->d_scratch, host.data(), ring->env_bytes, cudaMemcpyHostToDevice),
+            "H2D ring scratch")) {
+    r->cuda_err = 1; return 1;
+  }
+
+  const unsigned slot = ring->head;
+  unsigned char *d_slot = ring->d_slots + (size_t)slot * ring->env_bytes;
+  k_copy<<<blocks_for(ring->env_bytes, threads), threads>>>(ring->d_scratch, d_slot, ring->env_bytes);
+  if (check(cudaDeviceSynchronize(), "sync ring copy")) { r->cuda_err = 1; return 1; }
+
+  unsigned zero = 0;
+  if (check(cudaMemcpy(ring->d_mis, &zero, sizeof(zero), cudaMemcpyHostToDevice), "H2D ring cmp0")) {
+    r->cuda_err = 1; return 1;
+  }
+  k_cmp<<<blocks_for(ring->env_bytes, threads), threads>>>(ring->d_scratch, d_slot, ring->env_bytes, ring->d_mis);
+  if (check(cudaDeviceSynchronize(), "sync ring cmp")) { r->cuda_err = 1; return 1; }
+  unsigned mis = 0;
+  if (check(cudaMemcpy(&mis, ring->d_mis, sizeof(mis), cudaMemcpyDeviceToHost), "D2H ring cmp")) {
+    r->cuda_err = 1; return 1;
+  }
+  r->cmp_mismatches = mis;
+  r->ok_cmp = (mis == 0u) ? 1 : 0;
+
+  Seq64 stamped = ring->seq;
+  k_fnv1a<<<1, 1>>>(d_slot, ring->env_bytes, ring->d_hash);
+  if (check(cudaDeviceSynchronize(), "sync ring hash")) { r->cuda_err = 1; return 1; }
+  if (check(cudaMemcpy(&r->ring_hash, ring->d_hash, sizeof(r->ring_hash), cudaMemcpyDeviceToHost),
+            "D2H ring hash")) {
+    r->cuda_err = 1; return 1;
+  }
+  r->ring_expect = fnv1a64_host(host.data(), ring->env_bytes);
+  r->ok_ring_hash = (r->ring_hash == r->ring_expect) ? 1 : 0;
+
+  r->ring_slot = slot;
+  r->ring_seq = stamped;
+  r->ok_ring_push = (r->ok_cmp && r->ok_ring_hash) ? 1 : 0;
+
+  seq64_inc(&ring->seq);
+  ring->head = ring_mod(ring->head + 1u, ring->slots);
+  ring->count += 1u;
+  ring->push_count += 1u;
+  return 0;
+}
+
+static int ring_hash_slot(PrivateRing *ring, unsigned slot, unsigned threads, ProbeResult *r) {
+  if (slot >= ring->slots) {
+    r->ok_ring_hash = 0;
+    return 0;
+  }
+  unsigned char *d_slot = ring->d_slots + (size_t)slot * ring->env_bytes;
+  k_fnv1a<<<1, 1>>>(d_slot, ring->env_bytes, ring->d_hash);
+  if (check(cudaDeviceSynchronize(), "sync ring hash2")) { r->cuda_err = 1; return 1; }
+  if (check(cudaMemcpy(&r->ring_hash, ring->d_hash, sizeof(r->ring_hash), cudaMemcpyDeviceToHost),
+            "D2H ring hash2")) {
+    r->cuda_err = 1; return 1;
+  }
+  std::vector<unsigned char> back(ring->env_bytes);
+  if (check(cudaMemcpy(back.data(), d_slot, ring->env_bytes, cudaMemcpyDeviceToHost), "D2H ring slot")) {
+    r->cuda_err = 1; return 1;
+  }
+  r->ring_expect = fnv1a64_host(back.data(), ring->env_bytes);
+  r->ok_ring_hash = (r->ring_hash == r->ring_expect) ? 1 : 0;
+  r->ring_slot = slot;
+  return 0;
 }
 
 /* Run selected probes once. Returns 0 on CUDA API success (ok_* may still fail). */
@@ -351,6 +654,76 @@ static int run_probes_once(const Options *opt, ProbeResult *r) {
   r->scrub_bytes = opt->env_bytes * (opt->batch < 16u ? opt->batch : 16u);
   r->seq_start.hi = 0u;
   r->seq_start.lo = 0xfffffffeu;
+
+  if (opt->ring_flag) {
+    if (ring_ensure(&g_ring, opt->ring_slots, opt->env_bytes)) {
+      r->cuda_err = 1;
+      r->ok_ring = 0;
+      r->ms = wall_ms_now() - t0;
+      return 2;
+    }
+
+    if (opt->do_ring_push) {
+      if (ring_push_once(&g_ring, (const unsigned char *)opt->payload, n_payload, threads, r)) {
+        r->ok_ring = 0;
+        r->ms = wall_ms_now() - t0;
+        return 2;
+      }
+    }
+
+    if (opt->do_ring_hash) {
+      unsigned slot = opt->ring_slot_set ? opt->ring_slot
+                    : (r->ring_slot != 0xffffffffu ? r->ring_slot
+                       : (g_ring.count ? ring_mod(g_ring.head + g_ring.slots - 1u, g_ring.slots)
+                                       : 0u));
+      if (ring_hash_slot(&g_ring, slot, threads, r)) {
+        r->ok_ring = 0;
+        r->ms = wall_ms_now() - t0;
+        return 2;
+      }
+    }
+
+    if (opt->do_ring_scrub) {
+      if (opt->ring_slot_set) {
+        /* Explicit slot scrub without advancing tail (overwrite/clear assist). */
+        unsigned slot = opt->ring_slot;
+        unsigned char *d_slot = g_ring.d_slots + (size_t)slot * g_ring.env_bytes;
+        k_scrub_zero<<<blocks_for(g_ring.env_bytes, threads), threads>>>(d_slot, g_ring.env_bytes);
+        if (check(cudaDeviceSynchronize(), "sync ring scrub slot")) {
+          r->cuda_err = 1; r->ok_ring = 0; r->ms = wall_ms_now() - t0; return 2;
+        }
+        std::vector<unsigned char> back(g_ring.env_bytes);
+        if (check(cudaMemcpy(back.data(), d_slot, g_ring.env_bytes, cudaMemcpyDeviceToHost),
+                  "D2H ring scrub slot")) {
+          r->cuda_err = 1; r->ok_ring = 0; r->ms = wall_ms_now() - t0; return 2;
+        }
+        int zero_ok = 1;
+        for (unsigned i = 0; i < g_ring.env_bytes; i++) {
+          if (back[i] != 0) { zero_ok = 0; break; }
+        }
+        r->ok_ring_scrub = zero_ok ? 1 : 0;
+        r->ring_slot = slot;
+      } else {
+        if (ring_scrub_tail(&g_ring, threads, r)) {
+          r->ok_ring = 0;
+          r->ms = wall_ms_now() - t0;
+          return 2;
+        }
+      }
+    }
+
+    ring_snapshot(&g_ring, r, opt->do_ring_push ? 1 : 0);
+    r->ok_ring = 1;
+    if (opt->do_ring_push && !r->ok_ring_push) r->ok_ring = 0;
+    if (opt->do_ring_hash && !r->ok_ring_hash) r->ok_ring = 0;
+    if (opt->do_ring_scrub && !r->ok_ring_scrub) r->ok_ring = 0;
+
+    /* Ring-only invocation: skip legacy probes unless also requested. */
+    if (!opt->do_copy && !opt->do_hash && !opt->do_scrub && !opt->do_seq) {
+      r->ms = wall_ms_now() - t0;
+      return 0;
+    }
+  }
 
   if (opt->do_copy || opt->do_hash) {
     std::vector<unsigned char> host(opt->payload, opt->payload + n_payload);
@@ -556,6 +929,10 @@ static int result_all_ok(const Options *opt, const ProbeResult *r) {
   if (opt->do_hash && !r->ok_hash) return 0;
   if (opt->do_scrub && !r->ok_scrub) return 0;
   if (opt->do_seq && !r->ok_seq) return 0;
+  if (opt->ring_flag && !r->ok_ring) return 0;
+  if (opt->do_ring_push && !r->ok_ring_push) return 0;
+  if (opt->do_ring_hash && !r->ok_ring_hash) return 0;
+  if (opt->do_ring_scrub && !r->ok_ring_scrub) return 0;
   return 1;
 }
 
@@ -589,6 +966,28 @@ static void print_json_result(const Options *opt, const cudaDeviceProp &prop,
                 r->ok_seq ? "true" : "false",
                 r->seq_start.hi, r->seq_start.lo, r->seq_end.hi, r->seq_end.lo);
   }
+  if (opt->ring_flag) {
+    std::printf("\"ring_ok\":%s,\"ring_slots\":%u,\"ring_env_bytes\":%u,",
+                r->ok_ring ? "true" : "false", r->ring_slots, r->ring_env_bytes);
+    std::printf("\"ring_slot\":%u,\"ring_head\":%u,\"ring_tail\":%u,\"ring_count\":%u,",
+                r->ring_slot, r->ring_head, r->ring_tail, r->ring_count);
+    std::printf("\"ring_push_count\":%u,\"ring_drop_count\":%u,",
+                r->ring_push_count, r->ring_drop_count);
+    std::printf("\"ring_seq\":{\"hi\":%u,\"lo\":%u},", r->ring_seq.hi, r->ring_seq.lo);
+    if (opt->do_ring_push) {
+      std::printf("\"ring_push_ok\":%s,\"ring_cmp_ok\":%s,\"ring_cmp_mismatches\":%u,",
+                  r->ok_ring_push ? "true" : "false",
+                  r->ok_cmp ? "true" : "false", r->cmp_mismatches);
+    }
+    if (opt->do_ring_push || opt->do_ring_hash) {
+      std::printf("\"ring_hash_ok\":%s,\"ring_hash\":\"0x%016llx\",\"ring_expect\":\"0x%016llx\",",
+                  r->ok_ring_hash ? "true" : "false",
+                  (unsigned long long)r->ring_hash, (unsigned long long)r->ring_expect);
+    }
+    if (opt->do_ring_scrub) {
+      std::printf("\"ring_scrub_ok\":%s,", r->ok_ring_scrub ? "true" : "false");
+    }
+  }
   std::printf("\"ms\":%.3f,", r->ms);
   if (loops > 1u) {
     std::printf("\"loops\":%u,\"loop_fail\":%u,\"ms_min\":%.3f,\"ms_avg\":%.3f,\"ms_max\":%.3f,",
@@ -615,6 +1014,23 @@ static void print_text_result(const Options *opt, const ProbeResult *r) {
   if (opt->do_seq) {
     std::printf("seq_ok=%d seq_start=%u:%u seq_end=%u:%u\n",
                 r->ok_seq, r->seq_start.hi, r->seq_start.lo, r->seq_end.hi, r->seq_end.lo);
+  }
+  if (opt->ring_flag) {
+    std::printf("ring_ok=%d slots=%u env=%u slot=%u head=%u tail=%u count=%u push=%u drop=%u\n",
+                r->ok_ring, r->ring_slots, r->ring_env_bytes, r->ring_slot,
+                r->ring_head, r->ring_tail, r->ring_count, r->ring_push_count, r->ring_drop_count);
+    if (opt->do_ring_push) {
+      std::printf("ring_push_ok=%d cmp_ok=%d cmp_mismatches=%u seq=%u:%u\n",
+                  r->ok_ring_push, r->ok_cmp, r->cmp_mismatches, r->ring_seq.hi, r->ring_seq.lo);
+    }
+    if (opt->do_ring_push || opt->do_ring_hash) {
+      std::printf("ring_hash_ok=%d ring_hash=0x%016llx expect=0x%016llx\n",
+                  r->ok_ring_hash,
+                  (unsigned long long)r->ring_hash, (unsigned long long)r->ring_expect);
+    }
+    if (opt->do_ring_scrub) {
+      std::printf("ring_scrub_ok=%d\n", r->ok_ring_scrub);
+    }
   }
   std::printf("ms=%.3f\n", r->ms);
 }

@@ -35,14 +35,22 @@ export {
   cpuScrub as sm11CpuScrub,
   cpuSeq as sm11CpuSeq,
   cpuBatch as sm11CpuBatch,
+  cpuRingPush as sm11CpuRingPush,
+  cpuRingHash as sm11CpuRingHash,
+  cpuRingScrub as sm11CpuRingScrub,
+  createCpuRingState as sm11CreateCpuRingState,
   verifyPayload as sm11VerifyPayload,
   verifyScrub as sm11VerifyScrub,
   verifySeq as sm11VerifySeq,
   verifyBatch as sm11VerifyBatch,
+  verifyRingPush as sm11VerifyRingPush,
+  verifyRingHash as sm11VerifyRingHash,
+  verifyRingScrub as sm11VerifyRingScrub,
   probeSm11,
   createSm11Assist,
   createSm11ServeSession,
   serveRunExeFactory,
+  SM11_DEFAULT_RING_SLOTS,
 } from './sm11-gpu.mjs';
 
 export {
