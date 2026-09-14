@@ -54,6 +54,42 @@ test('duplicate ensure calls share one start and only owned children are stopped
   assert.deepEqual(child.killed, ['SIGTERM']);
 });
 
+test('client abort during waitForReady does not kill a listening child', async () => {
+  const manifest = sampleManifest();
+  manifest.gateway.cold_start_timeout_ms = 5000;
+  const agent = manifest.agents.find((item) => item.alias === 'qwenstral-code-speculator');
+  const registry = new AgentRegistry(manifest);
+  registry.setStatus(agent.alias, 'cold');
+  const child = new FakeChild();
+  const ac = new AbortController();
+  const spawned = [];
+  const manager = new ProcessManager({
+    manifest,
+    registry,
+    hostAdapter: { applyPriority() { return true; } },
+    spawnImpl: () => {
+      spawned.push(1);
+      return child;
+    },
+    fetchImpl: async () => {
+      ac.abort(new Error('client hung up'));
+      await new Promise((r) => setTimeout(r, 50));
+      return { ok: true, status: 200 };
+    },
+  });
+  await assert.rejects(() => manager.ensure(agent, { signal: ac.signal }));
+  assert.deepEqual(child.killed, []);
+  assert.equal(child.exitCode, null);
+  await new Promise((r) => setTimeout(r, 80));
+  const rec = await manager.ensure(agent);
+  assert.equal(spawned.length, 1);
+  assert.equal(rec.state, 'ready');
+  rec.child.stdout.emit('error', Object.assign(new Error('broken pipe'), { code: 'EPIPE' }));
+  rec.child.stderr.emit('error', Object.assign(new Error('broken pipe'), { code: 'EPIPE' }));
+  assert.equal(rec.child.exitCode, null);
+  await manager.stop(agent.alias);
+});
+
 test('buildLaunch encodes EAGLE3 draft flags when enabled and present', () => {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'grz-draft-'));
   const draft = path.join(dir, 'draft.gguf');
@@ -524,4 +560,9 @@ test('waitForReady tolerates whisper/sd-server which have no /health (404 on it)
   const manager = new ProcessManager({
     manifest, registry, hostAdapter: { applyPriority() {} },
     spawnImpl: () => child,
-    fetchImpl: async (url) => ({ status: url.endsWith('/health') ? 404 : 200, ok: !url.endsWith('/health') && true
+    fetchImpl: async (url) => ({ status: url.endsWith('/health') ? 404 : 200, ok: !url.endsWith('/health') && true, async arrayBuffer() { return new ArrayBuffer(0); } }),
+  });
+  const rec = await manager.start(agent);
+  assert.equal(rec.state, 'ready');
+  await manager.stop(agent.alias);
+});
