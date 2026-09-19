@@ -81,7 +81,7 @@
                                },
                      "stable_diffusion":  {
                                               "kind":  "stable-diffusion",
-                                              "command":  "${GRZ_ROOT}/runtime/missing-sd-server",
+                                              "command":  "${GRZ_ROOT}/runtime/stable-diffusion.cpp/bin/sd-server.exe",
                                               "base_args":  [
                                                                 "--listen-ip",
                                                                 "127.0.0.1"
@@ -315,7 +315,7 @@
                                                              "text",
                                                              "file"
                                                          ],
-                       "model":  "${GRZ_ROOT}/models/missing-embed.gguf",
+                       "model":  "${GRZ_ROOT}/models/qwen3-embedding-0.6b-q8_0.gguf",
                        "required_artifacts":  [
                                                   "model"
                                               ],
@@ -436,7 +436,7 @@
                        "gateway_accepted_capabilities":  [
                                                              "text"
                                                          ],
-                       "model":  "${GRZ_ROOT}/models/missing-guard.gguf",
+                       "model":  "${GRZ_ROOT}/models/qwen3guard-gen-0.6b-q4_k_m.gguf",
                        "required_artifacts":  [
                                                   "model"
                                               ],
@@ -480,7 +480,7 @@
                                                              "text",
                                                              "image"
                                                          ],
-                       "model":  "${GRZ_ROOT}/models/missing-sd.gguf",
+                       "model":  "${GRZ_ROOT}/models/sd15-q4_0.gguf",
                        "required_artifacts":  [
                                                   "model"
                                               ],
