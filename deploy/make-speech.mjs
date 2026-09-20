@@ -15,6 +15,9 @@ import { fileURLToPath } from 'node:url';
 
 const PIPER = process.env.GRZ_PIPER || 'C:/LocalAI/piper/piper.exe';
 const VOICE = process.env.GRZ_PIPER_VOICE || 'C:/LocalAI/piper/voices/en_US-lessac-medium.onnx';
+const FESTIVAL_BIN = process.env.GRZ_FESTIVAL || process.env.FESTIVAL_BIN || 'text2wave';
+const FLITE_BIN = process.env.GRZ_FLITE || 'flite';
+const TTS_ENGINE = (process.env.GRZ_TTS_ENGINE || 'auto').toLowerCase();
 const REPO = path.resolve(fileURLToPath(new URL('../', import.meta.url)));
 
 // Canonical phrases: short, unambiguous, easy to assert a loose match on.
@@ -24,14 +27,44 @@ export const FIXTURES = [
   { name: 'green-roomz-probe', text: 'Green roomz audio transcription health probe.', expect: /green\s*room/i },
 ];
 
-export function synthesize(text, outFile) {
+export function synthesize(text, outFile, options = {}) {
+  const engine = options.engine || TTS_ENGINE;
+  mkdirSync(path.dirname(outFile), { recursive: true });
+
+  // 1. Explicit Festival / text2wave engine
+  if (engine === 'festival') {
+    return new Promise((resolve, reject) => {
+      const festivalArgs = ['-o', outFile];
+      if (options.voice) festivalArgs.unshift('-eval', `(voice_${options.voice})`);
+      const child = execFile(FESTIVAL_BIN, festivalArgs, { timeout: 30_000, windowsHide: true },
+        (err) => (err ? reject(err) : resolve(outFile)));
+      child.stdin.end(text);
+    });
+  }
+
+  // 2. Explicit Flite engine (Festival-lite C runtime)
+  if (engine === 'flite') {
+    return new Promise((resolve, reject) => {
+      const fliteArgs = ['-t', text, '-o', outFile];
+      if (options.voice) fliteArgs.push('-voice', options.voice);
+      execFile(FLITE_BIN, fliteArgs, { timeout: 30_000, windowsHide: true },
+        (err) => (err ? reject(err) : resolve(outFile)));
+    });
+  }
+
+  // 3. Piper engine or Auto Fallback
+  if (existsSync(PIPER) && existsSync(VOICE)) {
+    return new Promise((resolve, reject) => {
+      const child = execFile(PIPER, ['--model', options.voice || VOICE, '--output_file', outFile], { timeout: 30_000, windowsHide: true },
+        (err) => (err ? reject(err) : resolve(outFile)));
+      child.stdin.end(text);
+    });
+  }
+
+  // Auto fallback to Festival if Piper is absent
   return new Promise((resolve, reject) => {
-    if (!existsSync(PIPER) || !existsSync(VOICE)) {
-      return reject(new Error(`piper or voice missing (${PIPER} / ${VOICE})`));
-    }
-    mkdirSync(path.dirname(outFile), { recursive: true });
-    const child = execFile(PIPER, ['--model', VOICE, '--output_file', outFile], { timeout: 30_000, windowsHide: true },
-      (err) => (err ? reject(err) : resolve(outFile)));
+    const child = execFile(FESTIVAL_BIN, ['-o', outFile], { timeout: 30_000, windowsHide: true },
+      (err) => (err ? reject(new Error(`No TTS engine available (piper missing and festival failed: ${err.message})`)) : resolve(outFile)));
     child.stdin.end(text);
   });
 }
@@ -51,9 +84,22 @@ async function main() {
     console.error(`wrote ${path.join(dir, 'index.json')}`);
     return;
   }
-  const [text, out] = argv;
-  if (!text || !out) { console.error('usage: make-speech.mjs "text" out.wav  |  --fixtures [dir]'); process.exit(2); }
-  await synthesize(text, out);
+  
+  let engine = TTS_ENGINE;
+  let voice = null;
+  const positional = [];
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === '--engine' && argv[i + 1]) { engine = argv[++i]; }
+    else if (argv[i] === '--voice' && argv[i + 1]) { voice = argv[++i]; }
+    else { positional.push(argv[i]); }
+  }
+
+  const [text, out] = positional;
+  if (!text || !out) {
+    console.error('usage: make-speech.mjs [--engine piper|festival|flite] [--voice <voice>] "text" out.wav  |  --fixtures [dir]');
+    process.exit(2);
+  }
+  await synthesize(text, out, { engine, voice });
   console.log(out);
 }
 

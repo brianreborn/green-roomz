@@ -27,3 +27,7 @@ Envelope fields; seq as logical 64-bit with {hi,lo} on sm_1.1; push non-blocking
 ## Leave stub
 
 Replica/quorum, GPU ring choice, respond owner process, per-OS verb matrix, identity struct, ticket representation, second upcall queue body, encrypt-volumes, halt recovery, map-edit vote, enroll of node 1, vote TTL, waitable handle type.
+
+## sm_1.1 — implemented on qodesh (monitor-on-8600)
+
+**Usefulness bar met** for security-monitor hot path on the 8600 GT (#13 closed). `native/sm11-monitor` (CUDA 6.5 / sm_11, **Win32** VS2013 fallback): copy+cmp, FNV (+batch), scrub, seq `{hi,lo}`, fixed private-slot ring + host-authoritative meta mirror, `--loops` / warm `--serve`. JS `sm11-gpu.mjs` wires fat-hash + **`preferRing`** hot path (enqueue/drop/drain → ring assists when `--serve` is up) with scrub/seq/batch probe fallback; ring persists across serve cmds. Load/soak: `scripts/sm11-load.mjs`, `scripts/sm11-soak.mjs` (10k+ pushes). Place/respond/logger stay off CUDA. **#17 N-API wontfix** — keep `--serve`. Stretch leftovers (not bar): #16 Win32→x64; #14 optional 0.5B; deeper CUDA-owned index **wontfix** (meta mirror done). See `native/sm11-monitor/README.md`, `docs/fleet-targets.md` ship section.

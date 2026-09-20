@@ -185,6 +185,45 @@ test('fuzz: gateway HTTP corpus does not 500, hang, or inject headers', async (t
   assert.equal(control.status, 200, 'control hello should still succeed after corpus');
 });
 
+test('fuzz: 42-message history is not a gateway 400', async (t) => {
+  let forwarded;
+  const { server } = await withServer(t, {
+    fetchImpl: async (url, init) => {
+      const href = String(url);
+      const body = JSON.parse(Buffer.from(init.body).toString());
+      if (!href.includes(':18187') && Array.isArray(body.messages) && body.messages.length >= 42) {
+        forwarded = body;
+      }
+      return defaultFetch(url);
+    },
+  });
+  const messages = Array.from({ length: 42 }, (_, i) => ({
+    role: i % 2 === 0 ? 'user' : 'assistant',
+    content: `turn ${i}`,
+  }));
+  const result = await rawRequest(server, {
+    path: '/v1/chat/completions',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ messages, max_tokens: 8 }),
+  });
+  assert.notEqual(result.status, 400, `42 messages 400 body=${String(result.raw ?? '').slice(0, 240)}`);
+  assert.notEqual(result.status, 413, '42 short messages must not hit the body limit');
+  assert.equal(result.status, 200);
+  assert.ok(forwarded, 'specialist hop should see the 42-message history');
+  assert.ok(forwarded.messages.length >= 42, `forwarded ${forwarded.messages.length} messages`);
+});
+
+test('fuzz: messages as the number 42 is validation 400, not a hang', async (t) => {
+  const { server } = await withServer(t);
+  const result = await rawRequest(server, {
+    path: '/v1/chat/completions',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ messages: 42 }),
+  });
+  assert.equal(result.status, 400);
+  assert.match(String(result.body?.error?.message ?? ''), /messages must be an array/);
+});
+
 test('fuzz: oversized body is rejected without hanging the gateway', async (t) => {
   const limit = 4096;
   const { server } = await withServer(t, { manifestOverrides: { gateway: { request_body_limit_bytes: limit } } });

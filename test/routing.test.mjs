@@ -6,8 +6,9 @@ import {
   isExplicitTranslationRequest,
   latestUserMessageText,
   hardRuleRoute,
-  parseSlashCommand,
+  isGenericChatRequest,
   parseCouncilArgs,
+  parseSlashCommand,
   stripSlashCommand,
   aliasCanAdmit,
   availableAliases,
@@ -72,15 +73,37 @@ test('/router pins the resident nexus', () => {
   assert.equal(routed.reason, 'slash_router');
 });
 
-test('/tts routes to speech-synthesis-agent (piper is run as a one-shot by the gateway)', () => {
-  const routed = routeRequest({
+test('/tts pins speech-synthesis-agent on the chat path', () => {
+  const routed = hardRuleRoute({
     messages: [{ role: 'user', content: '/tts say hello' }],
   }, registry());
   assert.equal(routed.effectiveAlias, 'speech-synthesis-agent');
   assert.equal(routed.reason, 'slash_tts');
 });
 
-test('an explicit text model remains selected across mixed text history', () => {
+test('unavailable native model is still pinned so completions can 503', () => {
+  const reg = registry();
+  reg.setStatus('image-generation-agent', 'unavailable', { missing: ['model:missing'] });
+  const routed = hardRuleRoute({
+    model: 'image-generation-agent',
+    messages: [{ role: 'user', content: 'a red apple' }],
+  }, reg);
+  assert.equal(routed.effectiveAlias, 'image-generation-agent');
+  assert.equal(routed.reason, 'requested_alias');
+});
+
+test('unavailable qwenstral-code-speculator is not pinned as requested_alias', () => {
+  const reg = registry();
+  reg.setStatus('qwenstral-code-speculator', 'unavailable', { missing: ['impractical:RAM'] });
+  const routed = hardRuleRoute({
+    model: 'qwenstral-code-speculator',
+    messages: [{ role: 'user', content: 'write hello' }],
+  }, reg);
+  assert.equal(routed.effectiveAlias, null);
+  assert.equal(routed.reason, 'nexus');
+});
+
+test('text-only turns do not regex C++ or image intent; nexus decides', () => {
   const routed = routeRequest({
     model: 'qwenstral-code-speculator',
     messages: [
@@ -89,8 +112,15 @@ test('an explicit text model remains selected across mixed text history', () => 
       { role: 'user', content: 'Can you show me an image of how that hero might look?' },
     ],
   }, registry());
-  assert.equal(routed.effectiveAlias, 'qwenstral-code-speculator');
-  assert.equal(routed.reason, 'requested_alias');
+  assert.equal(routed.effectiveAlias, null);
+  assert.equal(routed.reason, 'nexus');
+});
+
+test('generic ChatGPT-compat model ids are not llama.app pins', () => {
+  assert.equal(isGenericChatRequest({}), true);
+  assert.equal(isGenericChatRequest({ model: 'general-text-speculator' }), true);
+  assert.equal(isGenericChatRequest({ model: 'gpt-4o' }), true);
+  assert.equal(isGenericChatRequest({ model: 'qwenstral-code-speculator' }), false);
 });
 
 test('lock_alias honors the requested specialist', () => {
@@ -196,6 +226,10 @@ test('nexus candidates omit vision and audio on plain text', () => {
   assert.equal(names.includes('vision-layout-agent'), false);
   assert.equal(names.includes('audio-transcription-agent'), false);
   assert.equal(names.includes('security-monitor-agent'), false);
+  assert.equal(names.includes('speech-synthesis-agent'), false);
+  assert.equal(names.includes('semantic-embedding-agent'), false);
+  assert.equal(names.includes('image-generation-agent'), false);
+  assert.equal(names.includes('retrieval-rerank-agent'), false);
 });
 
 test('stripSlashCommand replaces array text parts', () => {
@@ -207,28 +241,6 @@ test('stripSlashCommand replaces array text parts', () => {
   });
   assert.equal(stripped.messages[1].content[0].text, 'hello');
   assert.equal(stripped.messages[1].content[1].text, 'keep');
-});
-
-test('parseCouncilArgs: pulls targets / judge / parallelism off the front, leaves the prompt', () => {
-  assert.deepEqual(parseCouncilArgs('vision-layout-agent similarity what brand is this'),
-    { targets: ['vision-layout-agent'], judge: 'similarity', parallel: undefined, rest: 'what brand is this' });
-  assert.deepEqual(parseCouncilArgs('code,general-text-speculator serial refactor it'),
-    { targets: ['qwenstral-code-speculator', 'general-text-speculator'], judge: null, parallel: false, rest: 'refactor it' });
-  // a bare verb is not a target — the whole thing is the prompt
-  assert.deepEqual(parseCouncilArgs('extract the label fields as JSON'),
-    { targets: null, judge: null, parallel: undefined, rest: 'extract the label fields as JSON' });
-  // judge-first, no target
-  assert.deepEqual(parseCouncilArgs('field-vote read this'),
-    { targets: null, judge: 'field-vote', parallel: undefined, rest: 'read this' });
-});
-
-test('parseSlashCommand: /council carries a council spec and strips to the prompt', () => {
-  const p = parseSlashCommand({ messages: [{ role: 'user', content: '/council vision-layout-agent similarity what is this' }] });
-  assert.equal(p.token, 'council');
-  assert.deepEqual(p.council, { targets: ['vision-layout-agent'], judge: 'similarity', parallel: undefined });
-  assert.equal(p.rest, 'what is this');
-  const stripped = stripSlashCommand({ messages: [{ role: 'user', content: '/council code refactor this' }] });
-  assert.equal(stripped.messages[0].content, 'refactor this');
 });
 
 test('/council on|off toggles a session default; on + prompt also runs this turn', () => {
@@ -249,6 +261,26 @@ test('/council on|off toggles a session default; on + prompt also runs this turn
   assert.equal(off.council, undefined);
 });
 
+test('parseCouncilArgs: pulls targets / judge / parallelism off the front, leaves the prompt', () => {
+  assert.deepEqual(parseCouncilArgs('vision-layout-agent similarity what brand is this'),
+    { targets: ['vision-layout-agent'], judge: 'similarity', parallel: undefined, rest: 'what brand is this' });
+  assert.deepEqual(parseCouncilArgs('code,general-text-speculator serial refactor it'),
+    { targets: ['qwenstral-code-speculator', 'general-text-speculator'], judge: null, parallel: false, rest: 'refactor it' });
+  assert.deepEqual(parseCouncilArgs('extract the label fields as JSON'),
+    { targets: null, judge: null, parallel: undefined, rest: 'extract the label fields as JSON' });
+  assert.deepEqual(parseCouncilArgs('field-vote read this'),
+    { targets: null, judge: 'field-vote', parallel: undefined, rest: 'read this' });
+});
+
+test('parseSlashCommand: /council carries a council spec and strips to the prompt', () => {
+  const p = parseSlashCommand({ messages: [{ role: 'user', content: '/council vision-layout-agent similarity what is this' }] });
+  assert.equal(p.token, 'council');
+  assert.deepEqual(p.council, { targets: ['vision-layout-agent'], judge: 'similarity', parallel: undefined });
+  assert.equal(p.rest, 'what is this');
+  const stripped = stripSlashCommand({ messages: [{ role: 'user', content: '/council code refactor this' }] });
+  assert.equal(stripped.messages[0].content, 'refactor this');
+});
+
 test('model "auto" / OpenAI ids route via the nexus instead of pinning', () => {
   for (const model of ['auto', 'green-roomz', 'gpt-4o', 'default']) {
     const r = routeRequest({ model, messages: [{ role: 'user', content: 'hi' }] }, registry());
@@ -262,3 +294,36 @@ test('model "tool-router-agent" without lock_alias is nexus-routed, not pinned t
   const pinned = routeRequest({ model: 'tool-router-agent', lock_alias: true, messages: [{ role: 'user', content: 'hi' }] }, registry());
   assert.equal(pinned.effectiveAlias, 'tool-router-agent');
 });
+
+test('security slash dispatches route to their corresponding specialists', () => {
+  const reg = registry();
+  
+  // Code security & SAST -> qwenstral-code-speculator
+  const sast = hardRuleRoute({ messages: [{ role: 'user', content: '/sast check buffer overflow' }] }, reg);
+  assert.equal(sast.effectiveAlias, 'qwenstral-code-speculator');
+  assert.equal(sast.reason, 'slash_sast');
+
+  const audit = hardRuleRoute({ messages: [{ role: 'user', content: '/audit review auth handler' }] }, reg);
+  assert.equal(audit.effectiveAlias, 'qwenstral-code-speculator');
+  assert.equal(audit.reason, 'slash_audit');
+
+  // Threat modeling & OSINT -> general-text-speculator
+  const threat = hardRuleRoute({ messages: [{ role: 'user', content: '/threatmodel STRIDE analysis of gateway' }] }, reg);
+  assert.equal(threat.effectiveAlias, 'general-text-speculator');
+  assert.equal(threat.reason, 'slash_threatmodel');
+
+  const osint = hardRuleRoute({ messages: [{ role: 'user', content: '/osint summarize attack surface' }] }, reg);
+  assert.equal(osint.effectiveAlias, 'general-text-speculator');
+  assert.equal(osint.reason, 'slash_osint');
+
+  // Detection rules -> qwenstral-code-speculator
+  const rules = hardRuleRoute({ messages: [{ role: 'user', content: '/sigma generate rule for lolbin' }] }, reg);
+  assert.equal(rules.effectiveAlias, 'qwenstral-code-speculator');
+  assert.equal(rules.reason, 'slash_sigma');
+
+  // Monitor -> security-monitor-agent
+  const mon = hardRuleRoute({ messages: [{ role: 'user', content: '/monitor snapshot' }] }, reg);
+  assert.equal(mon.effectiveAlias, 'security-monitor-agent');
+  assert.equal(mon.reason, 'slash_monitor');
+});
+

@@ -1,0 +1,10 @@
+{
+  "runtimes": {
+    ".py": {
+      "bin": "python",
+      "args": [],
+      "version": "Python 3.12.10"
+    }
+  },
+  "at": "2026-09-07T21:09:38.869Z"
+}

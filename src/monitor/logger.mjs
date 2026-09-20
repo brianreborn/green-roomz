@@ -1,10 +1,13 @@
 /**
  * Dedicated append-only hash-chained audit sink.
- * NOT the 256-slot hot ring. Calls: emit, read.
+ * NOT the 256-slot hot ring. Calls: emit, read, stats.
  * No lockdown / reboot / secure_reboot rights.
- * Fail-closed on drop: missing path / flood / write failure returns {ok:false, dropped:true}.
+ * Fail-closed on drop: flood / write failure returns {ok:false, dropped:true}.
+ * No disk path → in-memory chain only (memoryWrite).
  * No retry-storm, no busy loop, no sync fsync. Flood must not block IPC push.
- * Chain: each record hashes previous hash + payload into opaque hex (v1).
+ * Chain: each record hashes previous hash + payload into opaque hex (v1, sha256).
+ * Optional sm11 (GRZ_SM11=1 / options.sm11): async FNV verify-assist for telemetry only —
+ * does not change stored hash or verifyChain(). Never CUDA place/list.
  * Never stores passwords / tokens / keys. Never invokes respond verbs.
  */
 
@@ -16,6 +19,7 @@ import {
   u64,
   u64Inc,
 } from './api.mjs';
+import { resolveSm11Option } from './sm11-gpu.mjs';
 
 const GENESIS = '0'.repeat(64);
 const MAX_IN_FLIGHT = 4;
@@ -85,6 +89,11 @@ function defaultWrite(path) {
   return (record) => appendFile(path, `${JSON.stringify(record)}\n`);
 }
 
+/** In-memory chain still advances when no disk path is configured. */
+function memoryWrite() {
+  return Promise.resolve();
+}
+
 /**
  * Verify prev-link + opaque payload hash. Algorithm is not a public SHALL.
  */
@@ -105,11 +114,15 @@ export function createLogger(options = {}) {
     ? options.write
     : typeof options.writer === 'function'
       ? options.writer
-      : defaultWrite(options.path);
+      : (defaultWrite(options.path) ?? memoryWrite);
+  // Explicit: on only when options.sm11 set or GRZ_SM11=1 (mailbox-style).
+  const sm11 = resolveSm11Option(options.sm11, { mode: 'explicit' });
   const chain = [];
   let prev = GENESIS;
   let seq = u64(0, 0);
   let inFlight = 0;
+  let emitted = 0;
+  let dropped = 0;
   let tail = Promise.resolve();
 
   async function emit(partial = {}, opts = {}) {
@@ -121,9 +134,11 @@ export function createLogger(options = {}) {
     assertCaller('emit', emitRole(callerRole));
 
     if (typeof write !== 'function') {
+      dropped += 1;
       return { ok: false, dropped: true };
     }
     if (inFlight >= MAX_IN_FLIGHT) {
+      dropped += 1;
       return { ok: false, dropped: true };
     }
     inFlight += 1;
@@ -156,6 +171,9 @@ export function createLogger(options = {}) {
       prev = record.hash;
       chain.push(record);
       if (chain.length > MAX_CHAIN) chain.splice(0, chain.length - MAX_CHAIN);
+      // Telemetry only: FNV/copy assist must not alter sha256 chain fields.
+      if (sm11) sm11.scheduleVerify(canonicalize(payload));
+      emitted += 1;
       return { ok: true, dropped: false, hash: record.hash };
     };
 
@@ -164,6 +182,7 @@ export function createLogger(options = {}) {
     try {
       return await mine;
     } catch {
+      dropped += 1;
       return { ok: false, dropped: true };
     } finally {
       inFlight -= 1;
@@ -182,5 +201,19 @@ export function createLogger(options = {}) {
     }));
   }
 
-  return Object.freeze({ emit, read });
+  function stats() {
+    return {
+      chain: chain.length,
+      emitted,
+      dropped,
+      inFlight,
+      sm11: sm11 ? sm11.stats() : null,
+    };
+  }
+
+  async function flush() {
+    if (sm11) await sm11.flush();
+  }
+
+  return Object.freeze({ emit, read, stats, flush });
 }

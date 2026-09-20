@@ -4,7 +4,7 @@
  * seq and ticket are 64-bit {hi, lo} uint32 pairs.
  */
 
-import { normalizeU64, u64, hashStringToU64 } from './ids.mjs';
+import { normalizeU64, u64 } from './ids.mjs';
 import { isAllowlistedOp } from './calls.mjs';
 import { makeReject } from './states.mjs';
 
@@ -25,6 +25,37 @@ export {
   packSlot,
   unpackSlot,
 } from './ids.mjs';
+
+export {
+  defaultExePath as sm11ExePath,
+  fnv1a64,
+  fnv1a64Hex,
+  digestFatPayload,
+  cpuVerify as sm11CpuVerify,
+  cpuScrub as sm11CpuScrub,
+  cpuSeq as sm11CpuSeq,
+  cpuBatch as sm11CpuBatch,
+  cpuRingPush as sm11CpuRingPush,
+  cpuRingHash as sm11CpuRingHash,
+  cpuRingScrub as sm11CpuRingScrub,
+  cpuRingSyncMeta as sm11CpuRingSyncMeta,
+  cpuRingDumpMeta as sm11CpuRingDumpMeta,
+  createCpuRingState as sm11CreateCpuRingState,
+  verifyPayload as sm11VerifyPayload,
+  verifyScrub as sm11VerifyScrub,
+  verifySeq as sm11VerifySeq,
+  verifyBatch as sm11VerifyBatch,
+  verifyRingPush as sm11VerifyRingPush,
+  verifyRingHash as sm11VerifyRingHash,
+  verifyRingScrub as sm11VerifyRingScrub,
+  verifyRingSyncMeta as sm11VerifyRingSyncMeta,
+  verifyRingDumpMeta as sm11VerifyRingDumpMeta,
+  probeSm11,
+  createSm11Assist,
+  createSm11ServeSession,
+  serveRunExeFactory,
+  SM11_DEFAULT_RING_SLOTS,
+} from './sm11-gpu.mjs';
 
 export {
   ALLOWLISTED_OPS,
@@ -94,7 +125,6 @@ export function makeUpcall(partial = {}) {
 
 function uncallableEnvelope(verb) {
   const envelope = makeReject({
-    ticket: hashStringToU64(`api:${verb}`),
     from: 'api',
     to: verb,
     reason: `${verb} is uncallable (v1)`,

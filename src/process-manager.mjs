@@ -3,10 +3,12 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync, unlinkSync } from 'node:fs';
+import { FALLBACK_ALIAS, NEXUS_ALIAS } from './constants.mjs';
 import { UnavailableError } from './errors.mjs';
-import { sleep } from './util.mjs';
+import { awaitWithAbort, isAbortError, sleep } from './util.mjs';
 import { agentFootprintBytes, headroomBytes, profileAdmitted } from './memory.mjs';
-import { CpuSetAllocator, DEFAULT_THREADS } from './cpu-set.mjs';
+import { CpuSetAllocator, defaultThreadCount } from './cpu-set.mjs';
+import { preferResidentChat } from './nexus.mjs';
 
 const MAX_LOG_CHARS = 64 * 1024;
 
@@ -21,7 +23,7 @@ const READY_PROBE = {
 
 export function vulkanAllThreadCount(logicalCpus = os.cpus().length) {
   const n = Number(logicalCpus);
-  const logical = Number.isFinite(n) && n > 0 ? Math.trunc(n) : 8;
+  const logical = Number.isFinite(n) && n > 0 ? Math.trunc(n) : 1;
   // Ryzen 5 7520U APU: 8 logical CPUs, AMD Radeon ~8058 MiB shared Vulkan.
   // vulkan-all uses logical-2 (6 on this host): those two cores are reserved for the
   // resident CPU nexus (--threads 2) so it can run concurrently with a GPU specialist.
@@ -39,7 +41,7 @@ export function withVulkanAllThreads(args, logicalCpus = os.cpus().length) {
   return next;
 }
 
-export function argsThreadCount(args, fallback = DEFAULT_THREADS) {
+export function argsThreadCount(args, fallback = defaultThreadCount()) {
   const index = (args ?? []).indexOf('--threads');
   if (index !== -1 && index + 1 < args.length) {
     const n = Number(args[index + 1]);
@@ -67,12 +69,13 @@ function hostBindsPublic(args) {
   return false;
 }
 
-function liveThreadSum(processes) {
+function liveThreadSum(processes, logicalCpus) {
   let total = 0;
+  const fallback = defaultThreadCount(logicalCpus);
   for (const rec of processes.values()) {
     if (!rec || rec.child?.exitCode != null) continue;
     if (!['ready', 'starting', 'suspended', 'stopping'].includes(rec.state)) continue;
-    total += argsThreadCount(rec.args ?? [], rec.threads ?? DEFAULT_THREADS);
+    total += argsThreadCount(rec.args ?? [], rec.threads ?? fallback);
   }
   return total;
 }
@@ -127,10 +130,52 @@ export function isResidentAgent(agent) {
   return Boolean(agent?.resident) || agent?.alias === 'tool-router-agent';
 }
 
+/**
+ * llama-server stays in the serve process tree so stopAll / children.json can reap it.
+ * Do not `detached: true` — that orphans a LISTEN backend after a Job Object kill.
+ * Launch the gateway itself via scripts/serve-window.cmd so *node* outlives the agent job.
+ */
+export function backendSpawnOptions({ cwd, env } = {}) {
+  return {
+    env,
+    cwd,
+    windowsHide: true,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    shell: false,
+    detached: false,
+  };
+}
+
+function attachChildIO(child, append) {
+  const swallow = () => {};
+  child.stdout?.on('data', append);
+  child.stderr?.on('data', append);
+  // A killed llama-server otherwise emits uncaught EPIPE on the pipes and takes down :8080.
+  child.stdout?.on('error', swallow);
+  child.stderr?.on('error', swallow);
+  child.on('error', (err) => {
+    try { append(err); } catch {}
+  });
+}
+
+/** Aliases to mmap at serve start. Skip Instruct when generic chat stays on the 0.5B. */
+export function servePrewarmAliases(registry, { gateway, env = process.env, logicalCpus = os.cpus().length } = {}) {
+  const aliases = [];
+  if (registry?.agents?.has(NEXUS_ALIAS) && registry.status(NEXUS_ALIAS).state !== 'unavailable') {
+    aliases.push(NEXUS_ALIAS);
+  }
+  // 2-logical-CPU hosts (and GRZ_OFFLINE_NEXUS) must not pre-warm the 4B Instruct.
+  if (preferResidentChat(gateway, env) || logicalCpus <= 2) return aliases;
+  if (registry?.agents?.has(FALLBACK_ALIAS) && registry.status(FALLBACK_ALIAS).state !== 'unavailable') {
+    aliases.push(FALLBACK_ALIAS);
+  }
+  return aliases;
+}
+
 
 export function orderProfiles(agent, profiles, { preferredId, freeMemoryBytes } = {}) {
   const list = [...(profiles ?? [])];
-  if (!list.length) return [{ id: 'default', args: [] }];
+  if (!list.length) return [{ id: 'default', args: ['--device', 'none', '--n-gpu-layers', '0'] }];
   const weights = cpuResidentWeightBytes(agent);
   const ramTight = Number.isFinite(freeMemoryBytes) && weights != null && weights > freeMemoryBytes;
   return list.sort((a, b) => {
@@ -148,7 +193,7 @@ export function orderProfiles(agent, profiles, { preferredId, freeMemoryBytes } 
 }
 
 export class ProcessManager {
-  constructor({ manifest, registry, hostAdapter, fetchImpl = fetch, spawnImpl = spawn, selectedProfiles = new Map() }) {
+  constructor({ manifest, registry, hostAdapter, fetchImpl = fetch, spawnImpl = spawn, selectedProfiles = new Map(), logicalCpus = os.cpus().length }) {
     this.manifest = manifest;
     this.registry = registry;
     this.hostAdapter = hostAdapter;
@@ -158,13 +203,14 @@ export class ProcessManager {
     this.processes = new Map();
     this.starting = new Map();
     this.idleSweeper = null;
-    this.cpuAllocator = new CpuSetAllocator(os.cpus().length);
+    const n = Number(logicalCpus);
+    this.logicalCpus = Number.isFinite(n) && n > 0 ? Math.trunc(n) : os.cpus().length;
+    this.cpuAllocator = new CpuSetAllocator(this.logicalCpus);
     const g = manifest?.gateway ?? {};
-    this.idleEvictMs = g.idle_evict_ms ?? 300_000;
-    // Hard ceiling on warm specialists. Default: no artificial cap - free memory
-    // is the real gate (see evictForNewSpecialist). A tight box sets this low.
-    this.maxWarmSpecialists = g.max_warm_specialists
-      ?? Math.max(1, (manifest?.agents ?? []).filter((a) => a.runtime === 'llama_server' && !isResidentAgent(a)).length);
+    this.idleEvictMs = Number(g.idle_evict_ms);
+    if (!Number.isFinite(this.idleEvictMs) || this.idleEvictMs < 0) this.idleEvictMs = 0;
+    this.maxWarmSpecialists = Math.max(1, Number(g.max_warm_specialists) || 1);
+    this.admitWhenTight = g.admit_when_tight === 'page' ? 'page' : 'refuse';
     // Suspend/resume makes evict->revive cheap: SIGSTOP freezes the model, the
     // OS pages its (now idle) memory out under pressure and back in on SIGCONT -
     // no re-mmap, no KV realloc, no warm-up. POSIX only; on Windows we terminate
@@ -358,6 +404,27 @@ export class ProcessManager {
     };
   }
 
+  /** Empty/default --threads: min(DEFAULT_THREADS, logical CPUs, remaining set). */
+  implicitThreadCount() {
+    const cap = defaultThreadCount(this.logicalCpus);
+    const liveRoom = Math.max(0, this.logicalCpus - liveThreadSum(this.processes, this.logicalCpus));
+    const room = Math.min(liveRoom, this.cpuAllocator.remaining());
+    return Math.max(1, Math.min(cap, room > 0 ? room : cap));
+  }
+
+  /** Council pin() skips eviction; do not fan out more specialists than maxWarm. */
+  canParallelCouncil(aliases, requested = true) {
+    if (!requested) return false;
+    const list = Array.isArray(aliases) ? aliases : [];
+    if (list.length <= 1) return false;
+    let specialists = 0;
+    for (const alias of list) {
+      const agent = this.manifest?.agents?.find((a) => a.alias === alias);
+      if (!agent || !isResidentAgent(agent)) specialists += 1;
+    }
+    return specialists <= Math.max(1, this.maxWarmSpecialists);
+  }
+
   async resume(alias) {
     const record = this.processes.get(alias);
     if (!record || record.state !== 'suspended' || record.child.exitCode !== null) return null;
@@ -408,13 +475,17 @@ export class ProcessManager {
     // Resident CPU nexus (tool-router-agent) stays loaded for the life of serve.
     // Starting a specialist must never stop or unload it — two llama-server
     // processes at once is required (nexus :8187 CPU + specialist vulkan).
-    if (this.starting.has(agent.alias)) return this.starting.get(agent.alias);
+    if (this.starting.has(agent.alias)) {
+      return awaitWithAbort(this.starting.get(agent.alias), signal);
+    }
 
     const bringUp = async () => {
       // Make room before starting another specialist on a memory-tight box:
       // evict the LRU warm one now rather than waiting for the idle sweep.
       if (!isResidentAgent(agent)) await this.evictForNewSpecialist(agent);
-      return this.start(agent, { signal });
+      // Client abort must not cancel spawn / waitForReady — that SIGKILLs a
+      // llama-server that just started LISTEN and wedges --parallel 1.
+      return this.start(agent);
     };
     // The resident nexus starts immediately (it runs alongside everything).
     // Every other cold start is serialized on one chain - two big models
@@ -428,7 +499,7 @@ export class ProcessManager {
       this.coldStartChain = promise.catch(() => {});
     }
     this.starting.set(agent.alias, promise.finally(() => this.starting.delete(agent.alias)));
-    return this.starting.get(agent.alias);
+    return awaitWithAbort(this.starting.get(agent.alias), signal);
   }
 
   buildLaunch(agent, profile) {
@@ -446,12 +517,13 @@ export class ProcessManager {
       if (!args.includes('--no-webui')) args.push('--no-webui');
       // Only rewrite vulkan-all; hybrid/cpu-4 already set --threads and must not regress.
       if (profile?.id === 'vulkan-all') {
-        const patched = withVulkanAllThreads(args, os.cpus().length);
+        const patched = withVulkanAllThreads(args, this.logicalCpus);
         args.length = 0;
         args.push(...patched);
       }
       if (!args.includes('--threads')) {
-        args.push('--threads', String(DEFAULT_THREADS), '--threads-batch', String(DEFAULT_THREADS));
+        const threads = String(this.implicitThreadCount());
+        args.push('--threads', threads, '--threads-batch', threads);
       }
       if (agent.projector) args.push('--mmproj', agent.projector);
       // Vision cost controls: cap image tokens (biggest lever for a slow box),
@@ -556,7 +628,7 @@ export class ProcessManager {
     const includeDraft = shouldAttachDraft(agent);
     let failedThreads = null;
     for (const profile of this.profilesFor(agent)) {
-      const admission = profileAdmitted(agent, profile, { freeMemoryBytes, includeDraft });
+      const admission = profileAdmitted(agent, profile, { freeMemoryBytes, includeDraft, admitWhenTight: this.admitWhenTight });
       if (!admission.ok) {
         lastError = new UnavailableError(
           `${agent.alias} profile ${profile.id} skipped: ${admission.reason} (estimate ${admission.estimateBytes} + headroom ${admission.headroomBytes} > free ${freeMemoryBytes})`,
@@ -564,9 +636,9 @@ export class ProcessManager {
         continue;
       }
       const probeArgs = [...(this.manifest.runtimes[agent.runtime]?.base_args ?? []), ...(agent.extra_args ?? []), ...(profile?.args ?? [])];
-      let wantThreads = argsThreadCount(probeArgs, DEFAULT_THREADS);
-      if (profile?.id === 'vulkan-all') wantThreads = vulkanAllThreadCount();
-      const remaining = Math.max(0, os.cpus().length - liveThreadSum(this.processes));
+      let wantThreads = argsThreadCount(probeArgs, this.implicitThreadCount());
+      if (profile?.id === 'vulkan-all') wantThreads = vulkanAllThreadCount(this.logicalCpus);
+      const remaining = Math.max(0, this.logicalCpus - liveThreadSum(this.processes, this.logicalCpus));
       if (wantThreads > remaining) {
         lastError = new UnavailableError(
           `${agent.alias} profile ${profile.id} skipped: cpu_oversubscribed (want ${wantThreads}, remaining ${remaining})`,
@@ -576,13 +648,10 @@ export class ProcessManager {
       }
       if (failedThreads != null && wantThreads > failedThreads) continue;
       try {
-        return await this.startProfile(agent, profile, { signal });
+        return await this.startProfile(agent, profile);
       } catch (error) {
         lastError = error;
-        if (signal?.aborted || /abort/i.test(String(error.message))) {
-          this.registry.setStatus(agent.alias, 'cold', { lastError: error.message });
-          throw error;
-        }
+        if (isAbortError(error)) throw error;
         if (/health deadline|timed out|timeout|ENOMEM|OOM/i.test(String(error.message))) {
           failedThreads = wantThreads;
         }
@@ -594,20 +663,17 @@ export class ProcessManager {
 
   async startProfile(agent, profile, { signal } = {}) {
     const launch = this.buildLaunch(agent, profile);
-    const wantThreads = argsThreadCount(launch.args, DEFAULT_THREADS);
+    const wantThreads = argsThreadCount(launch.args, this.implicitThreadCount());
     const cpus = this.cpuAllocator.allocate(agent.alias, wantThreads);
     if (wantThreads > 0 && cpus.length === 0) {
       throw new UnavailableError(`${agent.alias}: cpu_oversubscribed`, { code: 'cpu_oversubscribed' });
     }
     let child;
     try {
-      child = this.spawn(launch.command, launch.args, {
+      child = this.spawn(launch.command, launch.args, backendSpawnOptions({
         env: launch.env,
         cwd: this.packRoot,
-        windowsHide: true,
-        stdio: ['ignore', 'pipe', 'pipe'],
-        shell: false,
-      });
+      }));
     } catch (error) {
       this.cpuAllocator.release(agent.alias);
       throw error;
@@ -632,31 +698,37 @@ export class ProcessManager {
     this.registry.setStatus(agent.alias, 'starting', { profileId: profile.id });
     this.hostAdapter?.applyPriority(child);
     const append = (chunk) => { record.logs = (record.logs + chunk.toString()).slice(-MAX_LOG_CHARS); };
-    child.stdout?.on('data', append);
-    child.stderr?.on('data', append);
+    attachChildIO(child, append);
     child.once('exit', (code, signalName) => {
       record.state = 'exited';
       record.exitCode = code;
       record.exitSignal = signalName;
-      if (this.processes.get(agent.alias) === record) this.registry.setStatus(agent.alias, 'cold', { lastExitCode: code });
+      this.cpuAllocator.release(agent.alias);
+      if (this.processes.get(agent.alias) === record) {
+        this.processes.delete(agent.alias);
+        this.registry.setStatus(agent.alias, 'cold', { lastExitCode: code });
+      }
     });
-    child.once('error', append);
     try {
-      await this.waitForReady(agent, record, signal);
+      await this.waitForReady(agent, record);
       record.state = 'ready';
       this.registry.setStatus(agent.alias, 'ready', { pid: child.pid, profileId: profile.id });
       this.writeChildrenFile();
       await this.maybeRestoreDefault(agent, record).catch(() => {});
       return record;
     } catch (error) {
+      // A client abort is handled by awaitWithAbort in ensure(); never SIGKILL a
+      // child that is still loading just because one smoke hung up.
+      if (isAbortError(error) && record.child?.exitCode == null) throw error;
       await this.stopRecord(record);
       this.cpuAllocator.release(agent.alias);
+      if (this.processes.get(agent.alias) === record) this.processes.delete(agent.alias);
       const detail = record.logs.trim().slice(-2000);
       throw new UnavailableError(`Failed to start ${agent.alias} with ${profile.id}: ${error.message}${detail ? `; ${detail}` : ''}`);
     }
   }
 
-  async waitForReady(agent, record, signal) {
+  async waitForReady(agent, record) {
     const timeoutMs = this.manifest.gateway.cold_start_timeout_ms;
     const deadline = Date.now() + timeoutMs;
     const runtimeKind = this.manifest.runtimes[agent.runtime]?.kind;
@@ -666,24 +738,19 @@ export class ProcessManager {
     const probe = READY_PROBE[runtimeKind] ?? READY_PROBE['llama-server'];
     while (Date.now() < deadline) {
       if (record.child.exitCode !== null) throw new Error(`process exited with ${record.child.exitCode}`);
+      const probeMs = Math.max(250, Math.min(5_000, deadline - Date.now()));
       try {
         const response = await this.fetch(`http://127.0.0.1:${agent.port}${probe.path}`, {
-          signal: AbortSignal.timeout(1500),
+          signal: AbortSignal.timeout(probeMs),
           headers: { connection: 'close' },
         });
         try {
           if (typeof response.arrayBuffer === 'function') await response.arrayBuffer();
-          else if (response.body?.cancel) await response.body.cancel();
+          else if (typeof response.text === 'function') await response.text();
         } catch {}
-        if (probe.ready(response)) {
-          // RF4: health can be a leftover listener; require this child still alive after the probe.
-          if (record.child.exitCode !== null) {
-            throw new Error(`process exited with ${record.child.exitCode} after health probe`);
-          }
-          return;
-        }
+        if (probe.ready(response)) return;
       } catch {}
-      await sleep(200, signal);
+      await sleep(200);
     }
     throw new Error(`health deadline exceeded after ${timeoutMs} ms`);
   }
@@ -708,27 +775,17 @@ export class ProcessManager {
     // A SIGSTOP'd process won't act on SIGTERM until it runs again.
     if (record.state === 'suspended') { try { this.resumeImpl(record.child.pid); } catch {} }
     record.state = 'stopping';
-    const exited = new Promise((resolve) => {
-      if (record.child.exitCode !== null) return resolve();
-      record.child.once('exit', resolve);
-    });
+    const exited = new Promise((resolve) => record.child.once('exit', resolve));
     if (record.child.exitCode === null) record.child.kill('SIGTERM');
     let timer;
-    const killDeadline = new Promise((resolve) => {
+    const timeout = new Promise((resolve) => {
       timer = setTimeout(() => {
-        if (record.child.exitCode === null) {
-          try { record.child.kill('SIGKILL'); } catch {}
-        }
+        if (record.child.exitCode === null) record.child.kill('SIGKILL');
         resolve();
       }, 3000);
     });
-    // RF4: timer alone must not return while the child is still alive.
-    await Promise.race([exited, killDeadline]);
+    await Promise.race([exited, timeout]);
     clearTimeout(timer);
-    if (record.child.exitCode === null) {
-      try { record.child.kill('SIGKILL'); } catch {}
-      await exited;
-    }
   }
 
   async stopAll() {
@@ -807,14 +864,7 @@ export class ProcessManager {
     if (terminated.length) {
       const ports = terminated.map((r) => this.manifest.agents.find((a) => a.alias === r.alias)?.port).filter(Boolean);
       await Promise.all(terminated.map((r) => this.stop(r.alias)));
-      const free = await this.waitForPortsFree(ports);
-      // RF4: timeout = still occupied — do not let the incoming start bind-steal.
-      if (!free) {
-        throw new UnavailableError(
-          `${incomingAlias ?? 'specialist'}: evicted ports still busy after stop`,
-          { code: 'port_busy', ports },
-        );
-      }
+      await this.waitForPortsFree(ports);
     }
     return { suspended: suspended.map((r) => r.alias), terminated: terminated.map((r) => r.alias) };
   }
@@ -856,7 +906,7 @@ export class ProcessManager {
     const doomed = [];
     for (const r of ready) {
       const idleFor = now - (r.lastUsedAt ?? r.createdAt ?? now);
-      if (!overCap.has(r.alias) && !(this.idleEvictMs > 0 && idleFor > this.idleEvictMs)) continue;
+      if (!overCap.has(r.alias) && idleFor < this.idleEvictMs) continue;
       // Freeze the merely-idle ones (cheap revive); over-cap or long-idle -> terminate.
       if (this.canSuspend && overCap.has(r.alias) === false && idleFor < this.idleEvictMs * 3) {
         if (this.suspendRecord(r)) { this.registry.setStatus(r.alias, 'suspended'); continue; }

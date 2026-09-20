@@ -70,10 +70,9 @@ Copy onto qodesh too: C:\Users\brian\Documents\green-roomz\src\
 - qodesh: git yes; Python/CMake/Ninja were MISSING; winget was in-flight (first --id style failed). VS2013 (needed for CUDA 6.5 nvcc) NOT installed. vswhere missing. Do not install VS2022 as a fake.
 - qodesh CUDA WAN curl may have a partial file; prefer LAN copy from shalom and verify md5.
 
-## Web unicorn / file drop (NOT verified)
-- C:\LocalAI\green-unicorn.py listed on shalom HTTP earlier; not inspected this wrap.
-- Need: drop accept all GRZ types at ANY time (png/jpg/webp/wav/mp3/gguf/etc), no disable-during-generate, no mixed-modality hard fail if that blocks drops.
-- Gateway still rejects mixed image+audio.
+## Web unicorn / file drop
+- In-repo: `GET /unicorn` (`web/unicorn.html`), `scripts\unicorn.cmd`. Launcher also at `web/green-unicorn.py`.
+- Drop accepts any type at any time (not disabled during generate). Mixed image+audio may still 400 from the gateway.
 
 ## Operator traps
 - No Add-Type / P/Invoke on shalom (McAfee). Short PowerShell; long here-strings abort.

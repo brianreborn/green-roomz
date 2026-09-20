@@ -98,6 +98,41 @@ export function isTimeoutAbort(error, callerSignal) {
     || (error?.name === 'AbortError' && !callerSignal);
 }
 
+export function isAbortError(error) {
+  if (error == null) return false;
+  if (error.name === 'AbortError' || error.code === 'ABORT_ERR') return true;
+  return /aborted|abort/i.test(String(error.message ?? error));
+}
+
+/** Socket/abort noise that must not take down `green-roomz serve`. */
+export function isBenignSocketError(error) {
+  const code = error?.code ?? error?.cause?.code;
+  return code === 'ECONNRESET' || code === 'EPIPE' || code === 'ECONNABORTED'
+    || code === 'ERR_STREAM_DESTROYED' || code === 'ERR_STREAM_PREMATURE_CLOSE'
+    || code === 'ERR_HTTP_HEADERS_SENT'
+    || isAbortError(error);
+}
+
+/** Reject when `signal` aborts; do not cancel `promise` (cold start must keep running). */
+export function awaitWithAbort(promise, signal) {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.reject(signal.reason ?? new Error('aborted'));
+  return new Promise((resolve, reject) => {
+    const onAbort = () => reject(signal.reason ?? new Error('aborted'));
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener('abort', onAbort);
+        reject(error);
+      },
+    );
+  });
+}
+
 /**
  * Read an upstream Response body as text with a hard byte cap, streaming when a
  * ReadableStream body is available so a giant/never-ending response can't be
@@ -170,11 +205,16 @@ export function headerSafe(value, maxBytes = 240) {
 }
 
 export function jsonResponse(response, status, body, headers = {}) {
+  if (!response || response.writableEnded || response.destroyed) return;
   const data = Buffer.from(JSON.stringify(body));
-  response.writeHead(status, {
-    'content-type': 'application/json; charset=utf-8',
-    'content-length': data.length,
-    ...headers,
-  });
-  response.end(data);
+  try {
+    response.writeHead(status, {
+      'content-type': 'application/json; charset=utf-8',
+      'content-length': data.length,
+      ...headers,
+    });
+    response.end(data);
+  } catch {
+    try { response.destroy(); } catch {}
+  }
 }

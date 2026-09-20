@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
-import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { fieldVote, similarityVote, resolveJudgeChoice, judgePrompt } from './council.mjs';
-import { AGENCY_ROLE, DEFAULT_FAITH, DEFAULT_FEAR, FALLBACK_ALIAS, MAX_SPECIALIST_HOPS, MONITOR_ALIAS, NEXUS_ALIAS, REBUKE_OP, UPSTREAM_MAX_BUFFER_BYTES, UPSTREAM_TIMEOUT_MS, YOLO_TOKEN } from './constants.mjs';
+import { AGENCY_ROLE, DEFAULT_FAITH, DEFAULT_FEAR, FALLBACK_ALIAS, HANDOFF_PEEK_CHARS, HANDOFF_PEEK_TIMEOUT_MS, MAX_SPECIALIST_HOPS, MONITOR_ALIAS, NEXUS_ALIAS, NEXUS_CHAT_SYSTEM, NEXUS_MAX_TOKENS, REBUKE_OP, UPSTREAM_MAX_BUFFER_BYTES, UPSTREAM_TIMEOUT_MS, YOLO_TOKEN } from './constants.mjs';
 import { loadDeclaredKernel } from './config.mjs';
 import { compileStockPrompt } from './compile-prompt.mjs';
 import { Mailbox } from './mailbox.mjs';
@@ -11,14 +12,17 @@ import { CAP, MonitorIpc } from './monitor/ipc.mjs';
 import { createLogger } from './monitor/logger.mjs';
 import { GreenRoomzError, UnavailableError, UpstreamProtocolError, UpstreamTimeoutError, ValidationError } from './errors.mjs';
 import { deliverPeek, peekSpecialist } from './handoff.mjs';
-import { consultNexus } from './nexus.mjs';
+import { consultNexus, preferResidentChat } from './nexus.mjs';
 import { planRoute } from './logical-router.mjs';
 import { proxyJson } from './proxy.mjs';
-import { aliasCanAdmit, audioDataFromBody, detectModalities, hardRuleRoute, isRoutableAlias, latestUserMessageText, NATIVE_CHAT, parseSlashCommand, stripSlashCommand } from './routing.mjs';
+import { aliasCanAdmit, audioDataFromBody, detectModalities, hardRuleRoute, isGenericChatRequest, isRoutableAlias, latestUserMessageText, NATIVE_CHAT, parseSlashCommand, stripSlashCommand } from './routing.mjs';
+import { contentChars, contextCharBudget, formatMemoryHeader, injectWorkingSet, memoryBounds } from './session-memory.mjs';
 import { deadlineSignal, headerSafe, isTimeoutAbort, jsonResponse, readCappedText, redact, secureEquals, sleep, stripControls } from './util.mjs';
-import { holdMs } from './timing-quant.mjs';
+import { holdMs, resolveTimingPrivacy } from './timing-quant.mjs';
 
 const EXPLICIT_ROUTES = new Set([
+  '/',
+  '/unicorn',
   '/health',
   '/v1/health',
   '/v1/models',
@@ -29,7 +33,11 @@ const EXPLICIT_ROUTES = new Set([
   '/v1/chat/completions/route',
   '/v1/embeddings',
   '/v1/rerank',
+  '/v1/moderations',
+  '/v1/images/generations',
 ]);
+
+const UNICORN_PAGE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'web', 'unicorn.html');
 
 /** 8080 may post/observe hops. No vote / lockdown / reboot / respond rights. */
 export const GATEWAY_IPC_RIGHTS = (CAP.POST | CAP.OBSERVE | CAP.SNAPSHOT) >>> 0;
@@ -58,7 +66,7 @@ function publicEvent(event) {
   return { ...event, ticket: hashTicket(event.ticket) };
 }
 
-const GET_ONLY = new Set(['/health', '/v1/health', '/v1/models', '/props', '/metrics', '/v1/monitor/recent']);
+const GET_ONLY = new Set(['/', '/unicorn', '/health', '/v1/health', '/v1/models', '/props', '/metrics', '/v1/monitor/recent']);
 
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1', 'localhost']);
 const COUNCIL_JUDGES = new Set(['field-vote', 'judge-model', 'similarity']);
@@ -191,20 +199,41 @@ export function injectSystemPolicy(body, agent) {
   return payload;
 }
 
-export function prepareInferenceBody(body, agent) {
+/** Tiny chat prompt for the resident 0.5B. Never compileStockPrompt / tool-router.md. */
+function injectNexusChatPrompt(body) {
+  const payload = { ...body };
+  const messages = Array.isArray(payload.messages) ? [...payload.messages] : [];
+  if (messages.some((message) => message?.role === 'system' && String(message.content ?? '').includes(NEXUS_CHAT_SYSTEM))) {
+    payload.messages = messages;
+    return payload;
+  }
+  payload.messages = [{ role: 'system', content: NEXUS_CHAT_SYSTEM }, ...messages];
+  return payload;
+}
+
+export function prepareInferenceBody(body, agent, extras = {}) {
   const stripped = stripSlashCommand(body);
-  const payload = injectSystemPolicy({ ...stripped, model: agent.alias }, agent);
+  // Nexus routing kernel (tool-router.md) is only for consultNexus via withNexusPolicy.
+  // User-facing resident completions get a tiny chat prompt so the 0.5B does not dump baked identity.
+  const payload = agent.alias === NEXUS_ALIAS
+    ? injectNexusChatPrompt({ ...stripped, model: agent.alias })
+    : injectSystemPolicy({ ...stripped, model: agent.alias }, agent);
   delete payload.route_plan_only;
   delete payload.lock_alias;
   delete payload.session_id;
+  if (agent.alias !== NEXUS_ALIAS) {
+    const systemChars = contentChars(payload.messages?.[0]);
+    const maxChars = contextCharBudget(agent, { maxTokens: payload.max_tokens, systemChars });
+    payload.messages = injectWorkingSet(payload.messages ?? [], extras.session, { maxChars });
+  }
   if (agent.alias === NEXUS_ALIAS) {
     payload.enable_thinking = false;
     payload.chat_template_kwargs = { ...(payload.chat_template_kwargs ?? {}), enable_thinking: false };
     return payload;
   }
-  if (agent.alias !== FALLBACK_ALIAS) return payload;
   const explicit = payload.enable_thinking ?? payload.chat_template_kwargs?.enable_thinking;
-  if (explicit !== undefined) return payload;
+  if (explicit === true) return payload;
+  payload.enable_thinking = false;
   payload.chat_template_kwargs = { ...(payload.chat_template_kwargs ?? {}), enable_thinking: false };
   return payload;
 }
@@ -228,6 +257,11 @@ function wrapNativeAsChat(alias, nativeJson, kind) {
     content = url
       ? [{ type: 'image_url', image_url: { url } }]
       : JSON.stringify(nativeJson);
+  }
+  else if (kind === 'moderation') {
+    const res = nativeJson?.results?.[0];
+    const flagged = res?.flagged ? 'FLAGGED: Content violates safety policy' : 'PASSED: Content adheres to safety policy';
+    content = `${flagged}\n\n${JSON.stringify(nativeJson, null, 2)}`;
   }
   else content = JSON.stringify(nativeJson);
   return {
@@ -264,6 +298,10 @@ function nativePayload(kind, body, alias) {
     if (!prompt) throw new ValidationError('image generation needs a text prompt');
     return { prompt, n: 1, response_format: 'b64_json' };
   }
+  if (kind === 'moderation') {
+    const input = typeof body.input === 'string' ? body.input : text;
+    return { model: alias, input };
+  }
   return body;
 }
 
@@ -297,7 +335,7 @@ function nativeRequestInit(kind, payload, signal) {
 }
 
 export class Gateway {
-  constructor({ manifest, registry, processes, sessions, policy, hostAdapter, fetchImpl, mailbox, ipc, logger }) {
+  constructor({ manifest, registry, processes, sessions, policy, hostAdapter, fetchImpl, mailbox, ipc, logger, interrupts, brainz }) {
     this.manifest = manifest;
     this.registry = registry;
     this.processes = processes;
@@ -315,6 +353,122 @@ export class Gateway {
     this.logger = logger ?? createLogger();
     this.extraPeers = [];
     this.councilDir = this.manifest.gateway?.council_dir ?? process.env.GREEN_ROOMZ_COUNCIL_DIR ?? null;
+    this.timingPrivacy = resolveTimingPrivacy(this.manifest.gateway) ?? { mode: 'off', q: 0, dither: false, holdBeforeResponse: false };
+    this.interrupts = interrupts ?? null;
+    this.brainz = brainz ?? null;
+  }
+
+  serveHtml(response, cors, method, html) {
+    const data = Buffer.from(html);
+    response.writeHead(200, {
+      'content-type': 'text/html; charset=utf-8',
+      'content-length': method === 'HEAD' ? 0 : data.length,
+      ...cors,
+    });
+    return response.end(method === 'HEAD' ? undefined : data);
+  }
+
+  serveOperatorIndex(response, cors, method = 'GET') {
+    const html = `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Green-Roomz</title></head>
+<body>
+<h1>Green-Roomz</h1>
+<p>Use <strong>both</strong> clients against this same gateway. They do not conflict.</p>
+<ul>
+<li>Web / file-drop: <a href="/unicorn">Unicorn</a> &mdash; <code>scripts\\unicorn.cmd</code></li>
+<li>Console chat: <strong>chat-mvp</strong> &mdash; <code>scripts\\chat-mvp.cmd</code></li>
+<li>Desktop GUI: llama.app pointed at <code>http://127.0.0.1:8080</code></li>
+</ul>
+<p>This landing page is not a chat UI. Coding agent jail: <code>node bin\\green-roomz.mjs agent --goal "..."</code></p>
+<p>This URL is an OpenAI-compatible HTTP API. No TLS on :8080 &mdash; use <code>http://127.0.0.1:8080</code>, not https.</p>
+<ul>
+<li><a href="/health"><code>GET /health</code></a></li>
+<li><a href="/v1/models"><code>GET /v1/models</code></a></li>
+<li><code>POST /v1/chat/completions</code></li>
+</ul>
+<p>Other clients: curl, any OpenAI SDK at this origin.</p>
+</body></html>
+`;
+    return this.serveHtml(response, cors, method, html);
+  }
+
+  serveUnicorn(response, cors, method = 'GET') {
+    let html;
+    if (existsSync(UNICORN_PAGE)) {
+      html = readFileSync(UNICORN_PAGE, 'utf8');
+    } else {
+      html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Green Unicorn</title></head>
+<body><h1>Green Unicorn</h1><p>Missing <code>web/unicorn.html</code> next to the gateway. Use <code>scripts\\chat-mvp.cmd</code> until that file is restored.</p></body></html>`;
+    }
+    return this.serveHtml(response, cors, method, html);
+  }
+
+  async attachCognitiveTurn(request, issuedSession, identity, body) {
+    let payload = body;
+    if (this.interrupts) {
+      const lease = this.interrupts.begin(issuedSession, { signal: request.abortSignal });
+      request.abortSignal = lease.signal;
+      request._irqLease = lease;
+      const applied = this.interrupts.applyPending(issuedSession, payload);
+      payload = applied.body;
+    }
+    if (this.brainz) {
+      const recalled = await this.brainz.injectBoundedRecall(payload, {
+        readerAgentId: identity ?? 'green-roomz',
+      });
+      payload = recalled.body;
+      await this.brainz.observeTurn({
+        sessionId: issuedSession,
+        text: latestUserMessageText(payload),
+        action: { kind: 'chat' },
+        actorAgentId: identity ?? 'green-roomz',
+      });
+    }
+    return payload;
+  }
+
+  releaseCognitiveTurn(request) {
+    request._irqLease?.end();
+    request._irqLease = null;
+  }
+
+  memoryBounds() {
+    return memoryBounds(this.manifest.gateway);
+  }
+
+  prepareTurn(body, agent, issuedSession) {
+    const session = issuedSession ? this.sessions.workingSet(issuedSession) : null;
+    const payload = prepareInferenceBody(body, agent, { session });
+    if (issuedSession) {
+      this.sessions.rememberTurn(issuedSession, {
+        userText: latestUserMessageText(body),
+        agentAlias: agent.alias,
+      }, this.memoryBounds());
+    }
+    return payload;
+  }
+
+  noteAssistant(issuedSession, text) {
+    if (!issuedSession || text == null || text === '') return false;
+    return this.sessions.rememberTurn(issuedSession, { assistantText: String(text) }, this.memoryBounds());
+  }
+
+  recordProxy(issuedSession, proxied) {
+    const ok = Number(proxied?.status) >= 200 && Number(proxied?.status) < 400;
+    if (ok) this.noteAssistant(issuedSession, proxied?.content);
+    return ok;
+  }
+
+  async applyTimingHold(startedAt, beforeResponse) {
+    const p = this.timingPrivacy;
+    if (!p || p.q < 1) return;
+    if (Boolean(beforeResponse) !== Boolean(p.holdBeforeResponse)) return;
+    const wait = holdMs(startedAt, Date.now(), p.q, Math.random, p);
+    if (wait > 0) { try { await sleep(wait); } catch {} }
+  }
+
+  beforeClientWrite(startedAt) {
+    return () => this.applyTimingHold(startedAt, true);
   }
 
   /** Static manifest allow_peers plus any injected at launch (e.g. by the adb harness). */
@@ -331,7 +485,7 @@ export class Gateway {
   bindAddress(host) {
     const requested = host ?? this.manifest.gateway.host ?? '127.0.0.1';
     const loopback = requested === '127.0.0.1' || requested === 'localhost' || requested === '::1';
-    const bindAll = requested === '0.0.0.0' || requested === '::';
+    const bindAll = requested === '0.0.0.0' || requested === '::' || requested === '::0' || requested === '';
     const allowPeers = this.manifest.gateway.allow_peers ?? [];
     if (!loopback) {
       // Binding to a specific LAN address is allowed when an explicit peer
@@ -390,6 +544,12 @@ export class Gateway {
         if (method !== 'GET' && method !== 'HEAD') {
           return jsonResponse(response, 405, { error: { message: 'Method not allowed' } }, { allow: 'GET, HEAD, OPTIONS', ...cors });
         }
+        if (url.pathname === '/') {
+          return this.serveOperatorIndex(response, cors, method);
+        }
+        if (url.pathname === '/unicorn') {
+          return this.serveUnicorn(response, cors, method);
+        }
         if (url.pathname === '/health' || url.pathname === '/v1/health') {
           return headJson(200, this.health());
         }
@@ -443,11 +603,21 @@ export class Gateway {
       }
       if (url.pathname === '/v1/embeddings') body.model = body.model ?? 'semantic-embedding-agent';
       if (url.pathname === '/v1/rerank') body.model = body.model ?? 'retrieval-rerank-agent';
+      if (url.pathname === '/v1/moderations') body.model = body.model ?? 'safety-policy-agent';
+      if (url.pathname === '/v1/images/generations') body.model = body.model ?? 'image-generation-agent';
       return await this.handleInference(request, response, body, identity, cors, url.pathname);
     } catch (error) {
+      if (request.abortSignal?.aborted || response.destroyed || response.writableEnded) return;
+      if (response.headersSent) {
+        try { if (!response.writableEnded) response.destroy(); } catch {}
+        return;
+      }
       const status = error instanceof GreenRoomzError ? error.status : 500;
       const retryAfter = (error instanceof UnavailableError || error instanceof UpstreamTimeoutError)
         ? { 'retry-after': '2' }
+        : {};
+      const extraHeaders = (error && typeof error === 'object' && error.headers && typeof error.headers === 'object')
+        ? error.headers
         : {};
       return jsonResponse(response, status, {
         error: {
@@ -455,18 +625,26 @@ export class Gateway {
           type: error.code ?? 'internal_error',
           details: error.details,
         },
-      }, { ...cors, ...retryAfter });
+      }, { ...cors, ...retryAfter, ...extraHeaders });
     }
   }
 
   health() {
     const models = this.registry.listModels();
-    const unavailable = models.filter((model) => model.availability === 'unavailable');
+    const need = Array.isArray(this.manifest.gateway.health_aliases)
+      ? this.manifest.gateway.health_aliases
+      : [];
+    const down = need.filter((alias) => {
+      const row = models.find((model) => model.id === alias);
+      return !row || row.availability === 'unavailable';
+    });
     return {
-      status: unavailable.length ? 'degraded' : 'ok',
+      status: down.length ? 'degraded' : 'ok',
       product: 'Green-Roomz',
       uptime_ms: Date.now() - this.startedAt,
       policy: this.policy.policy,
+      health_aliases: need,
+      unavailable_required: down,
       agents: models,
       mailbox: this.mailbox.stats(),
       ipc: this.ipc.stats(),
@@ -531,6 +709,7 @@ export class Gateway {
   }
 
   async completeOnResident(request, response, body, issuedSession, cors, hops, reason) {
+    const startedAt = Date.now();
     const alias = NEXUS_ALIAS;
     const availability = this.registry.status(alias);
     if (!this.registry.agents.has(alias) || availability.state === 'unavailable') {
@@ -545,7 +724,11 @@ export class Gateway {
       // Honor client stream preference. Forcing stream:false here collapsed
       // OpenAI-compatible SSE on windows-mvp resident_fallback (tool-router)
       // into a one-shot application/json chat.completion (parity battery case E).
-      const payload = prepareInferenceBody(body, agent);
+      const payload = this.prepareTurn(body, agent, issuedSession);
+      if (reason === 'resident_fallback') {
+        const n = Number(payload.max_tokens);
+        if (!Number.isFinite(n) || n > NEXUS_MAX_TOKENS) payload.max_tokens = NEXUS_MAX_TOKENS;
+      }
       const path = '/v1/chat/completions';
       const target = `http://127.0.0.1:${agent.port}${path}`;
       this.sessions.setAgentAlias(issuedSession, alias);
@@ -564,8 +747,9 @@ export class Gateway {
         config: this.manifest.gateway,
         signal: request.abortSignal,
         fetchImpl: this.fetchImpl,
+        beforeClientWrite: this.beforeClientWrite(startedAt),
       });
-      const okHop = Number(proxied?.status) >= 200 && Number(proxied?.status) < 400;
+      const okHop = this.recordProxy(issuedSession, proxied);
       this.observeHop(okHop ? 'success' : 'agent_unavailable', alias, { ticket: issuedSession, payload: { reason, hops: hops.slice() } });
     } catch (error) {
       this.observeHop('agent_unavailable', alias, { ticket: issuedSession, payload: { reason: 'upstream_failed', hops: hops.slice() } });
@@ -576,6 +760,7 @@ export class Gateway {
   }
 
   async completeNativeChat(request, response, body, issuedSession, cors, hops, alias, native, reason) {
+    const startedAt = Date.now();
     const availability = this.registry.status(alias);
     if (!this.registry.agents.has(alias) || availability.state === 'unavailable') {
       throw new UnavailableError(`${alias} is unavailable`, availability.missing);
@@ -608,6 +793,7 @@ export class Gateway {
     this.observeHop('success', alias, { ticket: issuedSession, payload: { reason, hops: hops.slice() } });
     this.sessions.setAgentAlias(issuedSession, alias);
     const wrapped = wrapNativeAsChat(alias, parsed, native.kind);
+    await this.applyTimingHold(startedAt, true);
     return jsonResponse(
       response,
       upstream.status >= 400 ? upstream.status : 200,
@@ -640,9 +826,10 @@ export class Gateway {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'grz-tts-'));
     const out = path.join(dir, 'speech.wav');
     try {
+      const timeout = this.manifest.gateway.agent_chat_timeout_ms ?? 600_000;
       await new Promise((resolve, reject) => {
         const child = execFile(runtime.command, ['--model', agent.model, '--output_file', out],
-          { timeout: 30_000, windowsHide: true }, (err) => (err ? reject(err) : resolve()));
+          { timeout, windowsHide: true }, (err) => (err ? reject(err) : resolve()));
         child.stdin.end(text);
       });
       const wav = await readFile(out);
@@ -685,7 +872,7 @@ export class Gateway {
         await this.processes.ensure(agent, { signal: request.abortSignal });
         const unpin = this.processes.pin(alias);
         try {
-          const payload = { ...prepareInferenceBody(stripped, agent), stream: false };
+          const payload = { ...this.prepareTurn(stripped, agent, issuedSession), stream: false };
           const res = await this.fetchImpl(`http://127.0.0.1:${agent.port}${path}`, {
             method: 'POST', headers: { 'content-type': 'application/json', connection: 'close' },
             body: JSON.stringify(payload), signal: deadlineSignal(request.abortSignal, this.manifest.gateway.upstream_timeout_ms ?? UPSTREAM_TIMEOUT_MS),
@@ -702,9 +889,10 @@ export class Gateway {
       }
     };
 
-    // Parallel only if every variant can admit without eviction; else serial
-    // (each run evicts the previous - slow, but the memory-tight path).
-    const canParallel = spec.parallel ?? spec.aliases.every((a) => aliasCanAdmit(this.registry, a, this.processes) && this.registry.status(a).state === 'ready');
+    // Parallel only if every variant can admit without eviction and the
+    // specialist set fits under maxWarmSpecialists; else serial.
+    const requestedParallel = spec.parallel === true;
+    const canParallel = this.processes.canParallelCouncil(spec.aliases, requestedParallel);
     const candidates = canParallel
       ? await Promise.all(spec.aliases.map(runOne))
       : await spec.aliases.reduce(async (acc, a) => [...(await acc), await runOne(a)], Promise.resolve([]));
@@ -718,9 +906,12 @@ export class Gateway {
 
     this.recordCouncil({ task: detectModalities(body).image ? 'vision' : 'text', spec, candidates, verdict, userText: latestUserMessageText(stripped) });
     this.sessions.setAgentAlias(issuedSession, winnerAlias);
+    this.sessions.patch(issuedSession, { lastSpecialist: winnerAlias });
+    this.noteAssistant(issuedSession, winnerText);
 
     const headers = this.routeHeaders(issuedSession, { requestedAlias: body.model ?? null, effectiveAlias: winnerAlias, reason: `council_${spec.judge}` }, cors, { hops: spec.aliases.join(',') });
     headers['x-green-roomz-council'] = headerSafe(JSON.stringify({ judge: spec.judge, winner: winnerAlias, outlier: verdict.outlier, agreement: verdict.agreement }));
+    await this.applyTimingHold(startedAt, true);
     return jsonResponse(response, usable.length ? 200 : 502, {
       id: `grz-council-${issuedSession}`,
       object: 'chat.completion',
@@ -738,8 +929,7 @@ export class Gateway {
     }, headers);
     } finally {
       release();
-      const wait = holdMs(startedAt);
-      if (wait > 0) { try { await sleep(wait); } catch {} }
+      await this.applyTimingHold(startedAt, false);
     }
   }
 
@@ -781,7 +971,7 @@ export class Gateway {
           for (const c of usable) {
             const r = await this.fetchImpl(`http://127.0.0.1:${embedAgent.port}/v1/embeddings`, {
               method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: 'semantic-embedding-agent', input: c.content.slice(0, 4000) }),
-              signal: deadlineSignal(request.abortSignal, 20_000),
+              signal: deadlineSignal(request.abortSignal, this.manifest.gateway.handoff_peek_timeout_ms ?? HANDOFF_PEEK_TIMEOUT_MS),
             });
             const emb = JSON.parse(await readCappedText(r, 4 * 1024 * 1024))?.data?.[0]?.embedding;
             if (Array.isArray(emb)) vectors.push({ alias: c.alias, embedding: emb });
@@ -798,7 +988,7 @@ export class Gateway {
       const res = await this.fetchImpl(`http://127.0.0.1:${jAgent.port}/v1/chat/completions`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ messages: [{ role: 'user', content: judgePrompt(userText, usable) }], max_tokens: 8, stream: false }),
-        signal: deadlineSignal(request.abortSignal, 25_000),
+        signal: deadlineSignal(request.abortSignal, this.manifest.gateway.nexus_consult_timeout_ms ?? NEXUS_CONSULT_TIMEOUT_MS),
       });
       const reply = JSON.parse(await readCappedText(res, 1024 * 1024))?.choices?.[0]?.message?.content ?? '';
       return resolveJudgeChoice(reply, usable);
@@ -839,6 +1029,7 @@ export class Gateway {
       'x-green-roomz-effective-alias': headerSafe(routed.effectiveAlias ?? ''),
       'x-green-roomz-route-reason': headerSafe(routed.reason ?? ''),
       'x-green-roomz-hops': headerSafe(extra.hops ?? ''),
+      'x-green-roomz-memory': headerSafe(formatMemoryHeader(this.sessions.workingSet(issuedSession))),
       'x-green-roomz-nexus': NEXUS_ALIAS,
       'x-green-roomz-agency': AGENCY_ROLE,
       ...cors,
@@ -951,7 +1142,7 @@ export class Gateway {
         }
       } catch {}
     }
-    const alias = plan.route
+    const alias = (isRoutableAlias(this.registry, plan.route) ? plan.route : null)
       ?? (isRoutableAlias(this.registry, FALLBACK_ALIAS) ? FALLBACK_ALIAS : NEXUS_ALIAS);
     plan = { ...plan, route: alias };
     const routed = {
@@ -986,6 +1177,7 @@ export class Gateway {
       modality: detectModalities(body),
     });
     if (session?.id) this.sessions.setAgentAlias(issuedSession, alias);
+    body = await this.attachCognitiveTurn(request, issuedSession, identity, body);
     const headers = this.routeHeaders(issuedSession, { requestedAlias: body.model, effectiveAlias: alias, reason: 'requested_alias' }, cors, { hops: alias });
     for (const [key, value] of Object.entries(headers)) response.setHeader(key, value);
     const startedAt = Date.now();
@@ -994,7 +1186,7 @@ export class Gateway {
       await this.processes.ensure(agent, { signal: request.abortSignal });
       const unpin = this.processes.pin(alias);
       try {
-        const payload = prepareInferenceBody(body, agent);
+        const payload = this.prepareTurn(body, agent, issuedSession);
         const path = String(request.url.split('?')[0]).replace(/\/route$/, '') || '/v1/chat/completions';
         const proxied = await proxyJson({
           request,
@@ -1004,8 +1196,9 @@ export class Gateway {
           config: this.manifest.gateway,
           signal: request.abortSignal,
           fetchImpl: this.fetchImpl,
+          beforeClientWrite: this.beforeClientWrite(startedAt),
         });
-        const okHop = Number(proxied?.status) >= 200 && Number(proxied?.status) < 400;
+        const okHop = this.recordProxy(issuedSession, proxied);
         this.observeHop(okHop ? 'success' : 'agent_unavailable', alias, { ticket: issuedSession, payload: { reason: 'requested_alias', hops: [alias] } });
       } catch (error) {
         this.observeHop('agent_unavailable', alias, { ticket: issuedSession, payload: { reason: 'upstream_failed', hops: [alias] } });
@@ -1014,9 +1207,9 @@ export class Gateway {
         unpin();
       }
     } finally {
+      this.releaseCognitiveTurn(request);
       release();
-      const wait = holdMs(startedAt);
-      if (wait > 0) { try { await sleep(wait); } catch {} }
+      await this.applyTimingHold(startedAt, false);
     }
   }
 
@@ -1024,12 +1217,14 @@ export class Gateway {
     const visited = new Set();
     const hops = [];
     const notes = [];
+    const preferResident = preferResidentChat(this.manifest?.gateway ?? this.processes?.manifest?.gateway);
     const hard = hardRuleRoute(body, this.registry);
     const issuedSession = session?.id ?? this.sessions.create({
       identity,
       agentAlias: hard.effectiveAlias ?? FALLBACK_ALIAS,
       modality: hard.modality,
     });
+    body = await this.attachCognitiveTurn(request, issuedSession, identity, body);
     const turnSettings = this.applyTurnSettings(issuedSession, identity, body);
 
     const hopHeaders = (alias, reason) => this.routeHeaders(
@@ -1060,23 +1255,59 @@ export class Gateway {
             hops.push(alias);
             notes.push(stripControls(`${alias} unavailable (impractical or missing)`));
             this.observeHop('agent_unavailable', alias, { ticket: issuedSession, payload: { reason: hard.reason } });
+            // Slash/lock native (image/embed/rerank/whisper/tts) cannot fall through
+            // to the resident 0.5B; /code impractical still continues to text fallback.
+            if (NATIVE_CHAT[alias] || alias === 'speech-synthesis-agent') {
+              const availability = this.registry.status(alias);
+              const err = new UnavailableError(`${alias} is unavailable`, availability.missing);
+              err.headers = hopHeaders(alias, hard.reason);
+              throw err;
+            }
             continue;
           }
         } else {
-          const picked = await consultNexus({
-            processes: this.processes,
-            registry: this.registry,
-            fetchImpl: this.fetchImpl,
-            body: stripSlashCommand(body),
-            visited,
-            notes,
-            signal: request.abortSignal,
-            ...turnSettings,
-          });
-          alias = picked.route;
-          reason = picked.reason ?? 'nexus';
+          const stripped = stripSlashCommand(body);
+          const genericText = isGenericChatRequest(body)
+            && planRoute(stripped)?.route === FALLBACK_ALIAS;
+          const chatDefault = genericText
+            && isRoutableAlias(this.registry, FALLBACK_ALIAS)
+            && aliasCanAdmit(this.registry, FALLBACK_ALIAS, this.processes);
+          if (genericText && preferResident) {
+            // Slow hosts (Athlon) set GRZ_OFFLINE_NEXUS=1: stay on resident 0.5B even
+            // when Instruct is already ready from a pre-warm (chat_default would 150s).
+            alias = NEXUS_ALIAS;
+            reason = 'chat_default_resident';
+          } else if (chatDefault) {
+            alias = FALLBACK_ALIAS;
+            reason = 'chat_default';
+          } else {
+            const picked = await consultNexus({
+              processes: this.processes,
+              registry: this.registry,
+              fetchImpl: this.fetchImpl,
+              body: stripped,
+              visited,
+              notes,
+              signal: request.abortSignal,
+              ...turnSettings,
+            });
+            alias = picked.route;
+            reason = picked.reason ?? 'nexus';
+          }
         }
 
+        const slashPinned = Boolean(hard.effectiveAlias && hard.effectiveAlias === alias);
+        if (
+          preferResident
+          && isGenericChatRequest(body)
+          && !slashPinned
+          && (alias === FALLBACK_ALIAS || (alias === NEXUS_ALIAS && reason === 'chat_default_resident'))
+        ) {
+          return await this.completeOnResident(request, response, body, issuedSession, cors, hops, 'chat_default_resident');
+        }
+        if (alias === NEXUS_ALIAS && reason === 'chat_default_resident') {
+          return await this.completeOnResident(request, response, body, issuedSession, cors, hops, reason);
+        }
         if (!alias || visited.has(alias) || alias === NEXUS_ALIAS) break;
         if (alias === 'speech-synthesis-agent') {
           const slashOrLock = Boolean(hard.effectiveAlias === alias);
@@ -1115,7 +1346,7 @@ export class Gateway {
         // but still won't spontaneously mmap a 4B/7B code/vision model - those
         // stay opt-in via /code, /vision, etc. Idle eviction bounds the warm set.
         const alreadyReady = this.registry.status(alias).state === 'ready';
-        const mayColdStart = slashOrLock || alias === FALLBACK_ALIAS;
+        const mayColdStart = slashOrLock || (alias === FALLBACK_ALIAS && !preferResident);
         if (!mayColdStart && !alreadyReady && alias !== NEXUS_ALIAS) {
           visited.add(alias);
           hops.push(alias);
@@ -1148,9 +1379,35 @@ export class Gateway {
           }, hopHeaders(alias, reason));
         }
 
-        const payload = prepareInferenceBody(body, agent);
+        const payload = this.prepareTurn(body, agent, issuedSession);
         const path = String((pathname ?? request.url.split('?')[0])).replace(/\/route$/, '') || '/v1/chat/completions';
         const target = `http://127.0.0.1:${agent.port}${path}`;
+        if (reason === 'chat_default') {
+          if (preferResident) {
+            return await this.completeOnResident(request, response, body, issuedSession, cors, hops, 'chat_default_resident');
+          }
+          const unpinChat = this.processes.pin(alias);
+          try {
+            this.sessions.setAgentAlias(issuedSession, alias);
+            const headers = hopHeaders(alias, reason);
+            for (const [key, value] of Object.entries(headers)) response.setHeader(key, value);
+            const proxied = await proxyJson({
+              request,
+              response,
+              body: payload,
+              target,
+              config: this.manifest.gateway,
+              signal: request.abortSignal,
+              fetchImpl: this.fetchImpl,
+              beforeClientWrite: this.beforeClientWrite(startedAt),
+            });
+            const okHop = this.recordProxy(issuedSession, proxied);
+            this.observeHop(okHop ? 'success' : 'agent_unavailable', alias, { ticket: issuedSession, payload: { reason, hops: hops.slice() } });
+            return;
+          } finally {
+            unpinChat();
+          }
+        }
         peekedSpecialist = true;
         const unpin = this.processes.pin(alias);
         try {
@@ -1160,9 +1417,40 @@ export class Gateway {
             target,
             body: payload,
             signal: request.abortSignal,
+            peekChars: this.manifest.gateway.handoff_peek_chars ?? HANDOFF_PEEK_CHARS,
+            peekTimeoutMs: this.manifest.gateway.handoff_peek_timeout_ms ?? HANDOFF_PEEK_TIMEOUT_MS,
           });
 
           if (peek.degraded === 'peek_timeout' && !peek.handoff) {
+            if (alias === FALLBACK_ALIAS) {
+              // Peek aborted the SSE. Finish on Instruct (capped) instead of
+              // resident_fallback ramble on the router.
+              this.sessions.setAgentAlias(issuedSession, alias);
+              const headers = hopHeaders(alias, reason);
+              for (const [key, value] of Object.entries(headers)) response.setHeader(key, value);
+              if (peek.content || peek.events?.length) {
+                this.noteAssistant(issuedSession, peek.content);
+                await deliverPeek({ peek, request, response, body: payload, headers, beforeClientWrite: this.beforeClientWrite(startedAt) });
+                this.observeHop('success', alias, { ticket: issuedSession, payload: { reason: 'peek_timeout_keep', hops: hops.slice() } });
+                return;
+              }
+              const retryPayload = { ...payload, stream: false };
+              const n = Number(retryPayload.max_tokens);
+              if (!Number.isFinite(n) || n > NEXUS_MAX_TOKENS) retryPayload.max_tokens = NEXUS_MAX_TOKENS;
+              const proxied = await proxyJson({
+                request,
+                response,
+                body: retryPayload,
+                target,
+                config: this.manifest.gateway,
+                signal: request.abortSignal,
+                fetchImpl: this.fetchImpl,
+                beforeClientWrite: this.beforeClientWrite(startedAt),
+              });
+              const okHop = this.recordProxy(issuedSession, proxied);
+              this.observeHop(okHop ? 'success' : 'agent_unavailable', alias, { ticket: issuedSession, payload: { reason: 'peek_timeout_retry', hops: hops.slice() } });
+              return;
+            }
             visited.add(alias);
             notes.push(stripControls(`${alias} did not emit within the peek window`));
             this.observeHop('agent_unavailable', alias, { ticket: issuedSession, payload: { reason: 'peek_timeout' } });
@@ -1184,9 +1472,10 @@ export class Gateway {
           }
 
           this.sessions.setAgentAlias(issuedSession, alias);
+          this.noteAssistant(issuedSession, peek.content);
           const headers = hopHeaders(alias, reason);
           for (const [key, value] of Object.entries(headers)) response.setHeader(key, value);
-          await deliverPeek({ peek, request, response, body: payload, headers });
+          await deliverPeek({ peek, request, response, body: payload, headers, beforeClientWrite: this.beforeClientWrite(startedAt) });
           this.observeHop('success', alias, { ticket: issuedSession, payload: { reason, hops: hops.slice() } });
           return;
         } finally {
@@ -1207,21 +1496,22 @@ export class Gateway {
       // a handoff with nowhere to go, a peek timeout, hop budget spent). The
       // general-text model is the safety net for ANY of those - a chat request
       // always gets a chat answer. This is unconditional: a prior peek/handoff
-      // does not disqualify the fallback.
-      if (!visited.has(FALLBACK_ALIAS) && isRoutableAlias(this.registry, FALLBACK_ALIAS)) {
+      // does not disqualify the fallback. Offline/Athlon hosts skip Instruct
+      // even when it is already ready — mmap'd 4B sits silent past client timeouts.
+      if (!preferResident && !visited.has(FALLBACK_ALIAS) && isRoutableAlias(this.registry, FALLBACK_ALIAS)) {
         try {
           hops.push(FALLBACK_ALIAS);
           const agent = this.registry.get(FALLBACK_ALIAS);
           await this.processes.ensure(agent, { signal: request.abortSignal });
           const unpin = this.processes.pin(FALLBACK_ALIAS);
           try {
-            const payload = prepareInferenceBody(body, agent);
+            const payload = this.prepareTurn(body, agent, issuedSession);
             const path = String((pathname ?? request.url.split('?')[0])).replace(/\/route$/, '') || '/v1/chat/completions';
             this.sessions.setAgentAlias(issuedSession, FALLBACK_ALIAS);
             const headers = hopHeaders(FALLBACK_ALIAS, 'text_fallback');
             for (const [key, value] of Object.entries(headers)) response.setHeader(key, value);
-            const proxied = await proxyJson({ request, response, body: payload, target: `http://127.0.0.1:${agent.port}${path}`, config: this.manifest.gateway, signal: request.abortSignal, fetchImpl: this.fetchImpl });
-            const okHop = Number(proxied?.status) >= 200 && Number(proxied?.status) < 400;
+            const proxied = await proxyJson({ request, response, body: payload, target: `http://127.0.0.1:${agent.port}${path}`, config: this.manifest.gateway, signal: request.abortSignal, fetchImpl: this.fetchImpl, beforeClientWrite: this.beforeClientWrite(startedAt) });
+            const okHop = this.recordProxy(issuedSession, proxied);
             this.observeHop(okHop ? 'success' : 'agent_unavailable', FALLBACK_ALIAS, { ticket: issuedSession, payload: { reason: 'text_fallback', hops: hops.slice() } });
             return;
           } catch (error) {
@@ -1241,6 +1531,7 @@ export class Gateway {
         return await this.completeOnResident(request, response, body, issuedSession, cors, hops, 'resident_fallback');
       }
       this.observeHop('route_exhausted', hops[hops.length - 1] ?? '', { ticket: issuedSession, payload: { hops: hops.slice(), visited: [...visited] } });
+      await this.applyTimingHold(startedAt, true);
       return jsonResponse(response, 422, {
         error: {
           type: 'route_exhausted',
@@ -1249,9 +1540,9 @@ export class Gateway {
         },
       }, hopHeaders(null, 'route_exhausted'));
     } finally {
+      this.releaseCognitiveTurn(request);
       release();
-      const wait = holdMs(startedAt);
-      if (wait > 0) { try { await sleep(wait); } catch {} }
+      await this.applyTimingHold(startedAt, false);
     }
   }
 
@@ -1262,7 +1553,9 @@ export class Gateway {
       // A dead client socket must not take the process down mid-write.
       req.on('error', () => {});
       res.on('error', () => {});
+      req.socket?.on('error', () => {});
       Promise.resolve(this.handle(req, res)).catch((error) => {
+        if (req.abortSignal?.aborted || res.destroyed || res.writableEnded) return;
         try {
           if (!res.headersSent) {
             jsonResponse(res, 500, { error: { message: redact(String(error?.message ?? error)), type: 'internal_error' } });
@@ -1272,16 +1565,30 @@ export class Gateway {
         } catch { /* socket already gone */ }
       });
     });
-    // Malformed HTTP from a client is a 400, never a crash.
-    server.on('clientError', (_error, socket) => {
-      if (socket.writable) socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n');
-      else socket.destroy();
+    // Malformed HTTP is a 400, never a crash. TLS ClientHello (Firefox https://
+    // to this plaintext port) is HPE_INVALID_METHOD — do not reply with HTTP 400;
+    // that is what NSS reports as SSL_ERROR_RX_RECORD_TOO_LONG and it blocks
+    // HTTPS-First fallback to http://.
+    server.on('clientError', (error, socket) => {
+      const tlsOrBinary = error?.code === 'HPE_INVALID_METHOD' || error?.bytesParsed === 0;
+      if (!socket.writable || tlsOrBinary) {
+        socket.destroy();
+        return;
+      }
+      socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n');
     });
     server.headersTimeout = this.manifest.gateway.headers_timeout_ms ?? 30_000;
-    server.requestTimeout = this.manifest.gateway.request_timeout_ms ?? 180_000;
+    server.requestTimeout = this.manifest.gateway.request_timeout_ms ?? 0;
     return new Promise((resolve, reject) => {
-      server.once('error', reject);
-      server.listen(listenPort, address, () => resolve(server));
+      const onListenError = (error) => reject(error);
+      server.once('error', onListenError);
+      server.listen(listenPort, address, () => {
+        server.off('error', onListenError);
+        server.on('error', (error) => {
+          try { console.error(`gateway server error: ${error?.message ?? error}`); } catch {}
+        });
+        resolve(server);
+      });
     });
   }
 }

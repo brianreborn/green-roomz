@@ -1,0 +1,34 @@
+name: try-vm
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'packaging/vm/**'
+      - 'packaging/cloud-init/**'
+      - '.github/workflows/try-vm.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  kit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install qemu + cloud-utils
+        run: sudo apt-get update && sudo apt-get install -y qemu-utils cloud-image-utils
+      - name: Build VM kit
+        run: bash packaging/vm/build-kit.sh "$GITHUB_WORKSPACE/dist/vm"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: green-roomz-vm-kit
+          path: dist/vm/green-roomz-vm-kit.tar.gz
+          if-no-files-found: error
+      - name: Upload to latest pre-release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view try-vm >/dev/null 2>&1 || gh release create try-vm --prerelease --title "Green-Roomz try VM" --notes "Debian cloud qcow2 + cloud-init seed. See packaging/vm/README.md. ssh grz / greenroomz. Bearer try-local on :8080."
+          gh release upload try-vm dist/vm/green-roomz-vm-kit.tar.gz --clobber

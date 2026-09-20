@@ -96,17 +96,19 @@ test('bind then yield', () => {
   assert.equal(Object.prototype.hasOwnProperty.call(place, 'vote'), false);
   assert.equal(Object.prototype.hasOwnProperty.call(place, 'reboot'), false);
   assert.equal(Object.prototype.hasOwnProperty.call(place, 'secure_reboot'), false);
-  const voteReject = vote();
-  assert.equal(voteReject.kind, 'reject');
-  assert.equal(voteReject.ok, false);
-  assert.match(voteReject.reason, /uncallable/);
-  assert.equal(voteReject.to, 'vote');
-  const secureReject = secureReboot();
-  assert.equal(secureReject.kind, 'reject');
-  assert.equal(secureReject.ok, false);
-  assert.match(secureReject.reason, /uncallable/);
-  assert.equal(secureReject.to, 'secure_reboot');
-  assert.notEqual(voteReject, secureReject);
+  // API stubs return reject envelopes (never throw, never execute).
+  const voted = vote();
+  assert.equal(voted.ok, false);
+  assert.equal(voted.kind, 'reject');
+  assert.equal(voted.voted, false);
+  assert.equal(voted.executed, false);
+  assert.match(voted.reason, /uncallable|complex-last/);
+  const rebooted = secureReboot();
+  assert.equal(rebooted.ok, false);
+  assert.equal(rebooted.kind, 'reject');
+  assert.equal(rebooted.voted, false);
+  assert.equal(rebooted.executed, false);
+  assert.match(rebooted.reason, /uncallable|complex-last/);
 });
 
 test('second bind of llama floor rejected', () => {

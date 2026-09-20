@@ -11,5 +11,7 @@ if not exist "%GRZ_LLAMA%" (
   echo FAIL: missing llama-server.exe
   exit /b 1
 )
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\prepare-windows-media.ps1
+if errorlevel 2 echo WARN: optional media artifacts are missing; text gateway will still start.
 node bin\green-roomz.mjs serve --manifest config\agents.windows-mvp.json --host 127.0.0.1 --port 8080
 endlocal

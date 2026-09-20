@@ -38,7 +38,7 @@ test('missing artifacts degrade only the affected alias', async () => {
   assert.equal(monitor.capability_readiness.loaded, true);
 });
 
-test('inspect keeps a memory-tight specialist available (OS pages), not unavailable', async () => {
+test('inspect marks a memory-tight specialist unavailable unless admit_when_tight=page', async () => {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'grz-inspect-ram-'));
   const model = path.join(dir, 'model.gguf');
   writeFileSync(model, '');
@@ -57,8 +57,17 @@ test('inspect keeps a memory-tight specialist available (OS pages), not unavaila
       hostAdapter: { sampleResources() { return { freeMemoryBytes: 1 }; } },
     });
     const status = registry.status('qwenstral-code-speculator');
-    assert.notEqual(status.state, 'unavailable', 'tight RAM must not make it unavailable');
-    assert.ok(!(status.missing ?? []).some((reason) => String(reason).startsWith('impractical')));
+    // Default admit_when_tight=refuse: too-big specialist is unavailable (impractical), not "page anyway".
+    assert.equal(status.state, 'unavailable');
+    assert.ok((status.missing ?? []).some((reason) => String(reason).startsWith('impractical')));
+
+    manifest.gateway.admit_when_tight = 'page';
+    const paged = await new AgentRegistry(manifest).inspect({
+      hostAdapter: { sampleResources() { return { freeMemoryBytes: 1 }; } },
+    });
+    const pagedStatus = paged.status('qwenstral-code-speculator');
+    assert.notEqual(pagedStatus.state, 'unavailable', 'admit_when_tight=page keeps it available (OS pages)');
+    assert.ok(!(pagedStatus.missing ?? []).some((reason) => String(reason).startsWith('impractical')));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

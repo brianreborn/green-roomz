@@ -1,7 +1,7 @@
 import { POLICIES } from './constants.mjs';
 
 export class PolicyGate {
-  constructor(policy = 'maximize') {
+  constructor(policy = 'responsive') {
     this.setPolicy(policy);
     this.active = 0;
     this.queue = [];

@@ -1,0 +1,10 @@
+.git
+data
+node_modules
+native/sm11-monitor/out
+_bounce-backup-20260912
+*.gguf
+models
+runtime
+build
+docs/mcafee-*.png

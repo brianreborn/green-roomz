@@ -4,6 +4,7 @@ $Root = 'C:\Users\brian\Documents\green-roomz'
 $Node = 'C:\Program Files\nodejs\node.exe'
 $Log = Join-Path $Root 'data\local-ci.log'
 $IntervalSec = 900
+$Sm11Ci = Join-Path $Root 'scripts\sm11-ci.ps1'
 New-Item -ItemType Directory -Force -Path (Join-Path $Root 'data') | Out-Null
 
 function Stamp { Get-Date -Format 'yyyy-MM-ddTHH:mm:ssK' }
@@ -57,6 +58,15 @@ while ($true) {
     Write-Log ("health status=" + $h.status)
   } catch {
     Write-Log 'health down'
+  }
+
+  # Optional sm11 ring probe — never fails the CI cycle.
+  if (Test-Path -LiteralPath $Sm11Ci) {
+    try {
+      & $Sm11Ci -Root $Root -Log $Log | Out-Null
+    } catch {
+      Write-Log ("sm11 FAIL exception: " + $_.Exception.Message)
+    }
   }
 
   Write-Log "sleep ${IntervalSec}s"

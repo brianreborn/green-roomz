@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { resolveSm11Option, digestFatPayload } from './monitor/sm11-gpu.mjs';
 
 /**
  * Mailbox envelope (PQ-style). Same shape for this Node ring, a future CUDA
@@ -21,6 +21,14 @@ import { createHash } from 'node:crypto';
  * wait for drain. Drain runs on setImmediate so the user path is not stalled.
  *
  * Live hops keep numeric seq + string ticket. Monitor IPC may pass {hi,lo}.
+ * Optional sm11 assist (GRZ_SM11=1 or { sm11: true }) verifies fat payloads via
+ * CUDA FNV-1a/copy on the 8600 with CPU fallback — never blocks push().
+ * Hot path (non-blocking, coalesced): when --serve is up prefer
+ * push→assistRingPush, drop→assistRingScrub, drain→assistRingDrain;
+ * otherwise / on ring failure: assistSeq / assistScrub / assistBatch.
+ * Extra audit-safe hooks: stub/invalid reject→assistSeq (onReject);
+ * no clear-all/quarantine/vote CUDA — those are stubs or policy grades
+ * (vote/lockdown reject host-side; quarantine is policy, not a ring op).
  */
 
 function nextPow2(n) {
@@ -31,11 +39,12 @@ function nextPow2(n) {
 const HOP_KINDS = new Set(['hop', 'success', 'agent_unavailable', 'route_exhausted', 'observe', 'snapshot']);
 const STUB_KINDS = new Set(['lockdown', 'reboot', 'secure_reboot', 'vote']);
 
-function clonePayload(payload) {
+function clonePayload(payload, sm11) {
   if (payload == null) return {};
   if (typeof payload === 'string') {
     if (payload.length <= 256) return payload;
-    return createHash('sha256').update(payload).digest('hex');
+    if (sm11) return sm11.observeFat(payload).stored;
+    return digestFatPayload(payload).stored;
   }
   if (typeof payload === 'object' && !Array.isArray(payload)) return { ...payload };
   return payload;
@@ -62,7 +71,7 @@ function normalizeMailboxSeq(seq, fallbackNumber) {
 }
 
 export class Mailbox {
-  constructor({ capacity = 256, recentLimit = 64, onEvent, autoDrain = true } = {}) {
+  constructor({ capacity = 256, recentLimit = 64, onEvent, autoDrain = true, sm11 } = {}) {
     this.capacity = nextPow2(capacity);
     this.mask = this.capacity - 1;
     this.slots = new Array(this.capacity);
@@ -79,6 +88,7 @@ export class Mailbox {
     this.recentLimit = Math.max(1, Number(recentLimit) || 64);
     this.recentBuf = [];
     this._drainScheduled = false;
+    this.sm11 = resolveSm11Option(sm11, { mode: 'explicit' });
   }
 
   onEvent(fn) {
@@ -98,6 +108,7 @@ export class Mailbox {
       drained: this.drained,
       seq: this.seq,
       listeners: this.listeners.length,
+      sm11: this.sm11 ? this.sm11.stats() : null,
     };
   }
 
@@ -111,6 +122,8 @@ export class Mailbox {
   push(partial = {}) {
     const kind = String(partial.kind ?? '');
     if (!kind || STUB_KINDS.has(kind) || !HOP_KINDS.has(kind)) {
+      // Deny without ring write — seq integrity only (never place/respond).
+      if (this.sm11) this.sm11.onReject();
       return { ok: false, kind: 'reject', executed: false };
     }
     const nextSeq = this.seq + 1;
@@ -120,19 +133,25 @@ export class Mailbox {
       source: String(partial.source ?? ''),
       ticket: normalizeMailboxTicket(partial.ticket),
       ts: Number.isFinite(partial.ts) ? Number(partial.ts) : Date.now(),
-      payload: clonePayload(partial.payload),
+      payload: clonePayload(partial.payload, this.sm11),
       target: partial.target ?? 'machine',
     };
+    let droppedNow = false;
     if (this.size === this.capacity) {
       this.tail = (this.tail + 1) & this.mask;
       this.size -= 1;
       this.dropped += 1;
+      droppedNow = true;
     }
     this.slots[this.head] = event;
     this.head = (this.head + 1) & this.mask;
     this.size += 1;
     this.seq = nextSeq;
     this.pushed += 1;
+    if (this.sm11) {
+      this.sm11.onEnqueue();
+      if (droppedNow) this.sm11.onDropOrClear();
+    }
     this.recentBuf.push(event);
     if (this.recentBuf.length > this.recentLimit) this.recentBuf.splice(0, this.recentBuf.length - this.recentLimit);
     if (this.autoDrain) this._scheduleDrain();
@@ -149,6 +168,10 @@ export class Mailbox {
       this.size -= 1;
       this.drained += 1;
       out.push(event);
+    }
+    if (this.sm11 && out.length > 0) {
+      this.sm11.onDrain(out.length);
+      this.sm11.onDropOrClear();
     }
     const listeners = (typeof callback === 'function' ? [callback, ...this.listeners] : this.listeners).slice();
     for (const event of out) {

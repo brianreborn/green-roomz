@@ -184,6 +184,8 @@ export async function peekSpecialist({ fetchImpl = fetch, request, target, body,
     signal?.removeEventListener?.('abort', onParent);
     throw error;
   }
+  // Headers received: do not RST this generation if the client hangs up.
+  signal?.removeEventListener?.('abort', onParent);
 
   if (upstream.status >= 400) {
     signal?.removeEventListener?.('abort', onParent);
@@ -323,7 +325,8 @@ function writeSse(response, json) {
   response.write(`data: ${JSON.stringify(json)}\n\n`);
 }
 
-export async function deliverPeek({ peek, request, response, body, headers = {} }) {
+export async function deliverPeek({ peek, request, response, body, headers = {}, beforeClientWrite }) {
+  if (beforeClientWrite) await beforeClientWrite();
   if (peek.error) {
     const data = Buffer.from(JSON.stringify(peek.error));
     response.writeHead(peek.status ?? 502, { 'content-type': 'application/json; charset=utf-8', 'content-length': data.length, ...headers });

@@ -111,10 +111,13 @@ test('begin does not await a vote promise', async () => {
   assert.equal(finished.voted, false);
   assert.equal(voteTouched, false);
 
-  const voteReject = vote();
-  assert.equal(voteReject.kind, 'reject');
-  assert.equal(voteReject.ok, false);
-  assert.match(voteReject.reason, /uncallable/);
+  // API stubs return reject envelopes (never throw, never execute).
+  const voted = vote();
+  assert.equal(voted.ok, false);
+  assert.equal(voted.kind, 'reject');
+  assert.equal(voted.voted, false);
+  assert.equal(voted.executed, false);
+  assert.match(voted.reason, /uncallable|complex-last/);
 });
 
 test('illegal caller denied', () => {

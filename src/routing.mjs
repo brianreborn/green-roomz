@@ -8,7 +8,7 @@ import {
   REBUKE_OP,
   YOLO_TOKEN,
 } from './constants.mjs';
-import { agentCanAdmit } from './memory.mjs';
+import { admitWhenTightOf, agentCanAdmit } from './memory.mjs';
 
 function inspectContentPart(part, found) {
   if (!part || typeof part !== 'object') return;
@@ -97,7 +97,10 @@ export function aliasCanAdmit(registry, alias, processes) {
   } catch {
     freeMemoryBytes = undefined;
   }
-  return agentCanAdmit(agent, { freeMemoryBytes }).ok;
+  return agentCanAdmit(agent, {
+    freeMemoryBytes,
+    admitWhenTight: admitWhenTightOf(processes?.manifest ?? registry?.manifest),
+  }).ok;
 }
 
 export function availableAliases(registry, visited = new Set()) {
@@ -126,6 +129,16 @@ function finish(body, registry, alias, reason, modality) {
 /** Model ids that mean "route this for me" rather than pinning a specific agent. */
 const AUTO_MODEL_IDS = new Set(['auto', 'green-roomz', 'green-roomz-auto', 'default', 'gpt-4', 'gpt-4o', 'gpt-3.5-turbo']);
 
+/** Continue / curl / ChatGPT-compat clients. llama.app last-alias (e.g. after /code) is not this. */
+export function isGenericChatRequest(body) {
+  const requested = body?.model;
+  if (requested == null || requested === '') return true;
+  const id = String(requested).toLowerCase();
+  if (AUTO_MODEL_IDS.has(id)) return true;
+  if (id === 'general-text-speculator') return true;
+  return false;
+}
+
 const SLASH_ALIASES = Object.freeze({
   vision: 'vision-layout-agent',
   audio: 'audio-transcription-agent',
@@ -137,11 +150,34 @@ const SLASH_ALIASES = Object.freeze({
   rerank: 'retrieval-rerank-agent',
   router: NEXUS_ALIAS,
   guard: 'safety-policy-agent',
+  safety: 'safety-policy-agent',
   tts: 'speech-synthesis-agent',
   speak: 'speech-synthesis-agent',
   image: 'image-generation-agent',
   imagine: 'image-generation-agent',
   draw: 'image-generation-agent',
+  // Security & Audit Dispatches
+  sast: 'qwenstral-code-speculator',
+  audit: 'qwenstral-code-speculator',
+  cwe: 'qwenstral-code-speculator',
+  threatmodel: 'general-text-speculator',
+  stride: 'general-text-speculator',
+  osint: 'general-text-speculator',
+  recon: 'general-text-speculator',
+  threatintel: 'general-text-speculator',
+  ioc: 'general-text-speculator',
+  forensics: 'general-text-speculator',
+  dfir: 'general-text-speculator',
+  siem: 'qwenstral-code-speculator',
+  rules: 'qwenstral-code-speculator',
+  sigma: 'qwenstral-code-speculator',
+  yara: 'qwenstral-code-speculator',
+  harden: 'general-text-speculator',
+  sysprep: 'general-text-speculator',
+  sbom: 'qwenstral-code-speculator',
+  deps: 'qwenstral-code-speculator',
+  monitor: MONITOR_ALIAS,
+  secmon: MONITOR_ALIAS,
   auto: 'auto',
 });
 
@@ -239,6 +275,7 @@ export const NATIVE_CHAT = Object.freeze({
   'retrieval-rerank-agent': { path: '/v1/rerank', kind: 'rerank' },
   'audio-transcription-agent': { path: '/inference', kind: 'whisper' },
   'image-generation-agent': { path: '/v1/images/generations', kind: 'image' },
+  'safety-policy-agent': { path: '/v1/moderations', kind: 'moderation' },
 });
 
 function latestUserCommandText(body) {
@@ -379,14 +416,23 @@ export function hardRuleRoute(body, registry) {
     return finish(body, registry, MONITOR_ALIAS, 'mailbox', modality);
   }
   const requested = body?.model ?? null;
-  // `model: "auto"` / "green-roomz" / "default" => let the nexus route (for OpenAI
-  // clients that must send some model id but want routing, e.g. Continue).
+  // llama.app sends the last alias as `model`. Ignore it unless lock_alias.
+  // Unavailable native/speech still pin so /draw on a missing sd-server is 503.
   if (requested && !AUTO_MODEL_IDS.has(String(requested).toLowerCase())) {
-    const reason = body.lock_alias === true ? 'lock_alias' : 'requested_alias';
-    if (requested === NEXUS_ALIAS && body.lock_alias === true && registry.agents.has(requested) && registry.status(requested).state !== 'unavailable') {
+    const locked = body.lock_alias === true;
+    const reason = locked ? 'lock_alias' : 'requested_alias';
+    if (locked && requested === NEXUS_ALIAS && registry.agents.has(requested) && registry.status(requested).state !== 'unavailable') {
       return finish(body, registry, requested, reason, modality);
     }
-    if (requested !== NEXUS_ALIAS && isRoutableAlias(registry, requested)) {
+    if (locked && requested !== NEXUS_ALIAS && isRoutableAlias(registry, requested)) {
+      return finish(body, registry, requested, reason, modality);
+    }
+    if (
+      requested !== NEXUS_ALIAS
+      && registry.agents.has(requested)
+      && (NATIVE_CHAT[requested] || requested === 'speech-synthesis-agent')
+      && !isRoutableAlias(registry, requested)
+    ) {
       return finish(body, registry, requested, reason, modality);
     }
   }

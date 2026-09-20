@@ -236,9 +236,21 @@ Own gear only. Theory, not a recipe — no payloads. Prefer interfaces a normal 
 | Serve live | resident **8187** + gateway **:8080** (often `degraded`) |
 | Direct 8187 8-tok | **3.0 tok/s meas** (2026-08-29) |
 | `/code` via gateway | still needs live re-verify |
-| Local CI loop | **`scripts/local-ci-window.cmd`** detached, every 5 min → `data/local-ci.log` |
+| Local CI loop | **`scripts/local-ci.ps1`** detached (WMI/`Start-Process`), interval **900s** → `data/local-ci.log` (optional sm11 probe) |
 | Visible console | `serve-window.cmd` / `local-ci-window.cmd` |
+| Chat path | **`GRZ_OFFLINE_NEXUS=1`** — skip 4B `chat_default`, skip live nexus consult; resident 0.5B |
 | Git | develop on **shalom**; both trees at `origin/main` |
+
+### Athlon chat path (`GRZ_OFFLINE_NEXUS`)
+
+Athlon II is too slow for mmap'd 4B Instruct as generic chat and for a live 0.5B nexus consult (consult can sit silent past client timeouts; abort on `--parallel 1` wedges the resident slot).
+
+| knob | effect |
+|---|---|
+| `GRZ_OFFLINE_NEXUS=1` | `consultNexus` uses `offlinePlan` (no POST to `:8187`). Generic chat → resident 0.5B (`tool-router-agent`, reason `chat_default_resident`) instead of 4B Instruct |
+| `data/local-env.cmd` | **gitignored** host overrides. `scripts/serve-window.cmd` `call`s it when present. On qodesh: `GRZ_OFFLINE_NEXUS=1` and `GRZ_SM11=1`. **Do not commit.** |
+
+Landed `b1c034f`. User-facing resident completions do **not** inject `tool-router.md` (else the 0.5B echoes route JSON).
 
 ---
 
@@ -338,17 +350,27 @@ SKU confirmed: **Snapdragon, not Exynos.** GPU pack = OpenCL/Vulkan, not Mali.
 
 **Useful enough to ship the GPU story:** run **most of the security-monitor path on the 8600 GT** (CUDA 6.5 / sm_1.1). That alone counts. If we cannot do that, we failed the easy engineering proof.
 
-| Piece | Spec |
-|---|---|
-| Binary | Our CUDA **6.5 / compute_11** build (VS2013 + staged toolkit; careful Win11 driver story) |
-| Work | Majority of monitor/mailbox hot path on GPU: copy-engine or host-memcpy slot (**F3/F21**), seq `{hi,lo}`, push/drain assist, payload hash / ring scrub — **GPU MUST NOT list** (private slot, not a model roster) |
-| Useful = | Under load, most monitor ops hit the 8600; CPU fallback still correct if GPU absent |
+| Piece | Spec | Status (qodesh) |
+|---|---|---|
+| Binary | Our CUDA **6.5 / compute_11** build (VS2013 + staged toolkit; careful Win11 driver story) | **shipped** — Win32 fallback (`native/sm11-monitor`); see #16 for x64 |
+| Work | Majority of monitor/mailbox hot path on GPU: copy-engine or host-memcpy slot (**F3/F21**), seq `{hi,lo}`, push/drain assist, payload hash / ring scrub — **GPU MUST NOT list** (private slot, not a model roster) | **met** — warm `--serve`, private-slot ring, `preferRing` hot path, meta mirror |
+| Useful = | Under load, most monitor ops hit the 8600; CPU fallback still correct if GPU absent | **met** — soak 10k+ pushes `fail==0`; CPU twin when GPU absent |
+
+**Usefulness bar (monitor-on-8600): met.** Live on qodesh tip `3685dcd` / `c19af7e` (#13 closed):
+
+- **Warm `--serve`** — persistent CUDA context + resident ring (cold spawn ~100 ms → warm ops ~sub-ms–2 ms)
+- **`preferRing` hot path** — with `GRZ_SM11=1` + exe, Mailbox/MonitorIpc enqueue→`assistRingPush`, drop→`assistRingScrub`, drain→`assistRingDrain` (probe seq/scrub/batch fallback)
+- **Private-slot ring** — host 32-bit index; GPU hash/copy/scrub/cmp/seq only (**GPU MUST NOT list**); host-authoritative **meta mirror** (`3685dcd`) — true CUDA-owned index **wontfix** on sm_1.1
+- **Load / soak** — `scripts/sm11-load.mjs` + `scripts/sm11-soak.mjs`; live soak `--waves 40 --per-wave 128` → **10240** pushes, `fail==0`, `serveAlive`, rising `gpuOk` / ring counters
+- **N-API wontfix** — #17 closed; Win32 CUDA vs x64 Node / missing `vcvars64` / VS2013 vs node-gyp → keep `--serve`
+
+Issue: https://github.com/brianreborn/green-roomz/issues/13 — **usefulness bar DONE**. Stretch leftovers (open, not the bar): Win32→x64 (#16); optional 0.5B offload (#14); deeper CUDA-owned ring index **wontfix** (meta mirror landed). Athlon **chat** path (not the bar): resident 0.5B under `GRZ_OFFLINE_NEXUS` — see [Athlon chat path](#athlon-chat-path-grz_offline_nexus).
 
 **Optional later (not required to call the GPU useful):** partial 0.5B Q4 `n-gpu-layers` offload on the same toolchain. Nice if tok/s >= CPU-only; not the usefulness bar.
 
 **Non-goals on 224 MB:** whole chat models in VRAM; Vulkan lighting up; vision/whisper/sd on this card.
 
-**Order:** CPU nexus stays live -> CUDA 6.5 toolchain -> **monitor-on-8600** -> (optional) 0.5B partial offload.
+**Order:** CPU nexus stays live -> CUDA 6.5 toolchain -> **monitor-on-8600** (**bar met**) -> (optional) 0.5B partial offload.
 
 ## Block layouts (all considered)
 

@@ -60,6 +60,57 @@ function clientAskedForReasoning(body) {
   return body?.enable_thinking === true || body?.chat_template_kwargs?.enable_thinking === true;
 }
 
+export function assistantContentFromJson(payload) {
+  if (!payload || typeof payload !== 'object') return '';
+  const choice = payload.choices?.[0];
+  if (!choice) return '';
+  const raw = choice.message?.content ?? choice.delta?.content ?? '';
+  if (typeof raw === 'string') return raw;
+  if (Array.isArray(raw)) {
+    return raw.map((part) => (typeof part === 'string' ? part : part?.text ?? '')).join('');
+  }
+  if (raw && typeof raw === 'object' && typeof raw.text === 'string') return raw.text;
+  return String(raw ?? '');
+}
+
+/** llama.cpp sometimes ignores stream:true and returns one JSON chat.completion. */
+export function sseFromJsonCompletion(payload, keepReasoning = false) {
+  const sanitized = sanitizeCompletionJson(payload, { keepReasoning });
+  const text = assistantContentFromJson(sanitized);
+  const chunk = {
+    id: sanitized.id,
+    object: 'chat.completion.chunk',
+    created: sanitized.created,
+    model: sanitized.model,
+    choices: [{
+      index: 0,
+      delta: { role: 'assistant', ...(text ? { content: text } : {}) },
+      finish_reason: sanitized.choices?.[0]?.finish_reason ?? 'stop',
+    }],
+  };
+  return { text, sse: `data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n` };
+}
+
+function assistantDeltaFromJson(payload) {
+  const choice = payload?.choices?.[0];
+  if (!choice) return '';
+  if (typeof choice.delta?.content === 'string') return choice.delta.content;
+  if (typeof choice.message?.content === 'string') return choice.message.content;
+  return '';
+}
+
+function frameFromParsed(parsed, keepReasoning) {
+  if (!parsed) return null;
+  if (parsed.done) return { frame: 'data: [DONE]\n\n', delta: '' };
+  if (parsed.json) {
+    return {
+      frame: `data: ${JSON.stringify(sanitizeCompletionJson(parsed.json, { keepReasoning }))}\n\n`,
+      delta: assistantDeltaFromJson(parsed.json),
+    };
+  }
+  return { frame: `data: ${parsed.raw}\n\n`, delta: '' };
+}
+
 function parseSseBlock(raw) {
   const data = String(raw).split('\n')
     .filter((line) => line.startsWith('data:'))
@@ -97,92 +148,228 @@ export function sanitizeSseText(raw, { keepReasoning = false } = {}) {
   return out.join('');
 }
 
-async function writeSanitizedSse(upstream, response, { keepReasoning, signal } = {}) {
+function writeSseFrame(response, framed) {
+  if (!framed) return;
+  if (response?.writableEnded || response?.destroyed) return;
+  if (typeof response.write === 'function') response.write(framed.frame);
+}
+
+function clientGone(response, signal) {
+  return Boolean(signal?.aborted) || Boolean(response?.writableEnded) || Boolean(response?.destroyed);
+}
+
+/** Consume an upstream body without cancel() — cancel RSTs llama-server (--parallel 1). */
+export async function drainUpstreamBody(body) {
+  if (!body) return;
+  try {
+    if (typeof body.getReader === 'function') {
+      const reader = body.getReader();
+      try {
+        for (;;) {
+          const { done } = await reader.read();
+          if (done) break;
+        }
+      } finally {
+        reader.releaseLock?.();
+      }
+      return;
+    }
+    if (typeof body.arrayBuffer === 'function') await body.arrayBuffer();
+    else if (typeof body.text === 'function') await body.text();
+  } catch {}
+}
+
+async function writeSanitizedSse(upstream, response, { keepReasoning, signal, callerSignal, inactivityTimeoutMs = 0 } = {}) {
   const headers = downstreamHeaders(upstream);
   delete headers['content-length'];
-  if (response.writableEnded) {
-    try { await upstream.body?.cancel?.(); } catch {}
-    return;
+  let content = '';
+  if (clientGone(response, signal)) {
+    await drainUpstreamBody(upstream.body);
+    return content;
+  }
+  const ct = String(headers['content-type'] ?? '').toLowerCase();
+  if (ct.includes('application/json') && !ct.includes('event-stream')) {
+    let raw = '';
+    try {
+      raw = typeof upstream.text === 'function'
+        ? await upstream.text()
+        : await readCappedText(upstream, UPSTREAM_MAX_BUFFER_BYTES);
+    } catch {
+      raw = '';
+    }
+    if (clientGone(response, signal)) return content;
+    const sseHeaders = { ...headers, 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache' };
+    response.writeHead(upstream.status, sseHeaders);
+    const trimmed = raw.trim();
+    if (trimmed.startsWith('{')) {
+      try {
+        const wrapped = sseFromJsonCompletion(JSON.parse(trimmed), keepReasoning);
+        content = wrapped.text;
+        if (typeof response.write === 'function') response.write(wrapped.sse);
+      } catch {
+        if (typeof response.write === 'function') response.write(raw);
+      }
+    } else if (trimmed) {
+      const text = sanitizeSseText(raw, { keepReasoning });
+      if (typeof response.write === 'function') response.write(text || raw);
+    }
+    if (typeof response.end === 'function' && !response.writableEnded && !response.destroyed) response.end();
+    return content;
+  }
+  if (clientGone(response, signal)) {
+    await drainUpstreamBody(upstream.body);
+    return content;
   }
   response.writeHead(upstream.status, { ...headers, 'content-type': headers['content-type'] || 'text/event-stream; charset=utf-8' });
-  if (!upstream.body) {
-    if (typeof upstream.text === 'function') {
-      const raw = await upstream.text();
-      if (typeof response.write === 'function') response.write(sanitizeSseText(raw, { keepReasoning }));
-      else return response.end(sanitizeSseText(raw, { keepReasoning }));
+  const takeText = async () => {
+    if (typeof upstream.text !== 'function') return;
+    const raw = await upstream.text();
+    const text = sanitizeSseText(raw, { keepReasoning });
+    if (typeof response.write === 'function') response.write(text);
+    else response.end(text);
+    const src = String(raw ?? '').replace(/\r\n/g, '\n');
+    let pos = 0;
+    while (true) {
+      const sep = src.indexOf('\n\n', pos);
+      if (sep === -1) break;
+      const framed = frameFromParsed(parseSseBlock(src.slice(pos, sep)), keepReasoning);
+      pos = sep + 2;
+      if (framed) content += framed.delta;
     }
-    return response.end();
+    if (src.slice(pos).trim()) {
+      const framed = frameFromParsed(parseSseBlock(src.slice(pos)), keepReasoning);
+      if (framed) content += framed.delta;
+    }
+  };
+  if (!upstream.body) {
+    await takeText();
+    if (typeof response.end === 'function' && !response.writableEnded && !response.destroyed) response.end();
+    return content;
   }
   if (typeof upstream.body.getReader !== 'function') {
-    if (typeof upstream.text === 'function') {
-      const raw = await upstream.text();
-      if (typeof response.write === 'function') response.write(sanitizeSseText(raw, { keepReasoning }));
-    }
-    return response.end();
+    await takeText();
+    if (typeof response.end === 'function' && !response.writableEnded && !response.destroyed) response.end();
+    return content;
   }
   const reader = upstream.body.getReader();
   const decoder = new TextDecoder();
   let carry = '';
   try {
     while (true) {
-      if (signal?.aborted) break;
       const { done, value } = await reader.read();
       if (done) break;
+      // Keep reading after the client hangs up so llama-server can finish the
+      // slot. Breaking/cancel() RSTs --parallel 1 and wedges the next smoke.
+      if (clientGone(response, signal)) continue;
       carry += decoder.decode(value, { stream: true });
       carry = carry.replace(/\r\n/g, '\n');
       let pos = 0;
       while (true) {
         const sep = carry.indexOf('\n\n', pos);
         if (sep === -1) break;
-        const parsed = parseSseBlock(carry.slice(pos, sep));
+        const framed = frameFromParsed(parseSseBlock(carry.slice(pos, sep)), keepReasoning);
         pos = sep + 2;
-        if (!parsed) continue;
-        const frame = parsed.done
-          ? 'data: [DONE]\n\n'
-          : parsed.json
-            ? `data: ${JSON.stringify(sanitizeCompletionJson(parsed.json, { keepReasoning }))}\n\n`
-            : `data: ${parsed.raw}\n\n`;
-        if (typeof response.write === 'function') response.write(frame);
+        if (framed) {
+          content += framed.delta;
+          writeSseFrame(response, framed);
+        }
       }
       carry = carry.slice(pos);
     }
-    carry += decoder.decode();
-    if (carry.trim()) {
-      const parsed = parseSseBlock(carry);
-      if (parsed?.json && typeof response.write === 'function') {
-        response.write(`data: ${JSON.stringify(sanitizeCompletionJson(parsed.json, { keepReasoning }))}\n\n`);
+    if (!clientGone(response, signal)) {
+      carry += decoder.decode();
+      if (carry.trim()) {
+        const trimmed = carry.trim();
+        if (trimmed.startsWith('{') && !trimmed.startsWith('data:')) {
+          try {
+            const wrapped = sseFromJsonCompletion(JSON.parse(trimmed), keepReasoning);
+            content += wrapped.text;
+            if (typeof response.write === 'function') response.write(wrapped.sse);
+          } catch {
+            const framed = frameFromParsed(parseSseBlock(carry), keepReasoning);
+            if (framed) {
+              content += framed.delta;
+              writeSseFrame(response, framed);
+            }
+          }
+        } else {
+          const framed = frameFromParsed(parseSseBlock(carry), keepReasoning);
+          if (framed) {
+            content += framed.delta;
+            writeSseFrame(response, framed);
+          }
+        }
       }
     }
   } finally {
     reader.releaseLock?.();
   }
-  return response.end();
+  if (!clientGone(response, signal) && typeof response.end === 'function' && !response.writableEnded && !response.destroyed) response.end();
+  return content;
 }
 
-export async function proxyJson({ request, response, body, target, config, signal, fetchImpl = fetch }) {
+export async function proxyJson({ request, response, body, target, config, signal, fetchImpl = fetch, beforeClientWrite }) {
   const payload = Buffer.from(JSON.stringify(body));
-  const idempotencyKey = request.headers['idempotency-key'];
-  const deadline = Date.now() + config.retry_deadline_ms;
-  const upstreamTimeout = config.upstream_timeout_ms ?? UPSTREAM_TIMEOUT_MS;
-  const maxBuffer = config.upstream_max_buffer_bytes ?? UPSTREAM_MAX_BUFFER_BYTES;
+  const deadline = Date.now() + (config?.retry_deadline_ms ?? 180_000);
+  const upstreamTimeout = config?.upstream_timeout_ms ?? UPSTREAM_TIMEOUT_MS;
+  const maxBuffer = config?.upstream_max_buffer_bytes ?? UPSTREAM_MAX_BUFFER_BYTES;
   let attempt = 0;
   const keepReasoning = clientAskedForReasoning(body);
   while (true) {
-    const attemptSignal = deadlineSignal(signal, upstreamTimeout);
+    const remaining = Math.max(1, deadline - Date.now());
+    const connectTimeout = Math.min(upstreamTimeout, remaining);
+    const connectController = new AbortController();
+    let forwardCallerAbort = null;
+    if (signal) {
+      if (signal.aborted) {
+        connectController.abort(signal.reason);
+      } else {
+        forwardCallerAbort = () => connectController.abort(signal.reason);
+        signal.addEventListener('abort', forwardCallerAbort, { once: true });
+      }
+    }
+    const connectTimer = setTimeout(() => {
+      const err = new Error('upstream backend timed out');
+      err.name = 'TimeoutError';
+      connectController.abort(err);
+    }, connectTimeout);
+
     try {
-      const upstream = await fetchImpl(target, { method: request.method, headers: upstreamHeaders(request), body: payload, signal: attemptSignal });
-      if (upstream.status === 503 && idempotencyKey && Date.now() < deadline) {
+      const upstream = await fetchImpl(target, {
+        method: request.method,
+        headers: upstreamHeaders(request),
+        body: payload,
+        signal: connectController.signal,
+      });
+
+      // Headers arrived: connection established, clear connection/retry timeout.
+      clearTimeout(connectTimer);
+      // Stop forwarding client abort into undici — abort() RSTs llama-server.
+      if (forwardCallerAbort && signal) {
+        signal.removeEventListener('abort', forwardCallerAbort);
+        forwardCallerAbort = null;
+      }
+
+      if (upstream.status === 503 && Date.now() < deadline) {
         try { await upstream.body?.cancel(); } catch {}
-        await sleep(jitteredBackoff(attempt++, config.retry_initial_ms, config.retry_max_ms), signal);
+        await sleep(jitteredBackoff(attempt++, config?.retry_initial_ms, config?.retry_max_ms), signal);
         continue;
       }
+
       if (body?.stream) {
+        let content = '';
         try {
-          await writeSanitizedSse(upstream, response, { keepReasoning, signal: attemptSignal });
+          if (beforeClientWrite) await beforeClientWrite();
+          // Naive streaming: driven by active socket reader & client cancellation, no arbitrary cutoff
+          content = await writeSanitizedSse(upstream, response, { keepReasoning, signal }) ?? '';
         } catch (streamError) {
-          if (!response.writableEnded) response.destroy?.(streamError);
+          if (signal?.aborted || response.destroyed || response.writableEnded) {
+            return { status: upstream.status, content: content ?? '', aborted: true };
+          }
+          if (!response.writableEnded && !response.destroyed) response.destroy?.(streamError);
+          throw streamError;
         }
-        return { status: upstream.status };
+        return { status: upstream.status, content };
       }
       const canSanitize = typeof upstream.text === 'function' || upstream.body;
       if (canSanitize) {
@@ -198,41 +385,52 @@ export async function proxyJson({ request, response, body, target, config, signa
         const headers = downstreamHeaders(upstream);
         delete headers['content-length'];
         let data;
+        let content = '';
         try {
-          data = Buffer.from(JSON.stringify(sanitizeCompletionJson(JSON.parse(raw), { keepReasoning })));
+          const sanitized = sanitizeCompletionJson(JSON.parse(raw), { keepReasoning });
+          content = assistantContentFromJson(sanitized);
+          data = Buffer.from(JSON.stringify(sanitized));
         } catch {
           data = Buffer.from(raw);
         }
-        if (response.writableEnded) return { status: upstream.status };
+        if (response.writableEnded || response.destroyed || signal?.aborted) return { status: upstream.status, content };
+        if (beforeClientWrite) await beforeClientWrite();
+        if (response.writableEnded || response.destroyed || signal?.aborted) return { status: upstream.status, content };
         response.writeHead(upstream.status, { ...headers, 'content-length': data.length });
         response.end(data);
-        return { status: upstream.status };
+        return { status: upstream.status, content };
       }
-      if (response.writableEnded) {
+      if (response.writableEnded || response.destroyed) {
         try { await upstream.body?.cancel(); } catch {}
-        return { status: upstream.status };
+        return { status: upstream.status, content: '' };
       }
+      if (beforeClientWrite) await beforeClientWrite();
       response.writeHead(upstream.status, downstreamHeaders(upstream));
       if (!upstream.body) {
         response.end();
-        return { status: upstream.status };
+        return { status: upstream.status, content: '' };
       }
       try {
-        await pipeline(Readable.fromWeb(upstream.body), response, { signal: attemptSignal });
+        await pipeline(Readable.fromWeb(upstream.body), response, { signal: connectController.signal });
       } catch (streamError) {
         // Client gone or upstream stalled mid-stream: tear the socket down, do not rethrow
         // into the handler (headers are already sent).
-        if (!response.writableEnded) response.destroy(streamError);
+        if (!response.writableEnded && !response.destroyed) response.destroy(streamError);
       }
-      return { status: upstream.status };
+      return { status: upstream.status, content: '' };
     } catch (error) {
       if (isTimeoutAbort(error, signal)) {
-        throw new UpstreamTimeoutError('upstream backend timed out', { target: redactTarget(target), timeout_ms: upstreamTimeout });
+        throw new UpstreamTimeoutError('upstream backend timed out', { target: redactTarget(target), timeout_ms: connectTimeout });
       }
       if (signal?.aborted) throw error;
       const code = error.cause?.code ?? error.code;
       if (code !== 'ECONNREFUSED' || Date.now() >= deadline) throw error;
       await sleep(jitteredBackoff(attempt++, config.retry_initial_ms, config.retry_max_ms), signal);
+    } finally {
+      clearTimeout(connectTimer);
+      if (signal && forwardCallerAbort) {
+        signal.removeEventListener('abort', forwardCallerAbort);
+      }
     }
   }
 }

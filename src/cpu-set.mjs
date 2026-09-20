@@ -1,4 +1,13 @@
+import os from 'node:os';
+
 export const DEFAULT_THREADS = 4;
+
+/** min(DEFAULT_THREADS, logical CPUs). Empty/default profiles must not ask for 4 on a 2-CPU box. */
+export function defaultThreadCount(logical = os.cpus().length) {
+  const n = Number(logical);
+  const cpus = Number.isFinite(n) && n > 0 ? Math.trunc(n) : 1;
+  return Math.max(1, Math.min(DEFAULT_THREADS, cpus));
+}
 
 function requestedThreads(spec) {
   if (typeof spec === 'number' && Number.isFinite(spec)) return Math.max(0, Math.trunc(spec));

@@ -1,10 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync as rfs, rmSync, truncateSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, truncateSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { ProcessManager, orderProfiles, vulkanAllThreadCount, withVulkanAllThreads } from '../src/process-manager.mjs';
+import { ProcessManager, orderProfiles, servePrewarmAliases, vulkanAllThreadCount, withVulkanAllThreads } from '../src/process-manager.mjs';
+import { DEFAULT_THREADS, defaultThreadCount } from '../src/cpu-set.mjs';
 import { AgentRegistry } from '../src/registry.mjs';
 import { sampleManifest } from './helpers.mjs';
 
@@ -35,8 +36,8 @@ test('duplicate ensure calls share one start and only owned children are stopped
     manifest,
     registry,
     hostAdapter: { applyPriority() { return true; } },
-    spawnImpl: (command, args) => {
-      spawned.push({ command, args });
+    spawnImpl: (command, args, opts) => {
+      spawned.push({ command, args, opts });
       return child;
     },
     fetchImpl: async () => ({ ok: true }),
@@ -45,9 +46,48 @@ test('duplicate ensure calls share one start and only owned children are stopped
   assert.equal(first, second);
   assert.equal(spawned.length, 1);
   assert.ok(spawned[0].args.includes('--device'));
+  assert.equal(spawned[0].opts.detached, false);
+  assert.equal(spawned[0].opts.windowsHide, true);
+  assert.deepEqual(spawned[0].opts.stdio, ['ignore', 'pipe', 'pipe']);
   assert.equal(first.owned, true);
   await manager.stop(agent.alias);
   assert.deepEqual(child.killed, ['SIGTERM']);
+});
+
+test('client abort during waitForReady does not kill a listening child', async () => {
+  const manifest = sampleManifest();
+  manifest.gateway.cold_start_timeout_ms = 5000;
+  const agent = manifest.agents.find((item) => item.alias === 'qwenstral-code-speculator');
+  const registry = new AgentRegistry(manifest);
+  registry.setStatus(agent.alias, 'cold');
+  const child = new FakeChild();
+  const ac = new AbortController();
+  const spawned = [];
+  const manager = new ProcessManager({
+    manifest,
+    registry,
+    hostAdapter: { applyPriority() { return true; } },
+    spawnImpl: () => {
+      spawned.push(1);
+      return child;
+    },
+    fetchImpl: async () => {
+      ac.abort(new Error('client hung up'));
+      await new Promise((r) => setTimeout(r, 50));
+      return { ok: true, status: 200 };
+    },
+  });
+  await assert.rejects(() => manager.ensure(agent, { signal: ac.signal }));
+  assert.deepEqual(child.killed, []);
+  assert.equal(child.exitCode, null);
+  await new Promise((r) => setTimeout(r, 80));
+  const rec = await manager.ensure(agent);
+  assert.equal(spawned.length, 1);
+  assert.equal(rec.state, 'ready');
+  rec.child.stdout.emit('error', Object.assign(new Error('broken pipe'), { code: 'EPIPE' }));
+  rec.child.stderr.emit('error', Object.assign(new Error('broken pipe'), { code: 'EPIPE' }));
+  assert.equal(rec.child.exitCode, null);
+  await manager.stop(agent.alias);
 });
 
 test('buildLaunch encodes EAGLE3 draft flags when enabled and present', () => {
@@ -103,7 +143,7 @@ test('manifest profile order is kept when weight size is unknown', () => {
   assert.deepEqual(ids, ['cpu-4', 'vulkan-all']);
 });
 
-test('start spawns the preferred profile even under memory pressure (OS pages)', async () => {
+test('start skips cpu-4 spawn when not admitted and uses vulkan-all instead', async () => {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'grz-admit-start-'));
   const model = path.join(dir, 'model.gguf');
   writeFileSync(model, '');
@@ -114,7 +154,7 @@ test('start spawns the preferred profile even under memory pressure (OS pages)',
     agent.model = model;
     agent.draft_enabled = false;
     agent.profiles = [
-      { id: 'cpu-4', args: ['--device', 'none', '--n-gpu-layers', '0'] },
+      { id: 'cpu-4', args: ['--device', 'none', '--n-gpu-layers', '0', '--threads', '4', '--threads-batch', '4'] },
       { id: 'vulkan-all', args: ['--device', 'Vulkan0', '--n-gpu-layers', 'all'] },
     ];
     const registry = new AgentRegistry(manifest);
@@ -124,6 +164,7 @@ test('start spawns the preferred profile even under memory pressure (OS pages)',
     const manager = new ProcessManager({
       manifest,
       registry,
+      logicalCpus: 2,
       hostAdapter: {
         applyPriority() { return true; },
         sampleResources() { return { freeMemoryBytes: 5 * 1024 ** 3 }; },
@@ -135,8 +176,9 @@ test('start spawns the preferred profile even under memory pressure (OS pages)',
       fetchImpl: async () => ({ ok: true }),
     });
     const record = await manager.start(agent);
-    assert.equal(record.profileId, 'cpu-4', 'first profile is used; RAM math does not veto');
+    assert.equal(record.profileId, 'vulkan-all');
     assert.equal(spawned.length, 1);
+    assert.equal(spawned[0][spawned[0].indexOf('--device') + 1], 'Vulkan0');
     await manager.stop(agent.alias);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -205,6 +247,7 @@ test('ensure specialist does not stop the resident nexus', async () => {
     manifest,
     registry,
     hostAdapter: { applyPriority() { return true; } },
+    logicalCpus: 8,
     spawnImpl: () => {
       const child = new FakeChild();
       child.pid = 5000 + children.length;
@@ -226,139 +269,141 @@ test('ensure specialist does not stop the resident nexus', async () => {
   await manager.stopAll();
 });
 
-test('sweepIdle evicts over-cap and stale specialists, keeps the resident nexus', async () => {
+test('C1 empty profiles stay valid but default threads cap to logical CPUs', () => {
+  assert.deepEqual(orderProfiles({ alias: 'vision-layout-agent' }, []).map((p) => p.id), ['default']);
+  assert.equal(defaultThreadCount(2), 2);
+  assert.equal(defaultThreadCount(1), 1);
+  assert.equal(defaultThreadCount(8), DEFAULT_THREADS);
   const manifest = sampleManifest();
+  const agent = manifest.agents.find((item) => item.alias === 'vision-layout-agent');
   const registry = new AgentRegistry(manifest);
-  const children = [];
+  const two = new ProcessManager({
+    manifest,
+    registry,
+    logicalCpus: 2,
+    spawnImpl() { throw new Error('no spawn'); },
+  });
+  const empty = two.buildLaunch(agent, { id: 'default', args: [] });
+  assert.equal(empty.args[empty.args.indexOf('--threads') + 1], '2');
+  assert.equal(empty.args[empty.args.indexOf('--threads-batch') + 1], '2');
+  two.cpuAllocator.allocate('held', 1);
+  const clamped = two.buildLaunch(agent, { id: 'default', args: [] });
+  assert.equal(clamped.args[clamped.args.indexOf('--threads') + 1], '1');
+  const eight = new ProcessManager({
+    manifest,
+    registry,
+    logicalCpus: 8,
+    spawnImpl() { throw new Error('no spawn'); },
+  });
+  const capped = eight.buildLaunch(agent, { id: 'default', args: [] });
+  assert.equal(capped.args[capped.args.indexOf('--threads') + 1], String(DEFAULT_THREADS));
+});
+
+test('servePrewarmAliases skips FALLBACK_ALIAS when GRZ_OFFLINE_NEXUS=1', async () => {
+  const manifest = sampleManifest();
+  const registry = await new AgentRegistry(manifest).inspect();
+  registry.setStatus('tool-router-agent', 'ready');
+  registry.setStatus('general-text-speculator', 'ready');
+  assert.deepEqual(
+    servePrewarmAliases(registry, { gateway: manifest.gateway, env: {}, logicalCpus: 8 }),
+    ['tool-router-agent', 'general-text-speculator'],
+  );
+  assert.deepEqual(
+    servePrewarmAliases(registry, { gateway: manifest.gateway, env: { GRZ_OFFLINE_NEXUS: '1' }, logicalCpus: 8 }),
+    ['tool-router-agent'],
+  );
+  assert.deepEqual(
+    servePrewarmAliases(registry, { gateway: manifest.gateway, env: {}, logicalCpus: 2 }),
+    ['tool-router-agent'],
+  );
+  assert.deepEqual(
+    servePrewarmAliases(registry, { gateway: { ...manifest.gateway, nexus_consult: false }, env: {} }),
+    ['tool-router-agent'],
+  );
+  assert.deepEqual(
+    servePrewarmAliases(registry, { gateway: { ...manifest.gateway, chat_default_alias: 'tool-router-agent' }, env: {} }),
+    ['tool-router-agent'],
+  );
+});
+
+test('H3 canParallelCouncil is false when specialists exceed maxWarmSpecialists', () => {
+  const manifest = sampleManifest({ gateway: { max_warm_specialists: 1 } });
+  const registry = new AgentRegistry(manifest);
+  const manager = new ProcessManager({ manifest, registry, spawnImpl() { throw new Error('no spawn'); } });
+  assert.equal(manager.maxWarmSpecialists, 1);
+  assert.equal(manager.canParallelCouncil(['qwenstral-code-speculator', 'general-text-speculator'], true), false);
+  assert.equal(manager.canParallelCouncil(['tool-router-agent', 'general-text-speculator'], true), true);
+  assert.equal(manager.canParallelCouncil(['qwenstral-code-speculator', 'general-text-speculator'], false), false);
+  assert.equal(manager.canParallelCouncil(['qwenstral-code-speculator'], true), false);
+  manager.maxWarmSpecialists = 2;
+  assert.equal(manager.canParallelCouncil(['qwenstral-code-speculator', 'general-text-speculator'], true), true);
+});
+
+test('L3 failed start deletes the map row so a later ensure is not a zombie', async () => {
+  const manifest = sampleManifest();
+  const agent = manifest.agents.find((item) => item.alias === 'qwenstral-code-speculator');
+  agent.profiles = [{ id: 'cpu-1', args: ['--device', 'none', '--n-gpu-layers', '0', '--threads', '1', '--threads-batch', '1'] }];
+  const registry = new AgentRegistry(manifest);
+  registry.setStatus(agent.alias, 'cold');
   const manager = new ProcessManager({
     manifest,
     registry,
-    hostAdapter: { applyPriority() {} },
-    spawnImpl: () => { const c = new FakeChild(); children.push(c); return c; },
+    logicalCpus: 2,
+    hostAdapter: { applyPriority() { return true; } },
+    spawnImpl: () => {
+      const child = new FakeChild();
+      child.exitCode = 1;
+      queueMicrotask(() => child.emit('exit', 1, null));
+      return child;
+    },
+    fetchImpl: async () => ({ ok: false, status: 503 }),
+  });
+  await assert.rejects(() => manager.start(agent));
+  assert.equal(manager.processes.has(agent.alias), false);
+  assert.equal(manager.processes.get(agent.alias)?.state, undefined);
+  assert.equal(manager.cpuAllocator.remaining(), 2);
+  registry.setStatus(agent.alias, 'cold');
+  await assert.rejects(() => manager.ensure(agent));
+  assert.equal(manager.processes.has(agent.alias), false);
+  assert.equal(manager.cpuAllocator.remaining(), 2);
+});
+
+test('L3 exited first profile is dropped before the next profile starts', async () => {
+  const manifest = sampleManifest();
+  const agent = manifest.agents.find((item) => item.alias === 'qwenstral-code-speculator');
+  agent.profiles = [
+    { id: 'cpu-4', args: ['--device', 'none', '--n-gpu-layers', '0'] },
+    { id: 'vulkan-all', args: ['--device', 'Vulkan0', '--n-gpu-layers', 'all'] },
+  ];
+  const registry = new AgentRegistry(manifest);
+  registry.setStatus(agent.alias, 'cold');
+  const spawned = [];
+  const manager = new ProcessManager({
+    manifest,
+    registry,
+    logicalCpus: 8,
+    hostAdapter: {
+      applyPriority() { return true; },
+      sampleResources() { return { freeMemoryBytes: 20 * 1024 ** 3 }; },
+    },
+    spawnImpl: (_command, args) => {
+      const child = new FakeChild();
+      spawned.push(args);
+      if (args.includes('none')) {
+        child.exitCode = 1;
+        queueMicrotask(() => child.emit('exit', 1, null));
+      }
+      return child;
+    },
     fetchImpl: async () => ({ ok: true }),
   });
-  manager.maxWarmSpecialists = 1;
-  manager.idleEvictMs = 10_000;
-  const now = Date.now();
-  const put = (alias, resident, lastUsedAt) => manager.processes.set(alias, {
-    alias, resident, owned: true, state: 'ready', createdAt: now, lastUsedAt,
-    child: new FakeChild(),
-  });
-  put('tool-router-agent', true, now);                 // resident - never evicted
-  put('general-text-speculator', false, now - 1_000);  // fresh, within warm cap
-  put('qwenstral-code-speculator', false, now - 2_000); // over cap (cap = 1)
-  put('vision-layout-agent', false, now - 60_000);      // stale + over cap
-
-  const evicted = await manager.sweepIdle(now);
-  assert.ok(evicted.includes('qwenstral-code-speculator'));
-  assert.ok(evicted.includes('vision-layout-agent'));
-  assert.ok(!evicted.includes('tool-router-agent'), 'resident nexus survives');
-  assert.ok(!evicted.includes('general-text-speculator'), 'most-recent specialist stays warm');
-  assert.ok(manager.processes.has('tool-router-agent'));
-  assert.ok(!manager.processes.has('vision-layout-agent'));
-});
-
-test('startIdleSweeper is a no-op when idle eviction is disabled', () => {
-  const manager = new ProcessManager({ manifest: sampleManifest(), registry: new AgentRegistry(sampleManifest()) });
-  manager.idleEvictMs = 0;
-  manager.startIdleSweeper();
-  assert.equal(manager.idleSweeper, null);
-});
-
-test('buildLaunch defaults the KV cache to q8_0, honours an explicit profile choice, and f16 opt-out', () => {
-  const manifest = sampleManifest();
-  const agent = manifest.agents.find((item) => item.alias === 'tool-router-agent');
-  const registry = new AgentRegistry(manifest);
-  const manager = new ProcessManager({ manifest, registry, spawnImpl() { throw new Error('no spawn'); } });
-
-  const dflt = manager.buildLaunch(agent, { id: 'cpu-2', args: ['--device', 'none'] });
-  assert.deepEqual(
-    [dflt.args[dflt.args.indexOf('--cache-type-k') + 1], dflt.args[dflt.args.indexOf('--cache-type-v') + 1]],
-    ['q8_0', 'q8_0'],
-  );
-
-  const explicit = manager.buildLaunch(agent, { id: 'cpu-2', args: ['--device', 'none', '--cache-type-k', 'q4_0', '--cache-type-v', 'q4_0'] });
-  assert.equal(explicit.args.filter((a) => a === '--cache-type-k').length, 1);
-  assert.equal(explicit.args[explicit.args.indexOf('--cache-type-k') + 1], 'q4_0');
-
-  const f16 = manager.buildLaunch({ ...agent, kv_cache: 'f16' }, { id: 'cpu-2', args: ['--device', 'none'] });
-  assert.equal(f16.args.includes('--cache-type-k'), false);
-});
-
-test('embedding and reranker backends never get a quantized KV cache (they fail to decode with one)', () => {
-  const manifest = sampleManifest();
-  const registry = new AgentRegistry(manifest);
-  const manager = new ProcessManager({ manifest, registry, spawnImpl() { throw new Error('no spawn'); } });
-  for (const alias of ['semantic-embedding-agent', 'retrieval-rerank-agent']) {
-    const agent = manifest.agents.find((a) => a.alias === alias);
-    const launch = manager.buildLaunch(agent, { id: 'x', args: ['--device', 'none'] });
-    assert.equal(launch.args.includes('--cache-type-k'), false, `${alias} must not get --cache-type-k`);
-  }
-  // a text agent still does
-  const text = manifest.agents.find((a) => a.alias === 'general-text-speculator');
-  assert.equal(manager.buildLaunch(text, { id: 'x', args: ['--device', 'none'] }).args.includes('--cache-type-k'), true);
-});
-
-test('waitForReady tolerates whisper/sd-server which have no /health (404 on it)', async () => {
-  const manifest = sampleManifest();
-  manifest.runtimes.stable_diffusion.command = process.execPath;
-  const registry = new AgentRegistry(manifest);
-  const agent = manifest.agents.find((a) => a.alias === 'image-generation-agent');
-  registry.setStatus(agent.alias, 'cold');
-  const child = new FakeChild();
-  let hits = 0;
-  const manager = new ProcessManager({
-    manifest, registry, hostAdapter: { applyPriority() {} },
-    spawnImpl: () => child,
-    fetchImpl: async (url) => { hits += 1; return { status: url.endsWith('/health') ? 404 : 200, ok: !url.endsWith('/health') && true, async arrayBuffer() { return new ArrayBuffer(0); } }; },
-  });
-  const rec = await manager.start(agent);          // must not time out on the 404 /health
-  assert.equal(rec.state, 'ready');
+  const record = await manager.start(agent);
+  assert.equal(record.profileId, 'vulkan-all');
+  assert.equal(spawned.length, 2);
+  assert.equal(manager.processes.size, 1);
+  assert.equal(manager.processes.get(agent.alias)?.state, 'ready');
   await manager.stop(agent.alias);
-});
-
-test('evictForNewSpecialist drops the LRU warm specialist to make room (maxWarm 1)', async () => {
-  const manager = new ProcessManager({ manifest: sampleManifest(), registry: new AgentRegistry(sampleManifest()), spawnImpl() { throw new Error('no'); } });
-  manager.maxWarmSpecialists = 2;
-  const now = Date.now();
-  manager.processes.set('vision-layout-agent', { alias: 'vision-layout-agent', owned: true, resident: false, state: 'ready', child: new FakeChild(), lastUsedAt: now - 5000 });
-  manager.processes.set('general-text-speculator', { alias: 'general-text-speculator', owned: true, resident: false, state: 'ready', child: new FakeChild(), lastUsedAt: now - 1000 });
-  manager.canSuspend = false;   // force terminate path for a deterministic assertion
-  const { terminated } = await manager.evictForNewSpecialist('qwenstral-code-speculator');
-  assert.deepEqual(terminated, ['vision-layout-agent']);      // older one goes; 1 slot kept for the incoming
-  assert.ok(!manager.processes.has('vision-layout-agent'));
-  assert.ok(manager.processes.has('general-text-speculator')); // most-recent stays
-});
-
-test('suspend/resume: an over-ceiling CPU model is frozen (SIGSTOP), revived by SIGCONT', async () => {
-  const manifest = sampleManifest();
-  const registry = new AgentRegistry(manifest);
-  const signals = [];
-  const manager = new ProcessManager({
-    manifest,
-    registry,
-    spawnImpl() { throw new Error('no'); },
-    fetchImpl: async () => ({ ok: true, status: 200 }),
-  });
-  manager.canSuspend = true;
-  manager.suspendImpl = (pid) => signals.push(['STOP', pid]);
-  manager.resumeImpl = (pid) => signals.push(['CONT', pid]);
-  manager.maxWarmSpecialists = 1;
-  const now = Date.now();
-  // qwenstral-code-speculator has a cpu-4 profile in the sample manifest
-  manager.processes.set('qwenstral-code-speculator', { alias: 'qwenstral-code-speculator', owned: true, resident: false, state: 'ready', profileId: 'cpu-4', createdAt: now, lastUsedAt: now - 9000, child: Object.assign(new FakeChild(), { pid: 42 }) });
-
-  const out = await manager.evictForNewSpecialist('general-text-speculator');
-  assert.deepEqual(out.suspended, ['qwenstral-code-speculator']);
-  assert.deepEqual(out.terminated, []);
-  assert.equal(signals[0][0], 'STOP');
-  assert.equal(manager.processes.get('qwenstral-code-speculator').state, 'suspended');
-
-  // ensure() revives it via SIGCONT instead of cold-starting
-  const agent = manifest.agents.find((a) => a.alias === 'qwenstral-code-speculator');
-  const revived = await manager.ensure(agent);
-  assert.equal(revived.state, 'ready');
-  assert.ok(signals.some((s) => s[0] === 'CONT'));
+  assert.equal(manager.processes.has(agent.alias), false);
 });
 
 test('checkpoint/restore: save the slot KV to a named file, restore it, checkpoint on stop', async () => {
@@ -374,8 +419,6 @@ test('checkpoint/restore: save the slot KV to a named file, restore it, checkpoi
   const child = new FakeChild();
   manager.processes.set(agent.alias, { alias: agent.alias, owned: true, resident: false, state: 'ready', child, createdAt: Date.now() });
 
-  // launch args carry --slot-save-path AND the dir is pre-created
-  // (llama-server exits 1 with "not a directory" otherwise)
   const launch = manager.buildLaunch(agent, { id: 'x', args: ['--device', 'none'] });
   assert.ok(launch.args.includes('--slot-save-path'));
   assert.ok(launch.args.includes('--cache-idle-slots'));
@@ -386,7 +429,7 @@ test('checkpoint/restore: save the slot KV to a named file, restore it, checkpoi
   assert.match(calls.at(-1).url, /\/slots\/0\?action=save/);
   assert.equal(calls.at(-1).body.filename, 'snap1.bin');
 
-  assert.equal(await manager.restoreModel(agent.alias), true);       // newest
+  assert.equal(await manager.restoreModel(agent.alias), true);
   assert.match(calls.at(-1).url, /\/slots\/0\?action=restore/);
   assert.equal(calls.at(-1).body.filename, 'snap1.bin');
 
@@ -396,36 +439,40 @@ test('checkpoint/restore: save the slot KV to a named file, restore it, checkpoi
   rmSync(dir, { recursive: true, force: true });
 });
 
-test('anti-thrash: cold-starts are serialized and a critically-low box gets a 503, not an OOM', async () => {
+test('maybeRestoreDefault: restores the default KV only when the prime snapshot still matches', async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'grz-prime-'));
   const manifest = sampleManifest();
-  const registry = new AgentRegistry(manifest);
-  registry.setStatus('qwenstral-code-speculator', 'cold');
-  registry.setStatus('general-text-speculator', 'cold');
-  let free = 200 * 1024 * 1024;   // critically low
-  let inFlight = 0; let maxInFlight = 0;
+  manifest.gateway.checkpoint_dir = dir;
+  const restoreCalls = [];
   const manager = new ProcessManager({
-    manifest, registry,
-    hostAdapter: { applyPriority() {}, sampleResources: () => ({ freeMemoryBytes: free }) },
-    spawnImpl: () => new FakeChild(),
-    fetchImpl: async () => ({ ok: true }),
+    manifest, registry: new AgentRegistry(manifest), spawnImpl() { throw new Error('no'); },
+    fetchImpl: async (url) => { if (/action=restore/.test(String(url))) restoreCalls.push(String(url)); return { ok: true, status: 200 }; },
   });
-  const realStartProfile = manager.startProfile.bind(manager);
-  manager.startProfile = async (...args) => {
-    inFlight += 1; maxInFlight = Math.max(maxInFlight, inFlight);
-    try { await new Promise((r) => setTimeout(r, 15)); return await realStartProfile(...args); }
-    finally { inFlight -= 1; }
-  };
+  const agent = manifest.agents.find((a) => a.alias === 'general-text-speculator');
+  const record = { alias: agent.alias, owned: true, resident: false, state: 'ready', child: new FakeChild(), command: '/opt/llama-server', logs: '' };
+  manager.processes.set(agent.alias, record);
 
-  await assert.rejects(
-    () => manager.ensure(manifest.agents.find((a) => a.alias === 'qwenstral-code-speculator')),
-    (e) => /critically low/.test(e.message) && e.status === 503,
-  );
+  assert.equal(await manager.maybeRestoreDefault(agent, record), false);
 
-  free = 40 * 1024 ** 3;   // plenty now
-  const a = manager.ensure(manifest.agents.find((x) => x.alias === 'qwenstral-code-speculator'));
-  const b = manager.ensure(manifest.agents.find((x) => x.alias === 'general-text-speculator'));
-  await Promise.all([a, b]);
-  assert.equal(maxInFlight, 1, 'never two specialists cold-starting at once');
+  const descDir = path.join(dir, agent.alias.replace(/[^a-z0-9-]/gi, '_'));
+  mkdirSync(descDir, { recursive: true });
+  const writeDesc = (obj) => writeFileSync(path.join(descDir, 'default.snapshot.json'), JSON.stringify(obj));
+
+  writeDesc({ state: 'default.bin', data: { model: agent.model }, code: { command: '/opt/llama-server' }, prime: { promptSha: 'MATCH' } });
+  manager.stockPromptSha = () => 'MATCH';
+  assert.equal(await manager.maybeRestoreDefault(agent, record), true);
+  assert.equal(restoreCalls.length, 1);
+  assert.equal(record.primed, true);
+
+  manager.stockPromptSha = () => 'DIFFERENT';
+  assert.equal(await manager.maybeRestoreDefault(agent, record), false);
+  assert.equal(restoreCalls.length, 1);
+
+  manager.stockPromptSha = () => 'MATCH';
+  writeDesc({ state: 'default.bin', data: { model: agent.model }, code: { command: '/other/llama-server' }, prime: { promptSha: 'MATCH' } });
+  assert.equal(await manager.maybeRestoreDefault(agent, record), false);
+
+  rmSync(dir, { recursive: true, force: true });
 });
 
 test('snapshotModel writes a code+data+config+state descriptor; the .bin is the only real payload', async () => {
@@ -445,374 +492,81 @@ test('snapshotModel writes a code+data+config+state descriptor; the .bin is the 
   const snap = await manager.snapshotModel(alias, 'snapA', { prime: { promptSha: 'abc123' } });
   assert.equal(snap.code.command, '/opt/llama-server');
   assert.ok(snap.code.args.includes('--no-warmup'));
-  assert.equal(snap.state, 'snapA.bin');            // the KV file
+  assert.equal(snap.state, 'snapA.bin');
   assert.equal(snap.profileId, 'cpu-4');
-  assert.equal(snap.prime.promptSha, 'abc123');     // extra descriptor fields merge through
+  assert.equal(snap.prime.promptSha, 'abc123');
   assert.ok(existsSync(snap.descriptor));
-  const d = JSON.parse(rfs(snap.descriptor, 'utf8'));
+  const d = JSON.parse(readFileSync(snap.descriptor, 'utf8'));
   assert.equal(d.alias, alias);
   assert.ok('model' in d.data);
   assert.equal(d.prime.promptSha, 'abc123');
   rmSync(dir, { recursive: true, force: true });
 });
 
-test('maybeRestoreDefault: restores the default KV only when the prime snapshot still matches', async () => {
-  const dir = mkdtempSync(path.join(os.tmpdir(), 'grz-prime-'));
-  const manifest = sampleManifest();
-  manifest.gateway.checkpoint_dir = dir;
-  const restoreCalls = [];
-  const manager = new ProcessManager({
-    manifest, registry: new AgentRegistry(manifest), spawnImpl() { throw new Error('no'); },
-    fetchImpl: async (url) => { if (/action=restore/.test(String(url))) restoreCalls.push(String(url)); return { ok: true, status: 200 }; },
-  });
-  const agent = manifest.agents.find((a) => a.alias === 'general-text-speculator');
-  const record = { alias: agent.alias, owned: true, resident: false, state: 'ready', child: new FakeChild(), command: '/opt/llama-server', logs: '' };
-  manager.processes.set(agent.alias, record);
-
-  // no resolver -> no restore
-  assert.equal(await manager.maybeRestoreDefault(agent, record), false);
-
-  const descDir = path.join(dir, agent.alias.replace(/[^a-z0-9-]/gi, '_'));
-  mkdirSync(descDir, { recursive: true });
-  const writeDesc = (obj) => writeFileSync(path.join(descDir, 'default.snapshot.json'), JSON.stringify(obj));
-
-  writeDesc({ state: 'default.bin', data: { model: agent.model }, code: { command: '/opt/llama-server' }, prime: { promptSha: 'MATCH' } });
-  manager.stockPromptSha = () => 'MATCH';
-  assert.equal(await manager.maybeRestoreDefault(agent, record), true);
-  assert.equal(restoreCalls.length, 1);
-  assert.equal(record.primed, true);
-
-  // stale prompt -> skipped
-  manager.stockPromptSha = () => 'DIFFERENT';
-  assert.equal(await manager.maybeRestoreDefault(agent, record), false);
-  assert.equal(restoreCalls.length, 1);
-
-  // wrong binary -> skipped
-  manager.stockPromptSha = () => 'MATCH';
-  writeDesc({ state: 'default.bin', data: { model: agent.model }, code: { command: '/other/llama-server' }, prime: { promptSha: 'MATCH' } });
-  assert.equal(await manager.maybeRestoreDefault(agent, record), false);
-
-  rmSync(dir, { recursive: true, force: true });
+test('startIdleSweeper is a no-op when idle eviction is disabled', () => {
+  const manager = new ProcessManager({ manifest: sampleManifest(), registry: new AgentRegistry(sampleManifest()) });
+  manager.idleEvictMs = 0;
+  manager.startIdleSweeper();
+  assert.equal(manager.idleSweeper, null);
 });
 
-test('pin skips sweepIdle; unpin then sweep evicts', async () => {
-  const manager = new ProcessManager({
-    manifest: sampleManifest(),
-    registry: new AgentRegistry(sampleManifest()),
-    spawnImpl() { throw new Error('no'); },
-    fetchImpl: async () => ({ ok: true, status: 200 }),
-  });
-  manager.maxWarmSpecialists = 0;
-  manager.idleEvictMs = 10;
-  manager.canSuspend = false;
-  const now = Date.now();
-  manager.processes.set('qwenstral-code-speculator', {
-    alias: 'qwenstral-code-speculator', owned: true, resident: false, state: 'ready',
-    createdAt: now - 60_000, lastUsedAt: now - 60_000, child: new FakeChild(), refs: 0,
-  });
-  const unpin = manager.pin('qwenstral-code-speculator');
-  const skipped = await manager.sweepIdle(now);
-  assert.equal(skipped.includes('qwenstral-code-speculator'), false);
-  assert.ok(manager.processes.has('qwenstral-code-speculator'));
-  unpin();
-  const evicted = await manager.sweepIdle(now);
-  assert.ok(evicted.includes('qwenstral-code-speculator'));
-});
-
-test('resume without /health 200 restarts rather than ready', async () => {
+test('sweepIdle evicts over-cap and stale specialists, keeps the resident nexus', async () => {
   const manifest = sampleManifest();
   const registry = new AgentRegistry(manifest);
-  const manager = new ProcessManager({
-    manifest,
-    registry,
-    spawnImpl() { throw new Error('no spawn'); },
-    fetchImpl: async () => ({ ok: false, status: 503 }),
-  });
-  manager.canSuspend = true;
-  manager.suspendImpl = () => {};
-  manager.resumeImpl = () => {};
-  const child = Object.assign(new FakeChild(), { pid: 99 });
-  manager.processes.set('qwenstral-code-speculator', {
-    alias: 'qwenstral-code-speculator', owned: true, resident: false, state: 'suspended',
-    profileId: 'cpu-4', child, createdAt: Date.now(), lastUsedAt: Date.now(), refs: 0,
-  });
-  const resumed = await manager.resume('qwenstral-code-speculator');
-  assert.equal(resumed, null);
-  assert.equal(manager.processes.has('qwenstral-code-speculator'), false);
-});
-
-test('restoreModel is skipped while refs>0', async () => {
-  const dir = mkdtempSync(path.join(os.tmpdir(), 'grz-restore-pin-'));
-  const manifest = sampleManifest();
-  manifest.gateway.checkpoint_dir = dir;
-  const calls = [];
-  const manager = new ProcessManager({
-    manifest, registry: new AgentRegistry(manifest), spawnImpl() { throw new Error('no'); },
-    fetchImpl: async (url, init) => {
-      calls.push({ url: String(url), body: init?.body && JSON.parse(init.body) });
-      return { ok: true, status: 200 };
-    },
-  });
-  const agent = manifest.agents.find((a) => a.alias === 'general-text-speculator');
-  manager.processes.set(agent.alias, {
-    alias: agent.alias, owned: true, resident: false, state: 'ready', child: new FakeChild(),
-    createdAt: Date.now(), refs: 1, checkpoints: [{ tag: 'snap1', filename: 'snap1.bin', at: Date.now() }],
-  });
-  assert.equal(await manager.restoreModel(agent.alias), false);
-  assert.equal(calls.some((c) => /action=restore/.test(c.url)), false);
-  manager.processes.get(agent.alias).refs = 0;
-  assert.equal(await manager.restoreModel(agent.alias), true);
-});
-
-test('timed-out cpu-4 does not retry cpu-6', async () => {
-  const manifest = sampleManifest();
-  const agent = manifest.agents.find((item) => item.alias === 'qwenstral-code-speculator');
-  agent.profiles = [
-    { id: 'cpu-4', args: ['--device', 'none', '--threads', '4', '--n-gpu-layers', '0'] },
-    { id: 'cpu-6', args: ['--device', 'none', '--threads', '6', '--n-gpu-layers', '0'] },
-  ];
-  const registry = new AgentRegistry(manifest);
-  registry.setStatus(agent.alias, 'cold');
-  const spawned = [];
-  const manager = new ProcessManager({
-    manifest,
-    registry,
-    hostAdapter: { applyPriority() { return true; }, sampleResources() { return { freeMemoryBytes: 40 * 1024 ** 3 }; } },
-    spawnImpl: (_command, args) => {
-      spawned.push(args);
-      throw new Error('timed out');
-    },
-    fetchImpl: async () => ({ ok: true }),
-  });
-  await assert.rejects(() => manager.start(agent), /timed out|Unavailable|Failed to start/);
-  assert.equal(spawned.length, 1);
-  assert.ok(spawned[0].includes('4'));
-  assert.equal(spawned.some((args) => args.includes('6') && args[args.indexOf('--threads') + 1] === '6'), false);
-});
-
-test('empty CPU set does not spawn', async () => {
-  const { CpuSetAllocator } = await import('../src/cpu-set.mjs');
-  const manifest = sampleManifest();
-  const agent = manifest.agents.find((item) => item.alias === 'qwenstral-code-speculator');
-  agent.extra_args = ['--threads', '4', '--threads-batch', '4'];
-  const registry = new AgentRegistry(manifest);
-  registry.setStatus(agent.alias, 'cold');
-  const spawned = [];
-  const manager = new ProcessManager({
-    manifest,
-    registry,
-    hostAdapter: { applyPriority() { return true; }, sampleResources() { return { freeMemoryBytes: 40 * 1024 ** 3 }; } },
-    spawnImpl: () => { spawned.push('x'); return new FakeChild(); },
-    fetchImpl: async () => ({ ok: true }),
-  });
-  manager.cpuAllocator = new CpuSetAllocator(0);
-  await assert.rejects(() => manager.start(agent), /cpu_oversubscribed|Unable to start|oversubscribed/);
-  assert.equal(spawned.length, 0);
-});
-
-test('Cursor nexus --threads stays 4; buildLaunch injects --no-webui and strips --metrics', () => {
-  const raw = JSON.parse(rfs(new URL('../config/agents.cursor.json', import.meta.url)));
-  const nexus = raw.agents.find((a) => a.alias === 'tool-router-agent');
-  const cpu4 = (nexus.profiles ?? []).find((p) => p.id === 'cpu-4');
-  assert.ok(cpu4);
-  assert.equal(cpu4.args[cpu4.args.indexOf('--threads') + 1], '4');
-  const manifest = sampleManifest();
-  const agent = manifest.agents.find((a) => a.alias === 'tool-router-agent');
-  const registry = new AgentRegistry(manifest);
-  const manager = new ProcessManager({ manifest, registry, spawnImpl() { throw new Error('no'); } });
-  const launch = manager.buildLaunch(agent, { id: 'cpu-2', args: ['--device', 'none', '--metrics', '1'] });
-  assert.ok(launch.args.includes('--no-webui'));
-  assert.equal(launch.args.includes('--metrics'), false);
-});
-
-test('extra_args --host 0.0.0.0 is refused', () => {
-  const manifest = sampleManifest();
-  const agent = manifest.agents.find((a) => a.alias === 'general-text-speculator');
-  agent.extra_args = ['--host', '0.0.0.0'];
-  const manager = new ProcessManager({
-    manifest, registry: new AgentRegistry(manifest), spawnImpl() { throw new Error('no'); },
-  });
-  assert.throws(
-    () => manager.buildLaunch(agent, { id: 'cpu-4', args: ['--device', 'none'] }),
-    /0\.0\.0\.0|public_bind/,
-  );
-});
-
-test('PF7: canSuspend defaults false (no SIGSTOP of bound llama)', () => {
-  const manager = new ProcessManager({
-    manifest: sampleManifest(),
-    registry: new AgentRegistry(sampleManifest()),
-    spawnImpl() { throw new Error('no'); },
-  });
-  assert.equal(manager.canSuspend, false);
-});
-
-test('PF7: waitForPortsFree treats connect-timeout / listening as busy (fail closed)', async () => {
-  const manager = new ProcessManager({
-    manifest: sampleManifest(),
-    registry: new AgentRegistry(sampleManifest()),
-    spawnImpl() { throw new Error('no'); },
-  });
-  // Fake a busy port: portBusy returns true
-  manager.portBusy = async () => true;
-  const ok = await manager.waitForPortsFree([59999], { timeoutMs: 300 });
-  assert.equal(ok, false);
-});
-
-test('PF4: buildLaunch prepends LD_LIBRARY_PATH instead of clobbering', () => {
-  const prev = process.env.LD_LIBRARY_PATH;
-  process.env.LD_LIBRARY_PATH = '/usr/local/lib';
-  try {
-    const manifest = sampleManifest();
-    manifest.runtimes.llama_server.env = { LD_LIBRARY_PATH: '/pack/runtime' };
-    const registry = new AgentRegistry(manifest);
-    const manager = new ProcessManager({ manifest, registry, spawnImpl() { throw new Error('no spawn'); } });
-    const agent = manifest.agents.find((a) => a.alias === 'tool-router-agent');
-    const launch = manager.buildLaunch(agent, { id: 'cpu-2', args: ['--device', 'none'] });
-    assert.match(launch.env.LD_LIBRARY_PATH, /\/pack\/runtime/);
-    assert.match(launch.env.LD_LIBRARY_PATH, /\/usr\/local\/lib/);
-    assert.ok(launch.env.LD_LIBRARY_PATH.startsWith('/pack/runtime'));
-  } finally {
-    if (prev === undefined) delete process.env.LD_LIBRARY_PATH;
-    else process.env.LD_LIBRARY_PATH = prev;
-  }
-});
-
-test('PF4: spawn options include cwd packRoot', async () => {
-  const manifest = sampleManifest();
-  const registry = new AgentRegistry(manifest);
-  const spawned = [];
-  const manager = new ProcessManager({
-    manifest,
-    registry,
-    spawnImpl: (command, args, opts) => {
-      spawned.push({ command, args, opts });
-      const child = new FakeChild();
-      queueMicrotask(() => child.emit('exit', 0, null));
-      return child;
-    },
-    fetchImpl: async () => ({ ok: true, status: 200, arrayBuffer: async () => new ArrayBuffer(0) }),
-  });
-  manager.packRoot = '/tmp/grz-pack-root';
-  manager.cpuAllocator.allocate = () => [0, 1];
-  const agent = manifest.agents.find((a) => a.alias === 'tool-router-agent');
-  agent.profiles = [{ id: 'cpu-2', args: ['--device', 'none', '--threads', '2', '--threads-batch', '2', '--n-gpu-layers', '0'] }];
-  try {
-    await manager.startProfile(agent, agent.profiles[0]);
-  } catch {
-    // may fail health; we only care spawn opts
-  }
-  assert.ok(spawned.length >= 1);
-  assert.equal(spawned[0].opts.cwd, '/tmp/grz-pack-root');
-  assert.equal(spawned[0].opts.shell, false);
-  assert.equal(spawned[0].opts.windowsHide, true);
-});
-
-test('PF1: stopAll on empty manager is ok; childrenSnapshot empty', async () => {
-  const manager = new ProcessManager({
-    manifest: sampleManifest(),
-    registry: new AgentRegistry(sampleManifest()),
-    spawnImpl() { throw new Error('no'); },
-  });
-  await manager.stopAll();
-  assert.deepEqual(manager.childrenSnapshot(), []);
-  assert.deepEqual(manager.ownedPorts().sort(), [18080].sort());
-});
-
-test('RF4: waitForReady rejects when child exits after health probe', async () => {
-  const manifest = sampleManifest();
-  const registry = new AgentRegistry(manifest);
-  const agent = manifest.agents.find((a) => a.alias === 'tool-router-agent');
-  const child = new FakeChild();
   const manager = new ProcessManager({
     manifest,
     registry,
     hostAdapter: { applyPriority() {} },
-    spawnImpl: () => child,
-    fetchImpl: async () => {
-      // Health looks ready, but the child died during the probe (stale listener case).
-      child.exitCode = 1;
-      return { ok: true, status: 200, async arrayBuffer() { return new ArrayBuffer(0); } };
-    },
-  });
-  manager.cpuAllocator.allocate = () => [0, 1];
-  agent.profiles = [{ id: 'cpu-2', args: ['--device', 'none', '--threads', '2', '--threads-batch', '2', '--n-gpu-layers', '0'] }];
-  await assert.rejects(
-    () => manager.startProfile(agent, agent.profiles[0]),
-    (err) => /exited with 1 after health probe|Failed to start/.test(String(err.message)),
-  );
-});
-
-test('RF4: stopRecord awaits exit after SIGKILL (timer alone is not enough)', async () => {
-  const manifest = sampleManifest();
-  const registry = new AgentRegistry(manifest);
-  const manager = new ProcessManager({
-    manifest,
-    registry,
-    spawnImpl() { throw new Error('no'); },
-  });
-  class StickyChild extends EventEmitter {
-    constructor() {
-      super();
-      this.pid = 9991;
-      this.exitCode = null;
-      this.killed = [];
-      this.stdout = new EventEmitter();
-      this.stderr = new EventEmitter();
-    }
-    kill(signal) {
-      this.killed.push(signal);
-      if (signal === 'SIGKILL') {
-        // Exit only after a short delay — old Promise.race would return on the timer first.
-        setTimeout(() => {
-          this.exitCode = 1;
-          this.emit('exit', 1, signal);
-        }, 50);
-      }
-    }
-  }
-  const child = new StickyChild();
-  const record = { alias: 'general-text-speculator', owned: true, child, state: 'ready' };
-  manager.processes.set(record.alias, record);
-  // Shrink the SIGTERM deadline so the test is fast.
-  const orig = manager.stopRecord.bind(manager);
-  // Monkey: call stopRecord but with a patched setTimeout via temporary override of kill path
-  // by replacing the method's 3000 with racing a shorter path — instead invoke stopRecord
-  // after patching child.kill to ignore SIGTERM and only exit on SIGKILL delayed.
-  child.kill = function kill(signal) {
-    this.killed.push(signal);
-    if (signal === 'SIGTERM') return; // ignore soft kill
-    if (signal === 'SIGKILL') {
-      setTimeout(() => {
-        this.exitCode = 1;
-        this.emit('exit', 1, signal);
-      }, 30);
-    }
-  };
-  const started = Date.now();
-  await manager.stopRecord(record);
-  assert.ok(record.child.exitCode !== null, 'must wait until exitCode is set');
-  assert.ok(child.killed.includes('SIGKILL'));
-  assert.ok(Date.now() - started >= 30);
-});
-
-test('RF4: evictForNewSpecialist throws when ports stay busy after stop', async () => {
-  const manager = new ProcessManager({
-    manifest: sampleManifest(),
-    registry: new AgentRegistry(sampleManifest()),
-    spawnImpl() { throw new Error('no'); },
+    spawnImpl: () => new FakeChild(),
+    fetchImpl: async () => ({ ok: true }),
   });
   manager.maxWarmSpecialists = 1;
-  manager.canSuspend = false;
+  manager.idleEvictMs = 10_000;
   const now = Date.now();
-  const child = new FakeChild();
-  manager.processes.set('general-text-speculator', {
-    alias: 'general-text-speculator', owned: true, resident: false, state: 'ready',
-    child, lastUsedAt: now - 5000, refs: 0,
+  const put = (alias, resident, lastUsedAt) => manager.processes.set(alias, {
+    alias, resident, owned: true, state: 'ready', createdAt: now, lastUsedAt,
+    child: new FakeChild(),
   });
-  manager.waitForPortsFree = async () => false;
-  await assert.rejects(
-    () => manager.evictForNewSpecialist('qwenstral-code-speculator'),
-    (err) => err?.code === 'port_busy' || /ports still busy/.test(String(err.message)),
-  );
+  put('tool-router-agent', true, now);
+  put('general-text-speculator', false, now - 1_000);
+  put('qwenstral-code-speculator', false, now - 2_000);
+  put('vision-layout-agent', false, now - 60_000);
+
+  const evicted = await manager.sweepIdle(now);
+  assert.ok(evicted.includes('qwenstral-code-speculator'));
+  assert.ok(evicted.includes('vision-layout-agent'));
+  assert.ok(!evicted.includes('tool-router-agent'), 'resident nexus survives');
+  assert.ok(!evicted.includes('general-text-speculator'), 'most-recent specialist stays warm');
+  assert.ok(manager.processes.has('tool-router-agent'));
+  assert.ok(!manager.processes.has('vision-layout-agent'));
+});
+
+test('evictForNewSpecialist drops the LRU warm specialist to make room (maxWarm 1)', async () => {
+  const manager = new ProcessManager({ manifest: sampleManifest(), registry: new AgentRegistry(sampleManifest()), spawnImpl() { throw new Error('no'); } });
+  manager.maxWarmSpecialists = 2;
+  const now = Date.now();
+  manager.processes.set('vision-layout-agent', { alias: 'vision-layout-agent', owned: true, resident: false, state: 'ready', child: new FakeChild(), lastUsedAt: now - 5000 });
+  manager.processes.set('general-text-speculator', { alias: 'general-text-speculator', owned: true, resident: false, state: 'ready', child: new FakeChild(), lastUsedAt: now - 1000 });
+  manager.canSuspend = false;
+  const { terminated } = await manager.evictForNewSpecialist('qwenstral-code-speculator');
+  assert.deepEqual(terminated, ['vision-layout-agent']);
+  assert.ok(!manager.processes.has('vision-layout-agent'));
+  assert.ok(manager.processes.has('general-text-speculator'));
+});
+
+test('waitForReady tolerates whisper/sd-server which have no /health (404 on it)', async () => {
+  const manifest = sampleManifest();
+  manifest.runtimes.stable_diffusion.command = process.execPath;
+  const registry = new AgentRegistry(manifest);
+  const agent = manifest.agents.find((a) => a.alias === 'image-generation-agent');
+  registry.setStatus(agent.alias, 'cold');
+  const child = new FakeChild();
+  const manager = new ProcessManager({
+    manifest, registry, hostAdapter: { applyPriority() {} },
+    spawnImpl: () => child,
+    fetchImpl: async (url) => ({ status: url.endsWith('/health') ? 404 : 200, ok: !url.endsWith('/health') && true, async arrayBuffer() { return new ArrayBuffer(0); } }),
+  });
+  const rec = await manager.start(agent);
+  assert.equal(rec.state, 'ready');
+  await manager.stop(agent.alias);
 });

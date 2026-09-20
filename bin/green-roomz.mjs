@@ -2,15 +2,19 @@
 import { loadManifest, loadDeclaredKernel } from '../src/config.mjs';
 import { compileManifestPrompts, compileStockPrompt, stockPromptLayers, sha256 } from '../src/compile-prompt.mjs';
 import { AgentRegistry } from '../src/registry.mjs';
-import { ProcessManager } from '../src/process-manager.mjs';
+import { ProcessManager, servePrewarmAliases } from '../src/process-manager.mjs';
+import { preferResidentChat } from '../src/nexus.mjs';
 import { PolicyGate } from '../src/scheduler.mjs';
 import { SessionLedger } from '../src/sessions.mjs';
 import { WindowsHostAdapter } from '../src/hosts/windows.mjs';
 import { AndroidSidecarAdapter } from '../src/hosts/android.mjs';
 import { applyStoreWinners, BenchmarkRunner, qualifyMissingAgents } from '../src/benchmark.mjs';
 import { Gateway } from '../src/gateway.mjs';
+import { loadOptionalBrainz } from '../src/brainz.mjs';
 import { attachServeConsole } from '../src/serve-console.mjs';
 import { POLICIES, REQUIRED_ALIASES } from '../src/constants.mjs';
+import { isBenignSocketError } from '../src/util.mjs';
+import path from 'node:path';
 
 function argValue(args, flag, fallback) {
   const index = args.indexOf(flag);
@@ -35,6 +39,11 @@ Commands:
   fingerprint [--manifest path]
   doctor [--manifest path]
   agents [--manifest path]
+  agent --goal TEXT [--workspace dir] [--offline] [--lang py] [--max-steps N]
+                           [--max-tokens N] [--timeout-ms N] [--manifest path]
+                           (write/run/test loop; language from goal/extension; learns runtimes as it goes.
+                            live max_tokens/timeout come from gateway.agent_max_tokens and
+                            gateway.agent_chat_timeout_ms unless the flags are set)
   stop [--manifest path]   (SIGTERM gateway from data/serve.pid; reap owned children.json PIDs)
 `;
 }
@@ -53,11 +62,14 @@ async function bootstrap(args) {
   const sessions = new SessionLedger({
     ttlMs: manifest.gateway.session_ttl_ms,
     limit: manifest.gateway.session_limit,
+    persistDir: path.join(manifest._meta?.packageRoot ?? process.cwd(), 'data', 'sessions'),
   });
-  const objective = POLICIES[manifest.gateway.policy]?.objective ?? 'throughput';
-  try {
-    await applyStoreWinners(processes, { objective });
-  } catch {}
+  const objective = POLICIES[manifest.gateway.policy]?.objective ?? 'interactive';
+  if (manifest.gateway.apply_store_winners === true) {
+    try {
+      await applyStoreWinners(processes, { objective });
+    } catch {}
+  }
   return { manifest, registry, hostAdapter, processes, policy, sessions };
 }
 
@@ -119,10 +131,20 @@ async function cmdServe(ctx, args) {
   ctx.processes.packRoot = packRoot;
   ctx.processes.dataDir = (await import('node:path')).default.join(packRoot, 'data');
   ctx.processes.writeServePid(process.pid);
-  const objective = POLICIES[ctx.manifest.gateway.policy]?.objective ?? 'throughput';
-  try {
-    await applyStoreWinners(ctx.processes, { objective });
-  } catch {}
+  if (ctx.manifest.gateway.apply_store_winners === true) {
+    const objective = POLICIES[ctx.manifest.gateway.policy]?.objective ?? 'interactive';
+    try {
+      await applyStoreWinners(ctx.processes, { objective });
+    } catch {}
+  }
+  const brainz = await loadOptionalBrainz();
+  if (brainz.enabled) {
+    ctx.interrupts = brainz.interrupts;
+    ctx.brainz = brainz.host;
+    console.error(`brainz: GREEN_BRAINZ_ROOT=${brainz.root} store=${brainz.storeDir}`);
+  } else {
+    console.error(`brainz: skipped (${brainz.reason})`);
+  }
   const gateway = new Gateway(ctx);
   // A cold start restores its `default` prime snapshot when it still matches the
   // live compiled stock prompt — model wakes holding its system prompt.
@@ -135,13 +157,64 @@ async function cmdServe(ctx, args) {
   const address = server.address();
   console.error(`green-roomz listening on http://${address.address}:${address.port}`);
   ctx.processes.startIdleSweeper();
+  const prewarm = servePrewarmAliases(ctx.registry, { gateway: ctx.manifest.gateway });
   const nexus = ctx.registry.agents.get('tool-router-agent');
-  if (nexus && ctx.registry.status(nexus.alias).state !== 'unavailable') {
+  if (prewarm.includes('tool-router-agent') && nexus && ctx.registry.status(nexus.alias).state !== 'unavailable') {
     try {
       await ctx.processes.ensure(nexus);
-      console.error(`pre-warmed ${nexus.alias} on :${nexus.port} (resident cpu kernel; specialists stay cold)`);
+      console.error(`pre-warmed ${nexus.alias} on :${nexus.port} (resident cpu kernel)`);
     } catch (error) {
       console.error(`nexus pre-warm failed: ${error.message}`);
+    }
+  }
+  const chatAgent = ctx.registry.agents.get('general-text-speculator');
+  if (!prewarm.includes('general-text-speculator')) {
+    if (preferResidentChat(ctx.manifest.gateway)) {
+      console.error('skipping general-text-speculator pre-warm (resident chat / GRZ_OFFLINE_NEXUS)');
+    }
+  } else if (chatAgent && ctx.registry.status(chatAgent.alias).state !== 'unavailable') {
+    try {
+      await ctx.processes.ensure(chatAgent);
+      console.error(`pre-warmed ${chatAgent.alias} on :${chatAgent.port} (pinned chat; generic clients skip mmap)`);
+      try {
+        const kernelText = loadDeclaredKernel(chatAgent);
+        const system = kernelText
+          ? compileStockPrompt(chatAgent, { kernelText })
+          : null;
+        const messages = system
+          ? [{ role: 'system', content: system }, { role: 'user', content: '.' }]
+          : [{ role: 'user', content: '.' }];
+        let primed = false;
+        let lastErr = null;
+        for (let attempt = 1; attempt <= 3 && !primed; attempt += 1) {
+          try {
+            await fetch(`http://127.0.0.1:${chatAgent.port}/v1/chat/completions`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                model: chatAgent.alias,
+                messages,
+                max_tokens: 1,
+                stream: false,
+              }),
+              signal: AbortSignal.timeout(600_000),
+            });
+            primed = true;
+          } catch (error) {
+            lastErr = error;
+            await new Promise((resolve) => setTimeout(resolve, 2000 * attempt));
+          }
+        }
+        if (primed) {
+          console.error(`primed ${chatAgent.alias} with stock prompt (1 token; client turns reuse KV)`);
+        } else {
+          throw lastErr ?? new Error('prime fetch failed');
+        }
+      } catch (error) {
+        console.error(`chat prime failed: ${error.message}`);
+      }
+    } catch (error) {
+      console.error(`chat pre-warm failed: ${error.message}`);
     }
   }
   let shuttingDown = false;
@@ -166,9 +239,10 @@ async function cmdServe(ctx, args) {
   process.on('unhandledRejection', (reason) => {
     console.error(`unhandledRejection (continuing): ${reason instanceof Error ? reason.stack : reason}`);
   });
-  // An uncaught exception may mean corrupt state: log, drain, let the supervisor restart.
+  // Abort/EPIPE/RST from one hung-up client must not drain the whole gateway.
   process.on('uncaughtException', (error) => {
     console.error(`uncaughtException: ${error?.stack ?? error}`);
+    if (isBenignSocketError(error)) return;
     shutdown(1);
     setTimeout(() => process.exit(1), 2000).unref();
   });
@@ -386,6 +460,58 @@ async function cmdStopFromPidfile(ctx) {
   return { ok: true, stopped: true, gatewayPid, reaped };
 }
 
+async function cmdAgent(args) {
+  const { runDevAgent, gatewayChat } = await import('../src/dev-agent.mjs');
+  const { loadManifest } = await import('../src/config.mjs');
+  const pathMod = await import('node:path');
+  const goal = argValue(args, '--goal');
+  if (!goal) {
+    console.error('agent --goal "write a python function add(a,b) with a test and run it" [--offline] [--lang py] [--max-tokens N] [--timeout-ms N]');
+    process.exitCode = 1;
+    return;
+  }
+  const workspace = argValue(args, '--workspace') || pathMod.join(process.cwd(), 'data', 'agent-ws');
+  const base = process.env.GRZ_BASE_URL || 'http://127.0.0.1:8080';
+  const offline = hasFlag(args, '--offline');
+  const maxSteps = Number(argValue(args, '--max-steps', '12'));
+  const manifest = await loadManifest(argValue(args, '--manifest'));
+  const timeoutFlag = argValue(args, '--timeout-ms');
+  const maxTokensFlag = argValue(args, '--max-tokens');
+  const timeoutMs = timeoutFlag != null ? Number(timeoutFlag) : Number(manifest.gateway.agent_chat_timeout_ms);
+  const maxTokens = maxTokensFlag != null ? Number(maxTokensFlag) : Number(manifest.gateway.agent_max_tokens);
+  if (!Number.isFinite(timeoutMs) || timeoutMs < 1) {
+    console.error('agent: gateway.agent_chat_timeout_ms or --timeout-ms must be a positive integer');
+    process.exitCode = 1;
+    return;
+  }
+  if (!Number.isFinite(maxTokens) || maxTokens < 1) {
+    console.error('agent: gateway.agent_max_tokens or --max-tokens must be a positive integer');
+    process.exitCode = 1;
+    return;
+  }
+  const chat = offline ? undefined : (body) => gatewayChat(base, body, { timeoutMs });
+  const result = await runDevAgent({
+    workspace,
+    goal,
+    chat,
+    model: argValue(args, '--model') || 'qwenstral-code-speculator',
+    lang: argValue(args, '--lang'),
+    maxSteps: Number.isFinite(maxSteps) && maxSteps > 0 ? maxSteps : 12,
+    maxTokens,
+  });
+  console.log(JSON.stringify({
+    ok: result.ok,
+    summary: result.summary,
+    stdout: result.stdout,
+    lang: result.lang,
+    learned: result.learned,
+    stats: result.stats,
+    workspace,
+    steps: result.steps.length,
+  }, null, 2));
+  if (!result.ok) process.exitCode = 1;
+}
+
 async function main(argv) {
   const args = argv.slice(2);
   const command = args[0];
@@ -393,6 +519,7 @@ async function main(argv) {
     process.stdout.write(usage());
     return;
   }
+  if (command === 'agent') return cmdAgent(args);
   if (command === 'stop') {
     // Lightweight: load manifest for packRoot only; do not claim stopAll on an empty ProcessManager.
     const { loadManifest } = await import('../src/config.mjs');

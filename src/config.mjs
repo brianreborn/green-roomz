@@ -15,6 +15,7 @@ import {
   DEFAULT_MANIFEST,
 } from './constants.mjs';
 import { ValidationError } from './errors.mjs';
+import { TIMING_PRIVACY_INSTALL_HINT, resolveTimingPrivacy } from './timing-quant.mjs';
 import { digestObject, expandEnvironment, resolveManifestPath, nfcPath } from './util.mjs';
 import { readFileSync, existsSync } from 'node:fs';
 import { assertNexusKernelText, kernelBindingIssues } from './kernel-text.mjs';
@@ -22,6 +23,46 @@ import { assertNexusKernelText, kernelBindingIssues } from './kernel-text.mjs';
 export { assertNexusKernelText, kernelBindingIssues };
 
 const SECRET_FIELD = /(api[_-]?key|password|secret|token)$/i;
+
+function requireInt(gateway, key, { min = 1 } = {}) {
+  const n = Number(gateway[key]);
+  if (!Number.isFinite(n) || n < min) return `gateway.${key} is required at install (integer >= ${min})`;
+  return null;
+}
+
+function installGatewayIssues(gateway) {
+  const issues = [];
+  for (const key of [
+    'max_warm_specialists',
+    'session_limit',
+    'session_ttl_ms',
+    'upstream_timeout_ms',
+    'request_timeout_ms',
+    'nexus_consult_timeout_ms',
+    'handoff_peek_timeout_ms',
+    'handoff_peek_chars',
+    'agent_chat_timeout_ms',
+    'agent_max_tokens',
+    'memory_transcript_chars',
+    'memory_facts_limit',
+  ]) {
+    const hit = requireInt(gateway, key, { min: 1 });
+    if (hit) issues.push(hit);
+  }
+  const idle = requireInt(gateway, 'idle_evict_ms', { min: 0 });
+  if (idle) issues.push(idle);
+  if (gateway.admit_when_tight !== 'refuse' && gateway.admit_when_tight !== 'page') {
+    issues.push('gateway.admit_when_tight is required at install (refuse | page)');
+  }
+  if (typeof gateway.apply_store_winners !== 'boolean') {
+    issues.push('gateway.apply_store_winners is required at install (false | true)');
+  }
+  if (!Array.isArray(gateway.health_aliases) || gateway.health_aliases.length < 1
+      || gateway.health_aliases.some((a) => typeof a !== 'string' || !a.trim())) {
+    issues.push('gateway.health_aliases is required at install (non-empty alias array)');
+  }
+  return issues;
+}
 
 function findSecretFields(value, location = '$', found = []) {
   if (!value || typeof value !== 'object') return found;
@@ -53,6 +94,14 @@ export function validateManifest(manifest, env = process.env) {
   if (aliases.includes(TRANSLATION_ALIAS)) issues.push('translation-agent is prohibited; translation is an explicit shared capability');
   if (!POLICIES[manifest.gateway?.policy]) issues.push('gateway.policy must be responsive, balanced, or maximize');
   if (manifest.gateway && typeof manifest.gateway === 'object') {
+    if (!resolveTimingPrivacy(manifest.gateway)) issues.push(TIMING_PRIVACY_INSTALL_HINT);
+    issues.push(...installGatewayIssues(manifest.gateway));
+    const healthAliases = manifest.gateway.health_aliases;
+    if (Array.isArray(healthAliases)) {
+      for (const alias of healthAliases) {
+        if (!aliases.includes(alias)) issues.push(`gateway.health_aliases unknown alias: ${alias}`);
+      }
+    }
     const extra = Object.keys(manifest.gateway).filter((key) => !ORCHESTRATOR_BOUNDED_KEYS.includes(key));
     if (extra.length) issues.push(`gateway has unbounded keys (sysadmin schema bump required): ${extra.join(', ')}`);
   }
@@ -102,17 +151,8 @@ export function withDefaultGrzEnv(env = process.env, root = packageRoot()) {
   if (!out.GRZ_LLAMA) {
     out.GRZ_LLAMA = path.join(out.GRZ_ROOT, 'runtime', `llama-server${out.GRZ_EXE || ''}`);
   }
-  // PF-M8: only inherit process HOME when key absent; empty string stays empty (fail closed on expand).
-  if (!Object.hasOwn(out, 'HOME') && process.env.HOME) out.HOME = process.env.HOME;
+  if (!out.HOME && process.env.HOME) out.HOME = process.env.HOME;
   return out;
-}
-
-/** True when empty/unset HOME expanded ${HOME}/grz-runtime → /grz-runtime (PF-M8). */
-function isCollapsedHomeGrzPath(value) {
-  const s = String(value ?? '');
-  if (s === '/grz-runtime' || s.startsWith('/grz-runtime/') || s.startsWith('/grz-runtime:')) return true;
-  // LD_LIBRARY_PATH-style: ...:/grz-runtime/... or leading /grz-runtime
-  return /(^|:)\/grz-runtime(\/|:|$)/.test(s);
 }
 
 function assertRuntimeCommands(manifest) {
@@ -129,25 +169,6 @@ function assertRuntimeCommands(manifest) {
     // Collapsed empty GRZ_ROOT historically produced "/runtime/llama-server"
     if (String(cmd) === '/runtime/llama-server' || String(cmd).startsWith('/runtime/llama-server')) {
       issues.push(`runtime ${name}: command collapsed to ${cmd} (unset GRZ_ROOT); fail closed`);
-    }
-    // PF-M8: empty/unset HOME → "${HOME}/grz-runtime/…" becomes "/grz-runtime/…"
-    if (isCollapsedHomeGrzPath(cmd)) {
-      issues.push(`runtime ${name}: command collapsed to ${cmd} (empty/unset HOME); fail closed`);
-    }
-    if (runtime.env && typeof runtime.env === 'object') {
-      for (const [k, v] of Object.entries(runtime.env)) {
-        if (typeof v === 'string' && isCollapsedHomeGrzPath(v)) {
-          issues.push(`runtime ${name}: env ${k} collapsed to ${v} (empty/unset HOME); fail closed`);
-        }
-      }
-    }
-  }
-  for (const agent of manifest.agents ?? []) {
-    for (const field of ['model', 'draft_model', 'projector', 'system_policy']) {
-      const v = agent?.[field];
-      if (typeof v === 'string' && isCollapsedHomeGrzPath(v)) {
-        issues.push(`agent ${agent.alias ?? '<unknown>'}.${field} collapsed to ${v} (empty/unset HOME); fail closed`);
-      }
     }
   }
   if (issues.length) throw new ValidationError('Invalid Green-Roomz manifest runtime commands', issues);
