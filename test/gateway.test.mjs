@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import net from 'node:net';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { AgentRegistry } from '../src/registry.mjs';
@@ -10,7 +10,7 @@ import { ProcessManager } from '../src/process-manager.mjs';
 import { PolicyGate } from '../src/scheduler.mjs';
 import { SessionLedger } from '../src/sessions.mjs';
 import { Gateway, prepareInferenceBody } from '../src/gateway.mjs';
-import { sampleManifest } from './helpers.mjs';
+import { sampleManifest, writeGgufBlockCount } from './helpers.mjs';
 import { NEXUS_CHAT_SYSTEM, REQUIRED_ALIASES } from '../src/constants.mjs';
 
 async function withServer(t, env = {}, extras = {}) {
@@ -18,6 +18,7 @@ async function withServer(t, env = {}, extras = {}) {
   Object.assign(process.env, env);
   const manifest = sampleManifest();
   if (extras.gateway) Object.assign(manifest.gateway, extras.gateway);
+  extras.patchAgents?.(manifest);
   const registry = await new AgentRegistry(manifest).inspect();
   for (const alias of extras.ready ?? []) registry.setStatus(alias, 'ready');
   const hostAdapter = extras.hostAdapter ?? { sampleResources() { return { freeMemoryBytes: 1 }; } };
@@ -125,6 +126,30 @@ test('health is degraded when artifacts are missing and models stay truthful', a
   assert.deepEqual(vision.native_capabilities, ['text', 'image']);
   const models = await request(server, { path: '/v1/models' });
   assert.equal(models.body.data.length, REQUIRED_ALIASES.length);
+});
+
+test('GET /v1/models/:id and /v1/weights disclose GGUF identity when the file exists', async (t) => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'grz-weights-'));
+  const gguf = path.join(dir, 'toy.gguf');
+  writeGgufBlockCount(gguf, 12, { key: 'qwen2.block_count', prefixKey: 'general.architecture' });
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const { server } = await withServer(t, {}, {
+    ready: ['general-text-speculator'],
+    patchAgents(manifest) {
+      manifest.agents.find((agent) => agent.alias === 'general-text-speculator').model = gguf;
+    },
+  });
+  const one = await request(server, { path: '/v1/models/general-text-speculator' });
+  assert.equal(one.status, 200);
+  assert.equal(one.body.architecture, 'qwen2');
+  assert.equal(one.body.num_layers, 12);
+  assert.equal(one.body.checkpoint_path, gguf);
+  const weights = await request(server, { path: '/v1/models/general-text-speculator/weights' });
+  assert.equal(weights.status, 200);
+  assert.equal(weights.body.format, 'gguf');
+  assert.equal(weights.body.model, 'general-text-speculator');
+  const missing = await request(server, { path: '/v1/models/nope/weights' });
+  assert.equal(missing.status, 404);
 });
 
 test('health is ok when health_aliases are ready even if vision is missing', async (t) => {

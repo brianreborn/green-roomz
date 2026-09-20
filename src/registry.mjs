@@ -1,6 +1,8 @@
+import { existsSync } from 'node:fs';
 import { fileExists } from './util.mjs';
 import { ValidationError } from './errors.mjs';
 import { admitWhenTightOf, agentCanAdmit } from './memory.mjs';
+import { quantizationLabel, readGgufInfo } from './gguf.mjs';
 
 function routingBehavior(alias) {
   if (alias === 'tool-router-agent') return 'nexus';
@@ -71,32 +73,72 @@ export class AgentRegistry {
   }
 
   listModels() {
-    return [...this.agents.values()].map((agent) => {
-      const status = this.status(agent.alias);
-      const callable = status.state === 'ready' || status.state === 'cold';
-      const loaded = status.state === 'ready';
+    return [...this.agents.values()].map((agent) => this.modelRecord(agent));
+  }
+
+  getModel(alias) {
+    if (!this.agents.has(alias)) return null;
+    return this.modelRecord(this.agents.get(alias));
+  }
+
+  modelRecord(agent) {
+    const status = this.status(agent.alias);
+    const callable = status.state === 'ready' || status.state === 'cold';
+    const loaded = status.state === 'ready';
+    const checkpoint = typeof agent.model === 'string' && agent.model ? agent.model : null;
+    const gguf = checkpoint && existsSync(checkpoint) ? readGgufInfo(checkpoint, { tensors: false }) : null;
+    const identity = gguf?.format === 'gguf' ? gguf : null;
+    return {
+      id: agent.alias,
+      object: 'model',
+      owned_by: 'green-roomz',
+      native_capabilities: agent.native_capabilities,
+      gateway_accepted_capabilities: agent.gateway_accepted_capabilities,
+      callable_capabilities: callable ? agent.native_capabilities : [],
+      ready_capabilities: loaded ? agent.native_capabilities : [],
+      capability_readiness: {
+        state: status.state,
+        callable,
+        loaded,
+        reasons: status.missing,
+      },
+      routing_behavior: routingBehavior(agent.alias),
+      availability: status.state,
+      unavailable_reasons: status.missing,
+      experimental_features: agent.experimental ?? [],
+      resident: Boolean(agent.resident) || agent.alias === 'tool-router-agent',
+      checkpoint_path: checkpoint,
+      root: checkpoint,
+      architecture: identity?.architecture ?? null,
+      num_layers: identity?.num_layers ?? null,
+      num_heads: identity?.num_heads ?? null,
+      hidden_size: identity?.hidden_size ?? null,
+      max_model_len: identity?.context_length ?? agent.context_size ?? null,
+      quantization: quantizationLabel(identity),
+    };
+  }
+
+  discloseWeights(alias) {
+    if (!this.agents.has(alias)) return null;
+    const agent = this.agents.get(alias);
+    if (agent.runtime === 'logical' || !agent.model) {
       return {
-        id: agent.alias,
-        object: 'model',
-        owned_by: 'green-roomz',
-        // Declared capabilities describe the configured model. Consumers that need
-        // to make a request must use the status-qualified fields below.
-        native_capabilities: agent.native_capabilities,
-        gateway_accepted_capabilities: agent.gateway_accepted_capabilities,
-        callable_capabilities: callable ? agent.native_capabilities : [],
-        ready_capabilities: loaded ? agent.native_capabilities : [],
-        capability_readiness: {
-          state: status.state,
-          callable,
-          loaded,
-          reasons: status.missing,
-        },
-        routing_behavior: routingBehavior(agent.alias),
-        availability: status.state,
-        unavailable_reasons: status.missing,
-        experimental_features: agent.experimental ?? [],
-        resident: Boolean(agent.resident) || agent.alias === 'tool-router-agent',
+        object: 'weights',
+        model: alias,
+        checkpoint_path: null,
+        format: agent.runtime === 'logical' ? 'logical' : 'unknown',
+        tensors: {},
       };
-    });
+    }
+    if (!existsSync(agent.model)) return { missing: true, model: alias, checkpoint_path: agent.model };
+    const info = readGgufInfo(agent.model, { tensors: true });
+    return {
+      object: 'weights',
+      model: alias,
+      checkpoint_path: agent.model,
+      format: info.format,
+      architecture: info.architecture ?? null,
+      tensors: info.tensors ?? {},
+    };
   }
 }

@@ -26,6 +26,7 @@ const EXPLICIT_ROUTES = new Set([
   '/health',
   '/v1/health',
   '/v1/models',
+  '/v1/weights',
   '/props',
   '/metrics',
   '/v1/monitor/recent',
@@ -66,7 +67,20 @@ function publicEvent(event) {
   return { ...event, ticket: hashTicket(event.ticket) };
 }
 
-const GET_ONLY = new Set(['/', '/unicorn', '/health', '/v1/health', '/v1/models', '/props', '/metrics', '/v1/monitor/recent']);
+const GET_ONLY = new Set(['/', '/unicorn', '/health', '/v1/health', '/v1/models', '/v1/weights', '/props', '/metrics', '/v1/monitor/recent']);
+
+function modelsRoute(pathname) {
+  if (pathname === '/v1/models') return { list: true };
+  if (pathname === '/v1/weights') return { weights: true, id: null };
+  if (!pathname.startsWith('/v1/models/')) return null;
+  const rest = pathname.slice('/v1/models/'.length);
+  if (!rest) return { list: true };
+  if (rest.endsWith('/weights')) {
+    const id = decodeURIComponent(rest.slice(0, -'/weights'.length).replace(/\/$/, ''));
+    return { id, weights: true };
+  }
+  return { id: decodeURIComponent(rest) };
+}
 
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1', 'localhost']);
 const COUNCIL_JUDGES = new Set(['field-vote', 'judge-model', 'similarity']);
@@ -384,6 +398,7 @@ export class Gateway {
 <ul>
 <li><a href="/health"><code>GET /health</code></a></li>
 <li><a href="/v1/models"><code>GET /v1/models</code></a></li>
+<li><a href="/v1/weights"><code>GET /v1/weights</code></a></li>
 <li><code>POST /v1/chat/completions</code></li>
 </ul>
 <p>Other clients: curl, any OpenAI SDK at this origin.</p>
@@ -530,7 +545,8 @@ export class Gateway {
       }
       const identity = identityFrom(request, this.apiKey);
       if (!identity) return jsonResponse(response, 401, { error: { message: 'Unauthorized', type: 'auth_error' } }, cors);
-      if (!EXPLICIT_ROUTES.has(url.pathname) && !url.pathname.endsWith('/route')) {
+      const modelRoute = modelsRoute(url.pathname);
+      if (!EXPLICIT_ROUTES.has(url.pathname) && !url.pathname.endsWith('/route') && !modelRoute) {
         return jsonResponse(response, 404, { error: { message: 'Not found', type: 'not_found' } }, cors);
       }
       const headJson = (status, body) => {
@@ -540,7 +556,7 @@ export class Gateway {
         }
         return jsonResponse(response, status, body, cors);
       };
-      if (GET_ONLY.has(url.pathname)) {
+      if (GET_ONLY.has(url.pathname) || modelRoute) {
         if (method !== 'GET' && method !== 'HEAD') {
           return jsonResponse(response, 405, { error: { message: 'Method not allowed' } }, { allow: 'GET, HEAD, OPTIONS', ...cors });
         }
@@ -561,8 +577,18 @@ export class Gateway {
             ipc: { data: this.ipc.recent().map(publicEvent), stats: this.ipc.stats() },
           });
         }
-        if (url.pathname === '/v1/models') {
+        if (url.pathname === '/v1/models' || modelRoute?.list) {
           return headJson(200, { object: 'list', data: this.registry.listModels() });
+        }
+        if (url.pathname === '/v1/weights' || modelRoute?.weights) {
+          return this.serveWeights(headJson, modelRoute?.id || url.searchParams.get('model'));
+        }
+        if (modelRoute?.id) {
+          const row = this.registry.getModel(modelRoute.id);
+          if (!row) {
+            return headJson(404, { error: { message: `Unknown agent alias: ${modelRoute.id}`, type: 'not_found' } });
+          }
+          return headJson(200, row);
         }
         if (url.pathname === '/props') {
           return headJson(200, {
@@ -627,6 +653,28 @@ export class Gateway {
         },
       }, { ...cors, ...retryAfter, ...extraHeaders });
     }
+  }
+
+  serveWeights(headJson, requestedAlias) {
+    const alias = String(requestedAlias || NEXUS_ALIAS).trim() || NEXUS_ALIAS;
+    const row = this.registry.getModel(alias);
+    if (!row) {
+      return headJson(404, { error: { message: `Unknown agent alias: ${alias}`, type: 'not_found' } });
+    }
+    const disclosed = this.registry.discloseWeights(alias);
+    if (!disclosed) {
+      return headJson(404, { error: { message: `Unknown agent alias: ${alias}`, type: 'not_found' } });
+    }
+    if (disclosed.missing) {
+      return headJson(404, {
+        error: {
+          message: `No checkpoint on disk for ${alias}`,
+          type: 'not_found',
+          checkpoint_path: disclosed.checkpoint_path,
+        },
+      });
+    }
+    return headJson(200, disclosed);
   }
 
   health() {
