@@ -44,6 +44,8 @@ Commands:
                            (write/run/test loop; language from goal/extension; learns runtimes as it goes.
                             live max_tokens/timeout come from gateway.agent_max_tokens and
                             gateway.agent_chat_timeout_ms unless the flags are set)
+  dogfood --goal TEXT   (one unified diff from the gateway; dry-run unless GRZ_DOGFOOD_APPLY=1.
+                           model qwenstral-code-speculator, or GRZ_DOGFOOD_MODEL=general-text-speculator)
   stop [--manifest path]   (SIGTERM gateway from data/serve.pid; reap owned children.json PIDs)
 `;
 }
@@ -512,6 +514,11 @@ async function cmdAgent(args) {
   if (!result.ok) process.exitCode = 1;
 }
 
+async function cmdDogfood(args) {
+  const { main: dogfoodMain } = await import('../src/dogfood.mjs');
+  await dogfoodMain(args);
+}
+
 async function main(argv) {
   const args = argv.slice(2);
   const command = args[0];
@@ -520,6 +527,7 @@ async function main(argv) {
     return;
   }
   if (command === 'agent') return cmdAgent(args);
+  if (command === 'dogfood') return cmdDogfood(args);
   if (command === 'stop') {
     // Lightweight: load manifest for packRoot only; do not claim stopAll on an empty ProcessManager.
     const { loadManifest } = await import('../src/config.mjs');
