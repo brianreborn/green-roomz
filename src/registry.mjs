@@ -118,7 +118,7 @@ export class AgentRegistry {
     };
   }
 
-  discloseWeights(alias) {
+  discloseWeights(alias, { hash = true, values = false, maxParams = 4096, tensorName = null } = {}) {
     if (!this.agents.has(alias)) return null;
     const agent = this.agents.get(alias);
     if (agent.runtime === 'logical' || !agent.model) {
@@ -131,7 +131,16 @@ export class AgentRegistry {
       };
     }
     if (!existsSync(agent.model)) return { missing: true, model: alias, checkpoint_path: agent.model };
-    const info = readGgufInfo(agent.model, { tensors: true });
+    const info = readGgufInfo(agent.model, { tensors: true, hash, values, maxParams, tensorName });
+    if (info.values_refused) {
+      return {
+        tooLarge: true,
+        model: alias,
+        checkpoint_path: agent.model,
+        tensor: info.values_refused.tensor,
+        max_params: info.values_refused.max_params,
+      };
+    }
     return {
       object: 'weights',
       model: alias,

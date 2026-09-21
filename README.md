@@ -35,7 +35,10 @@ Same origin as chat. Bearer matches `/v1/chat/completions`.
 | GET | `/v1/models/{alias}` | one row |
 | GET | `/v1/weights?model={alias}` | tensor **index** (names, shapes, dtypes) — not weight values |
 | GET | `/v1/models/{alias}/weights` | same |
-| POST | `/v1/chat/completions` | `logprobs` / `top_logprobs` passed through to llama.cpp |
+| POST | `/v1/chat/completions` | `logprobs` / `top_logprobs` mapped to the OpenAI shape. Full logits only with `obliteratus.logits` or `logprobs: "full"` |
+| GET | `/v1/weights?include=values&tensor={name}` | inline a tiny tensor; larger than `max_params` is `413` |
+
+In-band self-report is a claim. `GET /v1/models` and `GET /v1/weights` are the source of truth. See [docs/introspection.md](docs/introspection.md).
 
 Unknown alias → `404`. Missing checkpoint → `404`. Default dump is metadata, not a 7B JSON body.
 

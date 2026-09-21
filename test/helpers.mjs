@@ -96,3 +96,40 @@ export function writeGgufBlockCount(filePath, n, { key = 'qwen2.block_count', pr
   chunks.push(u32(3), u64(0), u64(kvs.length), ...kvs);
   writeFileSync(filePath, Buffer.concat(chunks));
 }
+
+/** One f32 tensor so weights disclosure can hash and inline values. */
+export function writeTinyF32Gguf(filePath, values = [1, 2]) {
+  const u32 = (value) => {
+    const buf = Buffer.alloc(4);
+    buf.writeUInt32LE(value);
+    return buf;
+  };
+  const u64 = (value) => {
+    const buf = Buffer.alloc(8);
+    buf.writeBigUInt64LE(BigInt(value));
+    return buf;
+  };
+  const str = (value) => {
+    const bytes = Buffer.from(value, 'utf8');
+    return Buffer.concat([u64(bytes.length), bytes]);
+  };
+  const kvs = [
+    Buffer.concat([str('general.architecture'), u32(8), str('qwen2')]),
+    Buffer.concat([str('general.alignment'), u32(4), u32(32)]),
+    Buffer.concat([str('general.file_type'), u32(4), u32(0)]),
+    Buffer.concat([str('qwen2.block_count'), u32(4), u32(2)]),
+  ];
+  const tensor = Buffer.concat([
+    str('bias'),
+    u32(1),
+    u64(values.length),
+    u32(0),
+    u64(0),
+  ]);
+  const head = Buffer.concat([Buffer.from('GGUF'), u32(3), u64(1), u64(kvs.length), ...kvs, tensor]);
+  const align = 32;
+  const pad = (align - (head.length % align)) % align;
+  const data = Buffer.alloc(values.length * 4);
+  values.forEach((value, index) => data.writeFloatLE(value, index * 4));
+  writeFileSync(filePath, Buffer.concat([head, Buffer.alloc(pad), data]));
+}

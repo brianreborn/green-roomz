@@ -1,6 +1,7 @@
 import { Readable } from 'node:stream';
 import { HANDOFF_PEEK_CHARS, HANDOFF_PEEK_TIMEOUT_MS, UPSTREAM_MAX_BUFFER_BYTES } from './constants.mjs';
-import { sanitizeCompletionJson } from './proxy.mjs';
+import { sanitizeCompletionJson, sseFromJsonCompletion } from './proxy.mjs';
+import { toOpenAILogprobs, topLogprobsLimit, clientWantsLogprobs } from './logprobs.mjs';
 import { stripControls, stripEscapes } from './util.mjs';
 import { extractJsonObject, stripFence } from './nexus.mjs';
 
@@ -100,11 +101,13 @@ class SseParser {
   }
 }
 
-function assembleCompletion(events, { model, keepReasoning = false } = {}) {
+function assembleCompletion(events, { model, keepReasoning = false, requestBody } = {}) {
   let content = '';
   let finishReason = 'stop';
   let id = 'grz-completion';
   let usedModel = model ?? '';
+  const logprobContent = [];
+  const limit = topLogprobsLimit(requestBody);
   for (const event of events) {
     const json = event.json;
     if (!json) continue;
@@ -113,15 +116,21 @@ function assembleCompletion(events, { model, keepReasoning = false } = {}) {
     content += contentFromChoice(json);
     const reason = json.choices?.[0]?.finish_reason;
     if (reason) finishReason = reason;
+    if (clientWantsLogprobs(requestBody)) {
+      const mapped = toOpenAILogprobs(json.choices?.[0]?.logprobs, limit);
+      if (mapped?.content) logprobContent.push(...mapped.content);
+    }
   }
+  const choice = { index: 0, message: { role: 'assistant', content }, finish_reason: finishReason };
+  if (logprobContent.length) choice.logprobs = { content: logprobContent };
   return sanitizeCompletionJson({
     id,
     object: 'chat.completion',
     created: Math.floor(Date.now() / 1000),
     model: usedModel,
-    choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: finishReason }],
+    choices: [choice],
     usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
-  }, { keepReasoning });
+  }, { keepReasoning, requestBody });
 }
 
 function clientAskedForReasoning(body) {
@@ -204,7 +213,7 @@ export async function peekSpecialist({ fetchImpl = fetch, request, target, body,
     return {
       status: upstream.status,
       handoff: parseHandoffContent(content),
-      assembled: sanitizeCompletionJson(data, { keepReasoning }),
+      assembled: sanitizeCompletionJson(data, { keepReasoning, requestBody: body }),
       content,
       finished: true,
       events: [],
@@ -334,6 +343,7 @@ export async function deliverPeek({ peek, request, response, body, headers = {},
   }
 
   const keepReasoning = peek.keepReasoning ?? clientAskedForReasoning(body);
+  const sanitizeOptions = { keepReasoning, requestBody: body };
   const stream = clientWantsStream(body, request);
 
   if (peek.assembled && peek.finished) {
@@ -343,21 +353,14 @@ export async function deliverPeek({ peek, request, response, body, headers = {},
       return response.end(data);
     }
     response.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache', ...headers });
-    const content = peek.assembled.choices?.[0]?.message?.content ?? '';
-    writeSse(response, {
-      id: peek.assembled.id ?? 'grz',
-      object: 'chat.completion.chunk',
-      model: peek.assembled.model,
-      choices: [{ index: 0, delta: { role: 'assistant', content }, finish_reason: peek.assembled.choices?.[0]?.finish_reason ?? 'stop' }],
-    });
-    response.write('data: [DONE]\n\n');
+    response.write(sseFromJsonCompletion(peek.assembled, sanitizeOptions).sse);
     return response.end();
   }
 
   if (stream) {
     response.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache', ...headers });
     for (const event of peek.events ?? []) {
-      if (event.json) writeSse(response, sanitizeCompletionJson(event.json, { keepReasoning }));
+      if (event.json) writeSse(response, sanitizeCompletionJson(event.json, sanitizeOptions));
     }
     if (peek.finished || !peek.reader) {
       response.write('data: [DONE]\n\n');
@@ -370,13 +373,13 @@ export async function deliverPeek({ peek, request, response, body, headers = {},
         if (done) {
           for (const event of peek.parser?.end?.() ?? []) {
             if (event.done) continue;
-            if (event.json) writeSse(response, sanitizeCompletionJson(event.json, { keepReasoning }));
+            if (event.json) writeSse(response, sanitizeCompletionJson(event.json, sanitizeOptions));
           }
           break;
         }
         for (const event of peek.parser?.push?.(value) ?? []) {
           if (event.done) continue;
-          if (event.json) writeSse(response, sanitizeCompletionJson(event.json, { keepReasoning }));
+          if (event.json) writeSse(response, sanitizeCompletionJson(event.json, sanitizeOptions));
         }
       }
     } finally {
@@ -387,7 +390,7 @@ export async function deliverPeek({ peek, request, response, body, headers = {},
   }
 
   const drained = await drainToEvents(peek);
-  const assembled = assembleCompletion(drained.events, { model: peek.model ?? body?.model, keepReasoning });
+  const assembled = assembleCompletion(drained.events, { model: peek.model ?? body?.model, keepReasoning, requestBody: body });
   const data = Buffer.from(JSON.stringify(assembled));
   response.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'content-length': data.length, ...headers });
   return response.end(data);

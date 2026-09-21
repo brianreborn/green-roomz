@@ -14,6 +14,7 @@ import { GreenRoomzError, UnavailableError, UpstreamProtocolError, UpstreamTimeo
 import { deliverPeek, peekSpecialist } from './handoff.mjs';
 import { consultNexus, preferResidentChat } from './nexus.mjs';
 import { planRoute } from './logical-router.mjs';
+import { isIntrospectionProbe, introspectionFacts } from './introspect.mjs';
 import { proxyJson } from './proxy.mjs';
 import { aliasCanAdmit, audioDataFromBody, detectModalities, hardRuleRoute, isGenericChatRequest, isRoutableAlias, latestUserMessageText, NATIVE_CHAT, parseSlashCommand, stripSlashCommand } from './routing.mjs';
 import { contentChars, contextCharBudget, formatMemoryHeader, injectWorkingSet, memoryBounds } from './session-memory.mjs';
@@ -581,7 +582,7 @@ export class Gateway {
           return headJson(200, { object: 'list', data: this.registry.listModels() });
         }
         if (url.pathname === '/v1/weights' || modelRoute?.weights) {
-          return this.serveWeights(headJson, modelRoute?.id || url.searchParams.get('model'));
+          return this.serveWeights(headJson, modelRoute?.id || url.searchParams.get('model'), url.searchParams);
         }
         if (modelRoute?.id) {
           const row = this.registry.getModel(modelRoute.id);
@@ -655,13 +656,20 @@ export class Gateway {
     }
   }
 
-  serveWeights(headJson, requestedAlias) {
+  serveWeights(headJson, requestedAlias, searchParams) {
     const alias = String(requestedAlias || NEXUS_ALIAS).trim() || NEXUS_ALIAS;
     const row = this.registry.getModel(alias);
     if (!row) {
       return headJson(404, { error: { message: `Unknown agent alias: ${alias}`, type: 'not_found' } });
     }
-    const disclosed = this.registry.discloseWeights(alias);
+    const params = searchParams ?? new URLSearchParams();
+    const maxRaw = Number(params.get('max_params') || 4096);
+    const disclosed = this.registry.discloseWeights(alias, {
+      hash: true,
+      values: params.get('include') === 'values',
+      maxParams: Number.isFinite(maxRaw) && maxRaw > 0 ? maxRaw : 4096,
+      tensorName: params.get('tensor') || null,
+    });
     if (!disclosed) {
       return headJson(404, { error: { message: `Unknown agent alias: ${alias}`, type: 'not_found' } });
     }
@@ -674,7 +682,45 @@ export class Gateway {
         },
       });
     }
+    if (disclosed.tooLarge) {
+      return headJson(413, {
+        error: {
+          message: `Tensor ${disclosed.tensor} exceeds max_params (${disclosed.max_params}). Read checkpoint_path instead of inlining it.`,
+          type: 'payload_too_large',
+          checkpoint_path: disclosed.checkpoint_path,
+          tensor: disclosed.tensor,
+          max_params: disclosed.max_params,
+        },
+      });
+    }
     return headJson(200, disclosed);
+  }
+
+  serveIntrospection(response, body, identity, session, cors) {
+    const requested = typeof body.model === 'string' ? body.model.trim() : '';
+    const alias = requested && this.registry.agents.has(requested) ? requested : NEXUS_ALIAS;
+    if (!this.registry.agents.has(alias)) {
+      return jsonResponse(response, 404, { error: { message: `Unknown agent alias: ${alias}`, type: 'not_found' } }, cors);
+    }
+    const issuedSession = session?.id ?? this.sessions.create({
+      identity,
+      agentAlias: alias,
+      modality: ['text'],
+    });
+    const facts = introspectionFacts(this.registry.getModel(alias));
+    const routed = { requestedAlias: body.model ?? null, effectiveAlias: alias, reason: 'introspection' };
+    return jsonResponse(response, 200, {
+      id: `grz-introspect-${issuedSession}`,
+      object: 'chat.completion',
+      created: Math.floor(Date.now() / 1000),
+      model: alias,
+      choices: [{
+        index: 0,
+        message: { role: 'assistant', content: JSON.stringify(facts) },
+        finish_reason: 'stop',
+      }],
+      usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+    }, this.routeHeaders(issuedSession, routed, cors, { hops: alias }));
   }
 
   health() {
@@ -1098,6 +1144,10 @@ export class Gateway {
 
     if (body.model === MONITOR_ALIAS) {
       return this.handleMonitorSnapshot(request, response, body, identity, session, cors);
+    }
+
+    if (isIntrospectionProbe(latestUserMessageText(body))) {
+      return this.serveIntrospection(response, body, identity, session, cors);
     }
 
     let councilSpec = parseCouncilRequest(body, this.registry);

@@ -1,4 +1,5 @@
-/** Small GGUF header reader: architecture KVs + tensor index. No weight payload. */
+/** Small GGUF header reader: architecture KVs, tensor index, optional hashes. No default weight dump. */
+import { createHash } from 'node:crypto';
 import { closeSync, openSync, readSync, statSync } from 'node:fs';
 
 const VALUE = {
@@ -17,22 +18,44 @@ const VALUE = {
   FLOAT64: 12,
 };
 
-const TENSOR_DTYPE = {
-  0: 'f32',
-  1: 'f16',
-  2: 'q4_0',
-  3: 'q4_1',
-  6: 'q5_0',
-  7: 'q5_1',
-  8: 'q8_0',
-  9: 'q8_1',
-  10: 'q2_k',
-  11: 'q3_k',
-  12: 'q4_k',
-  13: 'q5_k',
-  14: 'q6_k',
-  15: 'q8_k',
-  30: 'bf16',
+/** ggml type id → block size and on-disk block bytes (llama.cpp ggml-common.h). */
+const GGML = {
+  0: { name: 'f32', block: 1, bytes: 4, scalar: 'f32' },
+  1: { name: 'f16', block: 1, bytes: 2, scalar: 'f16' },
+  2: { name: 'q4_0', block: 32, bytes: 18 },
+  3: { name: 'q4_1', block: 32, bytes: 20 },
+  6: { name: 'q5_0', block: 32, bytes: 22 },
+  7: { name: 'q5_1', block: 32, bytes: 24 },
+  8: { name: 'q8_0', block: 32, bytes: 34 },
+  9: { name: 'q8_1', block: 32, bytes: 36 },
+  10: { name: 'q2_k', block: 256, bytes: 84 },
+  11: { name: 'q3_k', block: 256, bytes: 110 },
+  12: { name: 'q4_k', block: 256, bytes: 144 },
+  13: { name: 'q5_k', block: 256, bytes: 176 },
+  14: { name: 'q6_k', block: 256, bytes: 210 },
+  15: { name: 'q8_k', block: 256, bytes: 292 },
+  30: { name: 'bf16', block: 1, bytes: 2, scalar: 'bf16' },
+};
+
+/** llama.cpp general.file_type (LLAMA_FTYPE_*). */
+const FILE_TYPE = {
+  0: 'F32',
+  1: 'F16',
+  2: 'Q4_0',
+  3: 'Q4_1',
+  7: 'Q8_0',
+  8: 'Q5_0',
+  9: 'Q5_1',
+  10: 'Q2_K',
+  11: 'Q3_K_S',
+  12: 'Q3_K_M',
+  13: 'Q3_K_L',
+  14: 'Q4_K_S',
+  15: 'Q4_K_M',
+  16: 'Q5_K_S',
+  17: 'Q5_K_M',
+  18: 'Q6_K',
+  32: 'BF16',
 };
 
 function reader(fd) {
@@ -116,6 +139,7 @@ const INTEREST = new Set([
   'general.architecture',
   'general.file_type',
   'general.name',
+  'general.alignment',
 ]);
 
 function isInterestingKey(key) {
@@ -123,9 +147,73 @@ function isInterestingKey(key) {
   return /\.(block_count|embedding_length|attention\.head_count|context_length)$/.test(key);
 }
 
+export function tensorNbytes(shape, dtypeId) {
+  const spec = GGML[dtypeId];
+  if (!spec || !Array.isArray(shape) || !shape.length) return null;
+  let n = 1;
+  for (const dim of shape) {
+    if (!Number.isFinite(dim) || dim < 0) return null;
+    n *= dim;
+  }
+  if (n % spec.block !== 0) return null;
+  return (n / spec.block) * spec.bytes;
+}
+
+function hashRange(fd, start, length) {
+  const hash = createHash('sha256');
+  const buf = Buffer.alloc(Math.min(1024 * 1024, Math.max(length, 1)));
+  let left = length;
+  let pos = start;
+  while (left > 0) {
+    const n = Math.min(buf.length, left);
+    const got = readSync(fd, buf, 0, n, pos);
+    if (got <= 0) break;
+    hash.update(buf.subarray(0, got));
+    pos += got;
+    left -= got;
+  }
+  if (left !== 0) return null;
+  return hash.digest('hex');
+}
+
+function f16ToF32(h) {
+  const sign = (h & 0x8000) ? -1 : 1;
+  const exp = (h & 0x7C00) >> 10;
+  const frac = h & 0x03FF;
+  if (exp === 0) return sign * (2 ** -14) * (frac / 1024);
+  if (exp === 31) return frac ? Number.NaN : sign * Number.POSITIVE_INFINITY;
+  return sign * (2 ** (exp - 15)) * (1 + frac / 1024);
+}
+
+function readScalarValues(fd, abs, nbytes, scalar) {
+  const buf = Buffer.alloc(nbytes);
+  const got = readSync(fd, buf, 0, nbytes, abs);
+  if (got < nbytes) return null;
+  const out = [];
+  if (scalar === 'f32') {
+    for (let i = 0; i < nbytes; i += 4) out.push(buf.readFloatLE(i));
+  } else if (scalar === 'f16') {
+    for (let i = 0; i < nbytes; i += 2) out.push(f16ToF32(buf.readUInt16LE(i)));
+  } else if (scalar === 'bf16') {
+    for (let i = 0; i < nbytes; i += 2) {
+      const tmp = Buffer.alloc(4);
+      tmp.writeUInt16LE(buf.readUInt16LE(i), 2);
+      out.push(tmp.readFloatLE(0));
+    }
+  }
+  return out;
+}
+
 const INFO_CACHE = new Map();
 
-export function readGgufInfo(filePath, { maxTensors = 4096, tensors = true } = {}) {
+export function readGgufInfo(filePath, {
+  maxTensors = 4096,
+  tensors = true,
+  hash = false,
+  values = false,
+  maxParams = 4096,
+  tensorName = null,
+} = {}) {
   let mtimeMs = 0;
   let size = 0;
   try {
@@ -135,7 +223,7 @@ export function readGgufInfo(filePath, { maxTensors = 4096, tensors = true } = {
   } catch {
     return { format: 'unknown', size: 0 };
   }
-  const cacheKey = `${filePath}\0${mtimeMs}\0${size}\0${tensors ? 1 : 0}\0${maxTensors}`;
+  const cacheKey = [filePath, mtimeMs, size, tensors ? 1 : 0, maxTensors, hash ? 1 : 0, values ? 1 : 0, maxParams, tensorName ?? ''].join('\0');
   if (INFO_CACHE.has(cacheKey)) return INFO_CACHE.get(cacheKey);
   const fd = openSync(filePath, 'r');
   try {
@@ -152,18 +240,44 @@ export function readGgufInfo(filePath, { maxTensors = 4096, tensors = true } = {
       if (isInterestingKey(key) && type !== VALUE.ARRAY) kv[key] = readScalar(r, type);
       else skipValue(r, type);
     }
-    const listed = {};
+    const all = [];
     if (tensors) {
-      const n = Math.min(tensorCount, maxTensors);
-      for (let i = 0; i < n; i += 1) {
+      for (let i = 0; i < tensorCount; i += 1) {
         const name = readString(r);
         const nDims = r.u32();
         const shape = [];
         for (let d = 0; d < nDims; d += 1) shape.push(r.u64());
         const dtype = r.u32();
-        r.u64();
-        listed[name] = { shape, dtype: TENSOR_DTYPE[dtype] ?? `type_${dtype}` };
+        const offset = r.u64();
+        all.push({ name, shape, dtype, offset });
       }
+    }
+    const alignment = Number(kv['general.alignment']) > 0 ? Number(kv['general.alignment']) : 32;
+    const dataStart = tensors ? ((r.pos + alignment - 1) & ~(alignment - 1)) : 0;
+    let valuesRefused = null;
+    const listed = {};
+    const shown = all.slice(0, maxTensors);
+    for (const tensor of shown) {
+      const spec = GGML[tensor.dtype];
+      const nbytes = tensorNbytes(tensor.shape, tensor.dtype);
+      const row = {
+        shape: tensor.shape,
+        dtype: spec?.name ?? `type_${tensor.dtype}`,
+      };
+      const abs = dataStart + tensor.offset;
+      if (hash && nbytes != null) row.sha256 = hashRange(fd, abs, nbytes);
+      else if (hash) row.sha256 = null;
+      const numel = tensor.shape.reduce((acc, dim) => acc * dim, 1);
+      const selected = !tensorName || tensor.name === tensorName;
+      if (values && selected) {
+        if (numel > maxParams || !spec?.scalar || nbytes == null) {
+          if (tensorName) valuesRefused = { tensor: tensor.name, max_params: maxParams, numel };
+          else row.values_omitted = 'exceeds max_params or quantized';
+        } else {
+          row.values = readScalarValues(fd, abs, nbytes, spec.scalar);
+        }
+      }
+      listed[tensor.name] = row;
     }
     const architecture = kv['general.architecture'] ?? null;
     const prefix = architecture ? `${architecture}.` : '';
@@ -178,7 +292,10 @@ export function readGgufInfo(filePath, { maxTensors = 4096, tensors = true } = {
       hidden_size: kv[`${prefix}embedding_length`] ?? null,
       num_heads: kv[`${prefix}attention.head_count`] ?? null,
       context_length: kv[`${prefix}context_length`] ?? null,
+      tensor_count: tensors ? tensorCount : 0,
+      tensors_truncated: tensors ? tensorCount > shown.length : false,
       tensors: listed,
+      values_refused: valuesRefused,
     };
     INFO_CACHE.set(cacheKey, info);
     return info;
@@ -192,5 +309,5 @@ export function readGgufInfo(filePath, { maxTensors = 4096, tensors = true } = {
 export function quantizationLabel(info) {
   if (!info || info.format !== 'gguf') return null;
   if (info.file_type == null) return null;
-  return String(info.file_type);
+  return FILE_TYPE[info.file_type] ?? `type_${info.file_type}`;
 }
