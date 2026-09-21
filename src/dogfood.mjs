@@ -334,12 +334,43 @@ export function spawnNodeTests(files, { cwd } = {}) {
 
 function completionText(json) {
   const choice = json?.choices?.[0];
-  const content = choice?.message?.content ?? choice?.text ?? '';
+  const content = choice?.message?.content ?? choice?.delta?.content ?? choice?.text ?? '';
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) {
     return content.map((part) => (typeof part === 'string' ? part : part?.text ?? '')).join('');
   }
   return '';
+}
+
+async function readGatewayText(res) {
+  const type = String(res.headers?.get?.('content-type') ?? '');
+  if (!type.includes('event-stream') && typeof res.json === 'function') {
+    return completionText(await res.json());
+  }
+  const reader = res.body?.getReader?.();
+  if (!reader) {
+    if (typeof res.text === 'function') return assembleSse(await res.text());
+    return '';
+  }
+  const dec = new TextDecoder();
+  let raw = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    raw += dec.decode(value, { stream: true });
+  }
+  return assembleSse(raw);
+}
+
+function assembleSse(raw) {
+  let out = '';
+  for (const line of String(raw).split(/\r?\n/)) {
+    if (!line.startsWith('data:')) continue;
+    const data = line.slice(5).trim();
+    if (!data || data === '[DONE]') continue;
+    try { out += completionText(JSON.parse(data)); } catch { /* comment or partial */ }
+  }
+  return out;
 }
 
 function exitStatus(outcome) {
@@ -372,7 +403,7 @@ export async function runDogfood({
   const payload = {
     model: chosen,
     lock_alias: true,
-    stream: false,
+    stream: true,
     max_tokens: Number.isFinite(maxTokens) && maxTokens > 0 ? maxTokens : 2048,
     messages: [
       { role: 'system', content: DOGFOOD_SYSTEM },
@@ -390,7 +421,7 @@ export async function runDogfood({
     const res = await fetchImpl(url, init);
     if (!res || typeof res.json !== 'function') throw new Error('bad gateway response');
     if (res.ok === false) throw new Error(`gateway HTTP ${res.status ?? ''}`);
-    content = completionText(await res.json());
+    content = await readGatewayText(res);
   } catch (error) {
     return { ok: false, applied: false, reverted: false, reason: error.message || 'gateway failed' };
   }
