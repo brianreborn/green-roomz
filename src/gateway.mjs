@@ -812,6 +812,13 @@ export class Gateway {
     }
     const agent = this.registry.get(alias);
     hops.push(alias);
+    const headers = this.routeHeaders(
+      issuedSession,
+      { requestedAlias: body.model ?? null, effectiveAlias: alias, reason },
+      cors,
+      { hops: hops.join(',') },
+    );
+    if (body?.stream === true) this.openClientStream(response, headers);
     await this.processes.ensure(agent, { signal: request.abortSignal });
     const unpin = this.processes.pin(alias);
     try {
@@ -826,13 +833,7 @@ export class Gateway {
       const path = '/v1/chat/completions';
       const target = `http://127.0.0.1:${agent.port}${path}`;
       this.sessions.setAgentAlias(issuedSession, alias);
-      const headers = this.routeHeaders(
-        issuedSession,
-        { requestedAlias: body.model ?? null, effectiveAlias: alias, reason },
-        cors,
-        { hops: hops.join(',') },
-      );
-      for (const [key, value] of Object.entries(headers)) response.setHeader(key, value);
+      this.applyRouteHeaders(response, headers);
       const proxied = await proxyJson({
         request,
         response,
@@ -1114,6 +1115,22 @@ export class Gateway {
         }) + '\n');
       }
     } catch { /* best effort */ }
+  }
+
+  applyRouteHeaders(response, headers) {
+    if (!headers || response.headersSent) return;
+    for (const [key, value] of Object.entries(headers)) response.setHeader(key, value);
+  }
+
+  /** SSE headers before a cold start. Undici drops a stream that sends no headers for 300s. */
+  openClientStream(response, headers) {
+    if (response.headersSent) return;
+    this.applyRouteHeaders(response, headers);
+    response.writeHead(200, {
+      'content-type': 'text/event-stream; charset=utf-8',
+      'cache-control': 'no-cache',
+    });
+    if (typeof response.write === 'function') response.write(': open\n\n');
   }
 
   routeHeaders(issuedSession, routed, cors, extra = {}) {
@@ -1457,12 +1474,21 @@ export class Gateway {
         hops.push(alias);
         const agent = this.registry.get(alias);
         let record;
+        if (body?.stream === true && slashOrLock) this.openClientStream(response, hopHeaders(alias, reason));
         try {
           record = await this.processes.ensure(agent, { signal: request.abortSignal });
         } catch (startError) {
           if (request.abortSignal?.aborted) throw startError;
           notes.push(stripControls(`${alias} failed to start: ${startError?.message ?? startError}`));
           this.observeHop('agent_unavailable', alias, { ticket: issuedSession, payload: { reason: 'start_failed', hops: hops.slice() } });
+          if (response.headersSent) {
+            try {
+              response.write(`data: ${JSON.stringify({ error: { message: `${alias} failed to start`, type: 'agent_unavailable' } })}\n\n`);
+              response.write('data: [DONE]\n\n');
+              response.end();
+            } catch {}
+            return;
+          }
           continue;   // let the loop end -> media guard / text fallback below
         }
         if (record?.logical) {
@@ -1488,7 +1514,7 @@ export class Gateway {
           try {
             this.sessions.setAgentAlias(issuedSession, alias);
             const headers = hopHeaders(alias, reason);
-            for (const [key, value] of Object.entries(headers)) response.setHeader(key, value);
+            this.applyRouteHeaders(response, headers);
             const proxied = await proxyJson({
               request,
               response,
@@ -1525,7 +1551,7 @@ export class Gateway {
               // resident_fallback ramble on the router.
               this.sessions.setAgentAlias(issuedSession, alias);
               const headers = hopHeaders(alias, reason);
-              for (const [key, value] of Object.entries(headers)) response.setHeader(key, value);
+              this.applyRouteHeaders(response, headers);
               if (peek.content || peek.events?.length) {
                 this.noteAssistant(issuedSession, peek.content);
                 await deliverPeek({ peek, request, response, body: payload, headers, beforeClientWrite: this.beforeClientWrite(startedAt) });
@@ -1572,7 +1598,7 @@ export class Gateway {
           this.sessions.setAgentAlias(issuedSession, alias);
           this.noteAssistant(issuedSession, peek.content);
           const headers = hopHeaders(alias, reason);
-          for (const [key, value] of Object.entries(headers)) response.setHeader(key, value);
+          this.applyRouteHeaders(response, headers);
           await deliverPeek({ peek, request, response, body: payload, headers, beforeClientWrite: this.beforeClientWrite(startedAt) });
           this.observeHop('success', alias, { ticket: issuedSession, payload: { reason, hops: hops.slice() } });
           return;
@@ -1607,7 +1633,7 @@ export class Gateway {
             const path = String((pathname ?? request.url.split('?')[0])).replace(/\/route$/, '') || '/v1/chat/completions';
             this.sessions.setAgentAlias(issuedSession, FALLBACK_ALIAS);
             const headers = hopHeaders(FALLBACK_ALIAS, 'text_fallback');
-            for (const [key, value] of Object.entries(headers)) response.setHeader(key, value);
+            this.applyRouteHeaders(response, headers);
             const proxied = await proxyJson({ request, response, body: payload, target: `http://127.0.0.1:${agent.port}${path}`, config: this.manifest.gateway, signal: request.abortSignal, fetchImpl: this.fetchImpl, beforeClientWrite: this.beforeClientWrite(startedAt) });
             const okHop = this.recordProxy(issuedSession, proxied);
             this.observeHop(okHop ? 'success' : 'agent_unavailable', FALLBACK_ALIAS, { ticket: issuedSession, payload: { reason: 'text_fallback', hops: hops.slice() } });

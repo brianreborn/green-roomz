@@ -352,13 +352,13 @@ export async function deliverPeek({ peek, request, response, body, headers = {},
       response.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'content-length': data.length, ...headers });
       return response.end(data);
     }
-    response.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache', ...headers });
+    if (!response.headersSent) response.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache', ...headers });
     response.write(sseFromJsonCompletion(peek.assembled, sanitizeOptions).sse);
     return response.end();
   }
 
   if (stream) {
-    response.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache', ...headers });
+    if (!response.headersSent) response.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache', ...headers });
     for (const event of peek.events ?? []) {
       if (event.json) writeSse(response, sanitizeCompletionJson(event.json, sanitizeOptions));
     }

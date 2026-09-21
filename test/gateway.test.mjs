@@ -508,6 +508,46 @@ test('aborted streaming chat leaves the gateway listening', async (t) => {
   resumeRead();
 });
 
+test('locked stream sends SSE bytes before the upstream fetch returns', async (t) => {
+  let releaseFetch;
+  const fetchGate = new Promise((resolve) => { releaseFetch = resolve; });
+  const { server } = await withServer(t, {}, {
+    ready: ['general-text-speculator'],
+    stubEnsure: true,
+    fetchImpl: async () => {
+      await fetchGate;
+      return jsonFetch({ choices: [{ message: { role: 'assistant', content: 'pong' } }] });
+    },
+  });
+  const { port } = server.address();
+  const early = await new Promise((resolve, reject) => {
+    const req = http.request({
+      hostname: '127.0.0.1', port, family: 4, method: 'POST', path: '/v1/chat/completions',
+      headers: { 'content-type': 'application/json' },
+    }, (res) => {
+      let buf = '';
+      res.on('data', (chunk) => {
+        buf += chunk.toString();
+        if (buf.includes(': open')) resolve({ status: res.statusCode, type: res.headers['content-type'], buf });
+      });
+      res.on('error', reject);
+    });
+    req.on('error', reject);
+    req.write(JSON.stringify({
+      model: 'general-text-speculator',
+      lock_alias: true,
+      stream: true,
+      max_tokens: 8,
+      messages: [{ role: 'user', content: 'Say hi' }],
+    }));
+    req.end();
+  });
+  assert.equal(early.status, 200);
+  assert.match(early.type, /text\/event-stream/);
+  assert.match(early.buf, /: open/);
+  releaseFetch();
+});
+
 test('general-text thinking is off by default including max_tokens 256; explicit true is preserved', () => {
   const agent = { alias: 'general-text-speculator' };
   const short = prepareInferenceBody({ max_tokens: 24, messages: [] }, agent);

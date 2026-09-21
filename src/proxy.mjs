@@ -210,7 +210,7 @@ async function writeSanitizedSse(upstream, response, { keepReasoning, requestBod
     }
     if (clientGone(response, signal)) return content;
     const sseHeaders = { ...headers, 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache' };
-    response.writeHead(upstream.status, sseHeaders);
+    if (!response.headersSent) response.writeHead(upstream.status, sseHeaders);
     const trimmed = raw.trim();
     if (trimmed.startsWith('{')) {
       try {
@@ -231,7 +231,7 @@ async function writeSanitizedSse(upstream, response, { keepReasoning, requestBod
     await drainUpstreamBody(upstream.body);
     return content;
   }
-  response.writeHead(upstream.status, { ...headers, 'content-type': headers['content-type'] || 'text/event-stream; charset=utf-8' });
+  if (!response.headersSent) response.writeHead(upstream.status, { ...headers, 'content-type': headers['content-type'] || 'text/event-stream; charset=utf-8' });
   const takeText = async () => {
     if (typeof upstream.text !== 'function') return;
     const raw = await upstream.text();
@@ -397,8 +397,9 @@ export async function proxyJson({ request, response, body, target, config, signa
         delete headers['content-length'];
         let data;
         let content = '';
+        let sanitized = null;
         try {
-          const sanitized = sanitizeCompletionJson(JSON.parse(raw), { keepReasoning, requestBody: body });
+          sanitized = sanitizeCompletionJson(JSON.parse(raw), { keepReasoning, requestBody: body });
           content = assistantContentFromJson(sanitized);
           data = Buffer.from(JSON.stringify(sanitized));
         } catch {
@@ -407,6 +408,14 @@ export async function proxyJson({ request, response, body, target, config, signa
         if (response.writableEnded || response.destroyed || signal?.aborted) return { status: upstream.status, content };
         if (beforeClientWrite) await beforeClientWrite();
         if (response.writableEnded || response.destroyed || signal?.aborted) return { status: upstream.status, content };
+        if (response.headersSent) {
+          const sse = sanitized
+            ? sseFromJsonCompletion(sanitized, { keepReasoning, requestBody: body }).sse
+            : `data: ${JSON.stringify({ choices: [{ delta: { content: raw } }] })}\n\ndata: [DONE]\n\n`;
+          response.write(sse);
+          if (!response.writableEnded) response.end();
+          return { status: upstream.status, content };
+        }
         response.writeHead(upstream.status, { ...headers, 'content-length': data.length });
         response.end(data);
         return { status: upstream.status, content };
@@ -416,7 +425,7 @@ export async function proxyJson({ request, response, body, target, config, signa
         return { status: upstream.status, content: '' };
       }
       if (beforeClientWrite) await beforeClientWrite();
-      response.writeHead(upstream.status, downstreamHeaders(upstream));
+      if (!response.headersSent) response.writeHead(upstream.status, downstreamHeaders(upstream));
       if (!upstream.body) {
         response.end();
         return { status: upstream.status, content: '' };
