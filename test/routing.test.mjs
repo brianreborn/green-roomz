@@ -92,15 +92,15 @@ test('unavailable native model is still pinned so completions can 503', () => {
   assert.equal(routed.reason, 'requested_alias');
 });
 
-test('unavailable qwenstral-code-speculator is not pinned as requested_alias', () => {
+test('unavailable qwenstral-code-speculator is pinned as requested_alias (DISPATCH-FIX-01)', () => {
   const reg = registry();
   reg.setStatus('qwenstral-code-speculator', 'unavailable', { missing: ['impractical:RAM'] });
   const routed = hardRuleRoute({
     model: 'qwenstral-code-speculator',
     messages: [{ role: 'user', content: 'write hello' }],
   }, reg);
-  assert.equal(routed.effectiveAlias, null);
-  assert.equal(routed.reason, 'nexus');
+  assert.equal(routed.effectiveAlias, 'qwenstral-code-speculator');
+  assert.equal(routed.reason, 'requested_alias');
 });
 
 test('text-only turns do not regex C++ or image intent; nexus decides', () => {

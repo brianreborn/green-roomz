@@ -1513,9 +1513,9 @@ export class Gateway {
         const payload = this.prepareTurn(body, agent, issuedSession);
         const path = String((pathname ?? request.url.split('?')[0])).replace(/\/route$/, '') || '/v1/chat/completions';
         const target = `http://127.0.0.1:${agent.port}${path}`;
-        // A slash or lock_alias already chose the model. Peeking for HANDOFF
+        // A lock_alias already chose the model. Peeking for HANDOFF
         // would throw that choice away and hold the policy until the peek ends.
-        if (slashOrLock) {
+        if (body?.lock_alias === true || reason === 'lock_alias') {
           const unpinLocked = this.processes.pin(alias);
           try {
             this.sessions.setAgentAlias(issuedSession, alias);
