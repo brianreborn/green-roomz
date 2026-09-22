@@ -200,8 +200,62 @@ function countHunk(hunkLines) {
   return { oldC, newC };
 }
 
+function countHeader(start, count) {
+  return count === 1 ? String(start) : `${start},${count}`;
+}
+
+/** Small models glue unified-diff headers onto one line and skip the fence. */
+export function normalizeModelDiff(text) {
+  const raw = String(text ?? '');
+  const fenced = extractFencedDiff(raw);
+  let body = fenced;
+  if (!body) {
+    const at = raw.indexOf('diff --git ');
+    if (at < 0) return null;
+    body = `${raw.slice(at).trim()}\n`;
+  }
+  body = body.replace(/ (?=(?:new file mode |deleted file mode |old mode |new mode |index |similarity index |rename from |rename to |copy from |copy to |--- |\+\+\+ |@@ |diff --git ))/g, '\n');
+  const lines = body.split('\n');
+  const out = [];
+  let hunkHeader = null;
+  let hunkLines = [];
+  const flush = () => {
+    if (!hunkHeader) return;
+    const bodyLines = [];
+    for (const line of hunkLines) {
+      if (line === '') continue;
+      if (/^[ +\-\\]/.test(line)) bodyLines.push(line);
+      else bodyLines.push(`+${line}`);
+    }
+    const seen = countHunk(bodyLines);
+    const match = HUNK_RE.exec(hunkHeader);
+    if (!match) return;
+    const header = `@@ -${countHeader(match[1], seen.oldC)} +${countHeader(match[3], seen.newC)} @@`;
+    out.push(header, ...bodyLines);
+    hunkHeader = null;
+    hunkLines = [];
+  };
+  for (const line of lines) {
+    if (line.startsWith('@@')) {
+      flush();
+      hunkHeader = line.startsWith('@@ ') ? line : `@@ ${line.slice(2).trim()}`;
+      continue;
+    }
+    if (hunkHeader && /^(diff --git |--- |\+\+\+ |index |new file mode |deleted file mode )/.test(line)) {
+      flush();
+      out.push(line);
+      continue;
+    }
+    if (hunkHeader) hunkLines.push(line);
+    else if (line !== '') out.push(line);
+  }
+  flush();
+  if (!out.some((line) => line.startsWith('diff --git ')) || !out.some((line) => line.startsWith('@@ '))) return null;
+  return `${out.join('\n')}\n`;
+}
+
 export function reviewDiff(diffText) {
-  const fenced = extractFencedDiff(diffText);
+  const fenced = normalizeModelDiff(diffText);
   if (!fenced) return { ok: false, reason: 'missing diff', diff: null };
   const parsed = parseUnifiedDiff(fenced);
   if (!parsed.ok) return { ...parsed, diff: fenced };
@@ -403,6 +457,7 @@ export async function runDogfood({
   const payload = {
     model: chosen,
     lock_alias: true,
+    dogfood: true,
     stream: true,
     max_tokens: Number.isFinite(maxTokens) && maxTokens > 0 ? maxTokens : 2048,
     messages: [
@@ -427,7 +482,8 @@ export async function runDogfood({
   }
   const reviewed = reviewDiff(content);
   if (!reviewed.ok) {
-    return { ok: false, applied: false, reverted: false, reason: reviewed.reason, diff: reviewed.diff ?? null };
+    const excerpt = String(content ?? '').replace(/\s+/g, ' ').trim().slice(0, 400);
+    return { ok: false, applied: false, reverted: false, reason: reviewed.reason, diff: reviewed.diff ?? null, stderr: excerpt };
   }
   const doApply = wantsApply(apply, env);
   if (!doApply) {
@@ -451,7 +507,7 @@ export async function runDogfood({
         if (!existsSync(abs)) throw new Error(`missing ${file.rel}`);
         original = readFileSync(abs, 'utf8');
       } else if (existsSync(abs)) {
-        original = readFileSync(abs, 'utf8');
+        throw new Error(`refusing to recreate existing ${file.rel}`);
       }
       return { ...file, abs, next: applyHunks(original, file.hunks) };
     });
@@ -514,6 +570,7 @@ export async function main(argv = process.argv.slice(2)) {
   if (result.dryRun && result.ok && result.diff) process.stdout.write(result.diff);
   if (!result.ok) {
     console.error(result.reason || 'dogfood failed');
+    if (result.diff) process.stderr.write(result.diff);
     if (result.stderr) console.error(result.stderr);
     process.exitCode = 1;
   } else if (result.applied) {

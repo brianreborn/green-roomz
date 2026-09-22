@@ -548,6 +548,48 @@ test('locked stream sends SSE bytes before the upstream fetch returns', async (t
   releaseFetch();
 });
 
+test('dogfood skips the stock system prompt', () => {
+  const body = prepareInferenceBody({
+    dogfood: true,
+    max_tokens: 32,
+    messages: [
+      { role: 'system', content: 'DIFF ONLY' },
+      { role: 'user', content: 'add a comment' },
+    ],
+  }, { alias: 'general-text-speculator', system_policy: 'policies/general-text.md' });
+  assert.equal(body.dogfood, undefined);
+  assert.equal(body.messages[0].content, 'DIFF ONLY');
+  assert.equal(body.messages.some((message) => String(message.content).includes('general assistant')), false);
+});
+
+test('lock_alias returns a HANDOFF line instead of rerouting', async (t) => {
+  let calls = 0;
+  const { server } = await withServer(t, {}, {
+    ready: ['general-text-speculator', 'qwenstral-code-speculator'],
+    stubEnsure: true,
+    fetchImpl: async () => {
+      calls += 1;
+      return jsonFetch({
+        choices: [{ message: { role: 'assistant', content: 'HANDOFF {"reason":"not mine","suggest":"qwenstral-code-speculator"}' } }],
+      });
+    },
+  });
+  const result = await request(server, {
+    path: '/v1/chat/completions',
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: {
+      model: 'general-text-speculator',
+      lock_alias: true,
+      messages: [{ role: 'user', content: 'Say hi' }],
+    },
+  });
+  assert.equal(result.status, 200);
+  assert.equal(calls, 1);
+  assert.equal(result.headers['x-green-roomz-effective-alias'], 'general-text-speculator');
+  assert.match(result.body.choices[0].message.content, /^HANDOFF /);
+});
+
 test('general-text thinking is off by default including max_tokens 256; explicit true is preserved', () => {
   const agent = { alias: 'general-text-speculator' };
   const short = prepareInferenceBody({ max_tokens: 24, messages: [] }, agent);

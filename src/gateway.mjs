@@ -228,15 +228,22 @@ function injectNexusChatPrompt(body) {
 
 export function prepareInferenceBody(body, agent, extras = {}) {
   const stripped = stripSlashCommand(body);
+  // dogfood asks for a diff. The stock kernel tells the model to hand off, which
+  // swallows that diff. Keep the caller's own system message.
+  const dogfood = stripped.dogfood === true;
+  const base = { ...stripped, model: agent.alias };
+  delete base.dogfood;
   // Nexus routing kernel (tool-router.md) is only for consultNexus via withNexusPolicy.
   // User-facing resident completions get a tiny chat prompt so the 0.5B does not dump baked identity.
-  const payload = agent.alias === NEXUS_ALIAS
-    ? injectNexusChatPrompt({ ...stripped, model: agent.alias })
-    : injectSystemPolicy({ ...stripped, model: agent.alias }, agent);
+  const payload = dogfood
+    ? base
+    : (agent.alias === NEXUS_ALIAS
+      ? injectNexusChatPrompt(base)
+      : injectSystemPolicy(base, agent));
   delete payload.route_plan_only;
   delete payload.lock_alias;
   delete payload.session_id;
-  if (agent.alias !== NEXUS_ALIAS) {
+  if (!dogfood && agent.alias !== NEXUS_ALIAS) {
     const systemChars = contentChars(payload.messages?.[0]);
     const maxChars = contextCharBudget(agent, { maxTokens: payload.max_tokens, systemChars });
     payload.messages = injectWorkingSet(payload.messages ?? [], extras.session, { maxChars });
@@ -1506,6 +1513,31 @@ export class Gateway {
         const payload = this.prepareTurn(body, agent, issuedSession);
         const path = String((pathname ?? request.url.split('?')[0])).replace(/\/route$/, '') || '/v1/chat/completions';
         const target = `http://127.0.0.1:${agent.port}${path}`;
+        // A slash or lock_alias already chose the model. Peeking for HANDOFF
+        // would throw that choice away and hold the policy until the peek ends.
+        if (slashOrLock) {
+          const unpinLocked = this.processes.pin(alias);
+          try {
+            this.sessions.setAgentAlias(issuedSession, alias);
+            const headers = hopHeaders(alias, reason);
+            this.applyRouteHeaders(response, headers);
+            const proxied = await proxyJson({
+              request,
+              response,
+              body: payload,
+              target,
+              config: this.manifest.gateway,
+              signal: request.abortSignal,
+              fetchImpl: this.fetchImpl,
+              beforeClientWrite: this.beforeClientWrite(startedAt),
+            });
+            const okHop = this.recordProxy(issuedSession, proxied);
+            this.observeHop(okHop ? 'success' : 'agent_unavailable', alias, { ticket: issuedSession, payload: { reason, hops: hops.slice() } });
+            return;
+          } finally {
+            unpinLocked();
+          }
+        }
         if (reason === 'chat_default') {
           if (preferResident) {
             return await this.completeOnResident(request, response, body, issuedSession, cors, hops, 'chat_default_resident');
