@@ -1,5 +1,7 @@
 # Fresh checkout on a fast machine
 
+The handoff and the next tasks are `GOALS.md`. This file is only the clone steps.
+
 This Athlon II does about 1.6 tokens/second. Do the next dogfood there only to edit code. Run the model on the fastest box you still have SuperGrok time to drive.
 
 `main` does not have the dogfood command. Use `disclosure-acceptance`.
