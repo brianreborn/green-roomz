@@ -2,6 +2,7 @@ import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { UPSTREAM_MAX_BUFFER_BYTES, UPSTREAM_TIMEOUT_MS } from './constants.mjs';
 import { UpstreamProtocolError, UpstreamTimeoutError } from './errors.mjs';
+import { applyLogprobContract } from './logprobs.mjs';
 import { deadlineSignal, isTimeoutAbort, jitteredBackoff, readCappedText, sleep, stripEscapes } from './util.mjs';
 
 const HOP_BY_HOP = new Set(['connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization', 'te', 'trailer', 'transfer-encoding', 'upgrade']);
@@ -24,7 +25,13 @@ function downstreamHeaders(response) {
   return headers;
 }
 
-export function sanitizeCompletionJson(payload, { keepReasoning = false } = {}) {
+function sanitizeOpts(opts) {
+  if (typeof opts === 'boolean') return { keepReasoning: opts };
+  return opts ?? {};
+}
+
+export function sanitizeCompletionJson(payload, opts = {}) {
+  const { keepReasoning = false, requestBody = undefined } = sanitizeOpts(opts);
   if (!payload || typeof payload !== 'object') return payload;
   const next = { ...payload };
   delete next.timings;
@@ -53,7 +60,7 @@ export function sanitizeCompletionJson(payload, { keepReasoning = false } = {}) 
       return copy;
     });
   }
-  return next;
+  return applyLogprobContract(next, requestBody);
 }
 
 function clientAskedForReasoning(body) {
@@ -74,20 +81,23 @@ export function assistantContentFromJson(payload) {
 }
 
 /** llama.cpp sometimes ignores stream:true and returns one JSON chat.completion. */
-export function sseFromJsonCompletion(payload, keepReasoning = false) {
-  const sanitized = sanitizeCompletionJson(payload, { keepReasoning });
+export function sseFromJsonCompletion(payload, opts = false) {
+  const sanitized = sanitizeCompletionJson(payload, opts);
   const text = assistantContentFromJson(sanitized);
+  const choice = {
+    index: 0,
+    delta: { role: 'assistant', ...(text ? { content: text } : {}) },
+    finish_reason: sanitized.choices?.[0]?.finish_reason ?? 'stop',
+  };
+  if (sanitized.choices?.[0]?.logprobs) choice.logprobs = sanitized.choices[0].logprobs;
   const chunk = {
     id: sanitized.id,
     object: 'chat.completion.chunk',
     created: sanitized.created,
     model: sanitized.model,
-    choices: [{
-      index: 0,
-      delta: { role: 'assistant', ...(text ? { content: text } : {}) },
-      finish_reason: sanitized.choices?.[0]?.finish_reason ?? 'stop',
-    }],
+    choices: [choice],
   };
+  if (sanitized.obliteratus) chunk.obliteratus = sanitized.obliteratus;
   return { text, sse: `data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n` };
 }
 
@@ -99,12 +109,12 @@ function assistantDeltaFromJson(payload) {
   return '';
 }
 
-function frameFromParsed(parsed, keepReasoning) {
+function frameFromParsed(parsed, opts) {
   if (!parsed) return null;
   if (parsed.done) return { frame: 'data: [DONE]\n\n', delta: '' };
   if (parsed.json) {
     return {
-      frame: `data: ${JSON.stringify(sanitizeCompletionJson(parsed.json, { keepReasoning }))}\n\n`,
+      frame: `data: ${JSON.stringify(sanitizeCompletionJson(parsed.json, opts))}\n\n`,
       delta: assistantDeltaFromJson(parsed.json),
     };
   }
@@ -125,7 +135,7 @@ function parseSseBlock(raw) {
   }
 }
 
-export function sanitizeSseText(raw, { keepReasoning = false } = {}) {
+export function sanitizeSseText(raw, opts = {}) {
   const text = String(raw ?? '').replace(/\r\n/g, '\n');
   const out = [];
   let pos = 0;
@@ -136,14 +146,14 @@ export function sanitizeSseText(raw, { keepReasoning = false } = {}) {
     pos = sep + 2;
     if (!parsed) continue;
     if (parsed.done) out.push('data: [DONE]\n\n');
-    else if (parsed.json) out.push(`data: ${JSON.stringify(sanitizeCompletionJson(parsed.json, { keepReasoning }))}\n\n`);
+    else if (parsed.json) out.push(`data: ${JSON.stringify(sanitizeCompletionJson(parsed.json, opts))}\n\n`);
     else if (parsed.raw) out.push(`data: ${parsed.raw}\n\n`);
   }
   const rest = text.slice(pos);
   if (rest.trim()) {
     const parsed = parseSseBlock(rest);
     if (parsed?.done) out.push('data: [DONE]\n\n');
-    else if (parsed?.json) out.push(`data: ${JSON.stringify(sanitizeCompletionJson(parsed.json, { keepReasoning }))}\n\n`);
+    else if (parsed?.json) out.push(`data: ${JSON.stringify(sanitizeCompletionJson(parsed.json, opts))}\n\n`);
   }
   return out.join('');
 }
@@ -179,7 +189,8 @@ export async function drainUpstreamBody(body) {
   } catch {}
 }
 
-async function writeSanitizedSse(upstream, response, { keepReasoning, signal, callerSignal, inactivityTimeoutMs = 0 } = {}) {
+async function writeSanitizedSse(upstream, response, { keepReasoning, requestBody, signal, callerSignal, inactivityTimeoutMs = 0 } = {}) {
+  const opts = { keepReasoning, requestBody };
   const headers = downstreamHeaders(upstream);
   delete headers['content-length'];
   let content = '';
@@ -199,18 +210,18 @@ async function writeSanitizedSse(upstream, response, { keepReasoning, signal, ca
     }
     if (clientGone(response, signal)) return content;
     const sseHeaders = { ...headers, 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache' };
-    response.writeHead(upstream.status, sseHeaders);
+    if (!response.headersSent) response.writeHead(upstream.status, sseHeaders);
     const trimmed = raw.trim();
     if (trimmed.startsWith('{')) {
       try {
-        const wrapped = sseFromJsonCompletion(JSON.parse(trimmed), keepReasoning);
+        const wrapped = sseFromJsonCompletion(JSON.parse(trimmed), opts);
         content = wrapped.text;
         if (typeof response.write === 'function') response.write(wrapped.sse);
       } catch {
         if (typeof response.write === 'function') response.write(raw);
       }
     } else if (trimmed) {
-      const text = sanitizeSseText(raw, { keepReasoning });
+      const text = sanitizeSseText(raw, opts);
       if (typeof response.write === 'function') response.write(text || raw);
     }
     if (typeof response.end === 'function' && !response.writableEnded && !response.destroyed) response.end();
@@ -220,11 +231,11 @@ async function writeSanitizedSse(upstream, response, { keepReasoning, signal, ca
     await drainUpstreamBody(upstream.body);
     return content;
   }
-  response.writeHead(upstream.status, { ...headers, 'content-type': headers['content-type'] || 'text/event-stream; charset=utf-8' });
+  if (!response.headersSent) response.writeHead(upstream.status, { ...headers, 'content-type': headers['content-type'] || 'text/event-stream; charset=utf-8' });
   const takeText = async () => {
     if (typeof upstream.text !== 'function') return;
     const raw = await upstream.text();
-    const text = sanitizeSseText(raw, { keepReasoning });
+    const text = sanitizeSseText(raw, opts);
     if (typeof response.write === 'function') response.write(text);
     else response.end(text);
     const src = String(raw ?? '').replace(/\r\n/g, '\n');
@@ -232,12 +243,12 @@ async function writeSanitizedSse(upstream, response, { keepReasoning, signal, ca
     while (true) {
       const sep = src.indexOf('\n\n', pos);
       if (sep === -1) break;
-      const framed = frameFromParsed(parseSseBlock(src.slice(pos, sep)), keepReasoning);
+      const framed = frameFromParsed(parseSseBlock(src.slice(pos, sep)), opts);
       pos = sep + 2;
       if (framed) content += framed.delta;
     }
     if (src.slice(pos).trim()) {
-      const framed = frameFromParsed(parseSseBlock(src.slice(pos)), keepReasoning);
+      const framed = frameFromParsed(parseSseBlock(src.slice(pos)), opts);
       if (framed) content += framed.delta;
     }
   };
@@ -267,7 +278,7 @@ async function writeSanitizedSse(upstream, response, { keepReasoning, signal, ca
       while (true) {
         const sep = carry.indexOf('\n\n', pos);
         if (sep === -1) break;
-        const framed = frameFromParsed(parseSseBlock(carry.slice(pos, sep)), keepReasoning);
+        const framed = frameFromParsed(parseSseBlock(carry.slice(pos, sep)), opts);
         pos = sep + 2;
         if (framed) {
           content += framed.delta;
@@ -282,18 +293,18 @@ async function writeSanitizedSse(upstream, response, { keepReasoning, signal, ca
         const trimmed = carry.trim();
         if (trimmed.startsWith('{') && !trimmed.startsWith('data:')) {
           try {
-            const wrapped = sseFromJsonCompletion(JSON.parse(trimmed), keepReasoning);
+            const wrapped = sseFromJsonCompletion(JSON.parse(trimmed), opts);
             content += wrapped.text;
             if (typeof response.write === 'function') response.write(wrapped.sse);
           } catch {
-            const framed = frameFromParsed(parseSseBlock(carry), keepReasoning);
+            const framed = frameFromParsed(parseSseBlock(carry), opts);
             if (framed) {
               content += framed.delta;
               writeSseFrame(response, framed);
             }
           }
         } else {
-          const framed = frameFromParsed(parseSseBlock(carry), keepReasoning);
+          const framed = frameFromParsed(parseSseBlock(carry), opts);
           if (framed) {
             content += framed.delta;
             writeSseFrame(response, framed);
@@ -361,7 +372,7 @@ export async function proxyJson({ request, response, body, target, config, signa
         try {
           if (beforeClientWrite) await beforeClientWrite();
           // Naive streaming: driven by active socket reader & client cancellation, no arbitrary cutoff
-          content = await writeSanitizedSse(upstream, response, { keepReasoning, signal }) ?? '';
+          content = await writeSanitizedSse(upstream, response, { keepReasoning, requestBody: body, signal }) ?? '';
         } catch (streamError) {
           if (signal?.aborted || response.destroyed || response.writableEnded) {
             return { status: upstream.status, content: content ?? '', aborted: true };
@@ -386,8 +397,9 @@ export async function proxyJson({ request, response, body, target, config, signa
         delete headers['content-length'];
         let data;
         let content = '';
+        let sanitized = null;
         try {
-          const sanitized = sanitizeCompletionJson(JSON.parse(raw), { keepReasoning });
+          sanitized = sanitizeCompletionJson(JSON.parse(raw), { keepReasoning, requestBody: body });
           content = assistantContentFromJson(sanitized);
           data = Buffer.from(JSON.stringify(sanitized));
         } catch {
@@ -396,6 +408,14 @@ export async function proxyJson({ request, response, body, target, config, signa
         if (response.writableEnded || response.destroyed || signal?.aborted) return { status: upstream.status, content };
         if (beforeClientWrite) await beforeClientWrite();
         if (response.writableEnded || response.destroyed || signal?.aborted) return { status: upstream.status, content };
+        if (response.headersSent) {
+          const sse = sanitized
+            ? sseFromJsonCompletion(sanitized, { keepReasoning, requestBody: body }).sse
+            : `data: ${JSON.stringify({ choices: [{ delta: { content: raw } }] })}\n\ndata: [DONE]\n\n`;
+          response.write(sse);
+          if (!response.writableEnded) response.end();
+          return { status: upstream.status, content };
+        }
         response.writeHead(upstream.status, { ...headers, 'content-length': data.length });
         response.end(data);
         return { status: upstream.status, content };
@@ -405,7 +425,7 @@ export async function proxyJson({ request, response, body, target, config, signa
         return { status: upstream.status, content: '' };
       }
       if (beforeClientWrite) await beforeClientWrite();
-      response.writeHead(upstream.status, downstreamHeaders(upstream));
+      if (!response.headersSent) response.writeHead(upstream.status, downstreamHeaders(upstream));
       if (!upstream.body) {
         response.end();
         return { status: upstream.status, content: '' };

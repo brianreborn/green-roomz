@@ -21,6 +21,9 @@ const REPO = path.resolve(fileURLToPath(new URL('../', import.meta.url)));
 
 const LLAMA_CANDIDATES = [
   process.env.GRZ_E2E_LLAMA,
+  process.env.GRZ_LLAMA,
+  path.join(REPO, 'runtime', 'llama-server'),
+  path.join(REPO, 'runtime', 'llama-server.exe'),
   'C:/LocalAI/llama-b10665-bin-win-vulkan-x64/llama-server.exe',
   '/usr/local/bin/llama-server',
   '/usr/bin/llama-server',
@@ -28,6 +31,7 @@ const LLAMA_CANDIDATES = [
 
 const MODEL_CANDIDATES = [
   process.env.GRZ_E2E_MODEL,
+  path.join(REPO, 'models', 'Qwen2.5-0.5B-Instruct-Q4_K_M.gguf'),
   'C:/LocalAI/Qwenstral-Small-3.1-0.5B.Q4_K_M.gguf',
   'C:/LocalAI/qwen3-embedding-0.6b-q8_0.gguf',
 ].filter(Boolean);
@@ -46,7 +50,7 @@ async function waitForHttp(url, { timeoutMs = 120_000, label = url } = {}) {
   let lastErr;
   while (Date.now() < deadline) {
     try {
-      const res = await fetch(url, { signal: AbortSignal.timeout(3000) });
+      const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
       if (res.status >= 200 && res.status < 500) return;
     } catch (err) { lastErr = err; }
     await delay(500);
@@ -55,7 +59,7 @@ async function waitForHttp(url, { timeoutMs = 120_000, label = url } = {}) {
 }
 
 /** Minimal 2-agent manifest: nexus + one text specialist, both on the same tiny model. */
-export function writeTestManifest({ dir, nexusPort, specialistPort, gatewayPort, model }) {
+export function writeTestManifest({ dir, nexusPort, specialistPort, gatewayPort, model, llama }) {
   const manifest = {
     schema_version: 1,
     manifest_version: 'e2e',
@@ -70,16 +74,32 @@ export function writeTestManifest({ dir, nexusPort, specialistPort, gatewayPort,
       retry_max_ms: 1000,
       retry_deadline_ms: 30_000,
       upstream_timeout_ms: 45_000,
+      request_timeout_ms: 120_000,
+      nexus_consult_timeout_ms: 30_000,
+      handoff_peek_timeout_ms: 20_000,
+      handoff_peek_chars: 48,
+      agent_chat_timeout_ms: 45_000,
+      agent_max_tokens: 96,
       session_ttl_ms: 600_000,
       session_limit: 64,
+      memory_transcript_chars: 2048,
+      memory_facts_limit: 8,
       cors_origins: ['http://127.0.0.1'],
+      timing_privacy: 'off',
+      max_warm_specialists: 2,
+      idle_evict_ms: 300_000,
+      health_aliases: ['tool-router-agent', 'general-text-speculator'],
+      admit_when_tight: 'page',
+      apply_store_winners: false,
     },
     runtimes: {
       llama_server: {
         kind: 'llama-server',
-        command: process.env.GRZ_E2E_LLAMA || 'C:/LocalAI/llama-b10665-bin-win-vulkan-x64/llama-server.exe',
+        command: llama || process.env.GRZ_E2E_LLAMA || process.env.GRZ_LLAMA || path.join(REPO, 'runtime', 'llama-server'),
         base_args: ['--host', '127.0.0.1', '--parallel', '1'],
-        env: {},
+        env: {
+          LD_LIBRARY_PATH: [path.dirname(llama || process.env.GRZ_E2E_LLAMA || process.env.GRZ_LLAMA || path.join(REPO, 'runtime', 'llama-server')), process.env.LD_LIBRARY_PATH].filter(Boolean).join(path.delimiter),
+        },
       },
       whisper: { kind: 'whisper-server', command: '/nonexistent', base_args: [], env: {} },
       piper: { kind: 'piper', command: '/nonexistent', base_args: [], env: {} },
@@ -119,7 +139,91 @@ export function writeTestManifest({ dir, nexusPort, specialistPort, gatewayPort,
         runtime: 'logical',
         native_capabilities: ['text', 'json'],
         gateway_accepted_capabilities: ['text'],
-        routing_behavior: 'mailbox',
+      },
+      {
+        alias: 'vision-layout-agent',
+        description: 'e2e stub',
+        runtime: 'llama_server',
+        port: specialistPort + 11,
+        native_capabilities: ['text', 'image'],
+        gateway_accepted_capabilities: ['text', 'image', 'file'],
+        model: '/nonexistent-vision.gguf',
+        required_artifacts: ['model'],
+        profiles: [{ id: 'cpu', args: ['--device', 'none', '--n-gpu-layers', '0'] }],
+      },
+      {
+        alias: 'audio-transcription-agent',
+        description: 'e2e stub',
+        runtime: 'whisper',
+        port: specialistPort + 12,
+        native_capabilities: ['audio'],
+        gateway_accepted_capabilities: ['audio', 'file'],
+        model: '/nonexistent-whisper.bin',
+        required_artifacts: ['model'],
+      },
+      {
+        alias: 'qwenstral-code-speculator',
+        description: 'e2e stub',
+        runtime: 'llama_server',
+        port: specialistPort + 13,
+        native_capabilities: ['text', 'json', 'code'],
+        gateway_accepted_capabilities: ['text', 'file'],
+        model: '/nonexistent-code.gguf',
+        required_artifacts: ['model'],
+        profiles: [{ id: 'cpu', args: ['--device', 'none', '--n-gpu-layers', '0'] }],
+      },
+      {
+        alias: 'semantic-embedding-agent',
+        description: 'e2e stub',
+        runtime: 'llama_server',
+        port: specialistPort + 15,
+        native_capabilities: ['text', 'embedding'],
+        gateway_accepted_capabilities: ['text', 'file'],
+        model: '/nonexistent-embed.gguf',
+        required_artifacts: ['model'],
+        profiles: [{ id: 'cpu', args: ['--device', 'none', '--n-gpu-layers', '0'] }],
+      },
+      {
+        alias: 'retrieval-rerank-agent',
+        description: 'e2e stub',
+        runtime: 'llama_server',
+        port: specialistPort + 16,
+        native_capabilities: ['text', 'reranking'],
+        gateway_accepted_capabilities: ['text'],
+        model: '/nonexistent-rerank.gguf',
+        required_artifacts: ['model'],
+        profiles: [{ id: 'cpu', args: ['--device', 'none', '--n-gpu-layers', '0'] }],
+      },
+      {
+        alias: 'safety-policy-agent',
+        description: 'e2e stub',
+        runtime: 'llama_server',
+        port: specialistPort + 18,
+        native_capabilities: ['text', 'classification', 'json'],
+        gateway_accepted_capabilities: ['text'],
+        model: '/nonexistent-guard.gguf',
+        required_artifacts: ['model'],
+        profiles: [{ id: 'cpu', args: ['--device', 'none', '--n-gpu-layers', '0'] }],
+      },
+      {
+        alias: 'speech-synthesis-agent',
+        description: 'e2e stub',
+        runtime: 'piper',
+        port: specialistPort + 19,
+        native_capabilities: ['text', 'audio-output'],
+        gateway_accepted_capabilities: ['text'],
+        model: '/nonexistent-voice.onnx',
+        required_artifacts: ['model'],
+      },
+      {
+        alias: 'image-generation-agent',
+        description: 'e2e stub',
+        runtime: 'stable_diffusion',
+        port: specialistPort + 20,
+        native_capabilities: ['text', 'image-output'],
+        gateway_accepted_capabilities: ['text', 'image'],
+        model: '/nonexistent-sd.gguf',
+        required_artifacts: ['model'],
       },
     ],
   };
@@ -161,7 +265,10 @@ export async function startGateway({ manifestPath, port }) {
     cwd: REPO,
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
-    env: { ...process.env },
+    env: {
+      ...process.env,
+      LD_LIBRARY_PATH: [path.join(REPO, 'runtime'), process.env.LD_LIBRARY_PATH].filter(Boolean).join(path.delimiter),
+    },
   }), `gateway:${port}`);
   let log = '';
   child.stdout.on('data', (d) => { log += d; });

@@ -14,6 +14,7 @@ import { GreenRoomzError, UnavailableError, UpstreamProtocolError, UpstreamTimeo
 import { deliverPeek, peekSpecialist } from './handoff.mjs';
 import { consultNexus, preferResidentChat } from './nexus.mjs';
 import { planRoute } from './logical-router.mjs';
+import { isIntrospectionProbe, introspectionFacts } from './introspect.mjs';
 import { proxyJson } from './proxy.mjs';
 import { aliasCanAdmit, audioDataFromBody, detectModalities, hardRuleRoute, isGenericChatRequest, isRoutableAlias, latestUserMessageText, NATIVE_CHAT, parseSlashCommand, stripSlashCommand } from './routing.mjs';
 import { contentChars, contextCharBudget, formatMemoryHeader, injectWorkingSet, memoryBounds } from './session-memory.mjs';
@@ -26,6 +27,7 @@ const EXPLICIT_ROUTES = new Set([
   '/health',
   '/v1/health',
   '/v1/models',
+  '/v1/weights',
   '/props',
   '/metrics',
   '/v1/monitor/recent',
@@ -66,7 +68,20 @@ function publicEvent(event) {
   return { ...event, ticket: hashTicket(event.ticket) };
 }
 
-const GET_ONLY = new Set(['/', '/unicorn', '/health', '/v1/health', '/v1/models', '/props', '/metrics', '/v1/monitor/recent']);
+const GET_ONLY = new Set(['/', '/unicorn', '/health', '/v1/health', '/v1/models', '/v1/weights', '/props', '/metrics', '/v1/monitor/recent']);
+
+function modelsRoute(pathname) {
+  if (pathname === '/v1/models') return { list: true };
+  if (pathname === '/v1/weights') return { weights: true, id: null };
+  if (!pathname.startsWith('/v1/models/')) return null;
+  const rest = pathname.slice('/v1/models/'.length);
+  if (!rest) return { list: true };
+  if (rest.endsWith('/weights')) {
+    const id = decodeURIComponent(rest.slice(0, -'/weights'.length).replace(/\/$/, ''));
+    return { id, weights: true };
+  }
+  return { id: decodeURIComponent(rest) };
+}
 
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1', 'localhost']);
 const COUNCIL_JUDGES = new Set(['field-vote', 'judge-model', 'similarity']);
@@ -213,15 +228,22 @@ function injectNexusChatPrompt(body) {
 
 export function prepareInferenceBody(body, agent, extras = {}) {
   const stripped = stripSlashCommand(body);
+  // dogfood asks for a diff. The stock kernel tells the model to hand off, which
+  // swallows that diff. Keep the caller's own system message.
+  const dogfood = stripped.dogfood === true;
+  const base = { ...stripped, model: agent.alias };
+  delete base.dogfood;
   // Nexus routing kernel (tool-router.md) is only for consultNexus via withNexusPolicy.
   // User-facing resident completions get a tiny chat prompt so the 0.5B does not dump baked identity.
-  const payload = agent.alias === NEXUS_ALIAS
-    ? injectNexusChatPrompt({ ...stripped, model: agent.alias })
-    : injectSystemPolicy({ ...stripped, model: agent.alias }, agent);
+  const payload = dogfood
+    ? base
+    : (agent.alias === NEXUS_ALIAS
+      ? injectNexusChatPrompt(base)
+      : injectSystemPolicy(base, agent));
   delete payload.route_plan_only;
   delete payload.lock_alias;
   delete payload.session_id;
-  if (agent.alias !== NEXUS_ALIAS) {
+  if (!dogfood && agent.alias !== NEXUS_ALIAS) {
     const systemChars = contentChars(payload.messages?.[0]);
     const maxChars = contextCharBudget(agent, { maxTokens: payload.max_tokens, systemChars });
     payload.messages = injectWorkingSet(payload.messages ?? [], extras.session, { maxChars });
@@ -384,6 +406,7 @@ export class Gateway {
 <ul>
 <li><a href="/health"><code>GET /health</code></a></li>
 <li><a href="/v1/models"><code>GET /v1/models</code></a></li>
+<li><a href="/v1/weights"><code>GET /v1/weights</code></a></li>
 <li><code>POST /v1/chat/completions</code></li>
 </ul>
 <p>Other clients: curl, any OpenAI SDK at this origin.</p>
@@ -530,7 +553,8 @@ export class Gateway {
       }
       const identity = identityFrom(request, this.apiKey);
       if (!identity) return jsonResponse(response, 401, { error: { message: 'Unauthorized', type: 'auth_error' } }, cors);
-      if (!EXPLICIT_ROUTES.has(url.pathname) && !url.pathname.endsWith('/route')) {
+      const modelRoute = modelsRoute(url.pathname);
+      if (!EXPLICIT_ROUTES.has(url.pathname) && !url.pathname.endsWith('/route') && !modelRoute) {
         return jsonResponse(response, 404, { error: { message: 'Not found', type: 'not_found' } }, cors);
       }
       const headJson = (status, body) => {
@@ -540,7 +564,7 @@ export class Gateway {
         }
         return jsonResponse(response, status, body, cors);
       };
-      if (GET_ONLY.has(url.pathname)) {
+      if (GET_ONLY.has(url.pathname) || modelRoute) {
         if (method !== 'GET' && method !== 'HEAD') {
           return jsonResponse(response, 405, { error: { message: 'Method not allowed' } }, { allow: 'GET, HEAD, OPTIONS', ...cors });
         }
@@ -561,8 +585,18 @@ export class Gateway {
             ipc: { data: this.ipc.recent().map(publicEvent), stats: this.ipc.stats() },
           });
         }
-        if (url.pathname === '/v1/models') {
+        if (url.pathname === '/v1/models' || modelRoute?.list) {
           return headJson(200, { object: 'list', data: this.registry.listModels() });
+        }
+        if (url.pathname === '/v1/weights' || modelRoute?.weights) {
+          return this.serveWeights(headJson, modelRoute?.id || url.searchParams.get('model'), url.searchParams);
+        }
+        if (modelRoute?.id) {
+          const row = this.registry.getModel(modelRoute.id);
+          if (!row) {
+            return headJson(404, { error: { message: `Unknown agent alias: ${modelRoute.id}`, type: 'not_found' } });
+          }
+          return headJson(200, row);
         }
         if (url.pathname === '/props') {
           return headJson(200, {
@@ -627,6 +661,73 @@ export class Gateway {
         },
       }, { ...cors, ...retryAfter, ...extraHeaders });
     }
+  }
+
+  serveWeights(headJson, requestedAlias, searchParams) {
+    const alias = String(requestedAlias || NEXUS_ALIAS).trim() || NEXUS_ALIAS;
+    const row = this.registry.getModel(alias);
+    if (!row) {
+      return headJson(404, { error: { message: `Unknown agent alias: ${alias}`, type: 'not_found' } });
+    }
+    const params = searchParams ?? new URLSearchParams();
+    const maxRaw = Number(params.get('max_params') || 4096);
+    const disclosed = this.registry.discloseWeights(alias, {
+      hash: true,
+      values: params.get('include') === 'values',
+      maxParams: Number.isFinite(maxRaw) && maxRaw > 0 ? maxRaw : 4096,
+      tensorName: params.get('tensor') || null,
+    });
+    if (!disclosed) {
+      return headJson(404, { error: { message: `Unknown agent alias: ${alias}`, type: 'not_found' } });
+    }
+    if (disclosed.missing) {
+      return headJson(404, {
+        error: {
+          message: `No checkpoint on disk for ${alias}`,
+          type: 'not_found',
+          checkpoint_path: disclosed.checkpoint_path,
+        },
+      });
+    }
+    if (disclosed.tooLarge) {
+      return headJson(413, {
+        error: {
+          message: `Tensor ${disclosed.tensor} exceeds max_params (${disclosed.max_params}). Read checkpoint_path instead of inlining it.`,
+          type: 'payload_too_large',
+          checkpoint_path: disclosed.checkpoint_path,
+          tensor: disclosed.tensor,
+          max_params: disclosed.max_params,
+        },
+      });
+    }
+    return headJson(200, disclosed);
+  }
+
+  serveIntrospection(response, body, identity, session, cors) {
+    const requested = typeof body.model === 'string' ? body.model.trim() : '';
+    const alias = requested && this.registry.agents.has(requested) ? requested : NEXUS_ALIAS;
+    if (!this.registry.agents.has(alias)) {
+      return jsonResponse(response, 404, { error: { message: `Unknown agent alias: ${alias}`, type: 'not_found' } }, cors);
+    }
+    const issuedSession = session?.id ?? this.sessions.create({
+      identity,
+      agentAlias: alias,
+      modality: ['text'],
+    });
+    const facts = introspectionFacts(this.registry.getModel(alias));
+    const routed = { requestedAlias: body.model ?? null, effectiveAlias: alias, reason: 'introspection' };
+    return jsonResponse(response, 200, {
+      id: `grz-introspect-${issuedSession}`,
+      object: 'chat.completion',
+      created: Math.floor(Date.now() / 1000),
+      model: alias,
+      choices: [{
+        index: 0,
+        message: { role: 'assistant', content: JSON.stringify(facts) },
+        finish_reason: 'stop',
+      }],
+      usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+    }, this.routeHeaders(issuedSession, routed, cors, { hops: alias }));
   }
 
   health() {
@@ -718,6 +819,13 @@ export class Gateway {
     }
     const agent = this.registry.get(alias);
     hops.push(alias);
+    const headers = this.routeHeaders(
+      issuedSession,
+      { requestedAlias: body.model ?? null, effectiveAlias: alias, reason },
+      cors,
+      { hops: hops.join(',') },
+    );
+    if (body?.stream === true) this.openClientStream(response, headers);
     await this.processes.ensure(agent, { signal: request.abortSignal });
     const unpin = this.processes.pin(alias);
     try {
@@ -732,13 +840,7 @@ export class Gateway {
       const path = '/v1/chat/completions';
       const target = `http://127.0.0.1:${agent.port}${path}`;
       this.sessions.setAgentAlias(issuedSession, alias);
-      const headers = this.routeHeaders(
-        issuedSession,
-        { requestedAlias: body.model ?? null, effectiveAlias: alias, reason },
-        cors,
-        { hops: hops.join(',') },
-      );
-      for (const [key, value] of Object.entries(headers)) response.setHeader(key, value);
+      this.applyRouteHeaders(response, headers);
       const proxied = await proxyJson({
         request,
         response,
@@ -1022,6 +1124,22 @@ export class Gateway {
     } catch { /* best effort */ }
   }
 
+  applyRouteHeaders(response, headers) {
+    if (!headers || response.headersSent) return;
+    for (const [key, value] of Object.entries(headers)) response.setHeader(key, value);
+  }
+
+  /** SSE headers before a cold start. Undici drops a stream that sends no headers for 300s. */
+  openClientStream(response, headers) {
+    if (response.headersSent) return;
+    this.applyRouteHeaders(response, headers);
+    response.writeHead(200, {
+      'content-type': 'text/event-stream; charset=utf-8',
+      'cache-control': 'no-cache',
+    });
+    if (typeof response.write === 'function') response.write(': open\n\n');
+  }
+
   routeHeaders(issuedSession, routed, cors, extra = {}) {
     return {
       'x-session-id': headerSafe(issuedSession),
@@ -1050,6 +1168,10 @@ export class Gateway {
 
     if (body.model === MONITOR_ALIAS) {
       return this.handleMonitorSnapshot(request, response, body, identity, session, cors);
+    }
+
+    if (isIntrospectionProbe(latestUserMessageText(body))) {
+      return this.serveIntrospection(response, body, identity, session, cors);
     }
 
     let councilSpec = parseCouncilRequest(body, this.registry);
@@ -1359,12 +1481,21 @@ export class Gateway {
         hops.push(alias);
         const agent = this.registry.get(alias);
         let record;
+        if (body?.stream === true && slashOrLock) this.openClientStream(response, hopHeaders(alias, reason));
         try {
           record = await this.processes.ensure(agent, { signal: request.abortSignal });
         } catch (startError) {
           if (request.abortSignal?.aborted) throw startError;
           notes.push(stripControls(`${alias} failed to start: ${startError?.message ?? startError}`));
           this.observeHop('agent_unavailable', alias, { ticket: issuedSession, payload: { reason: 'start_failed', hops: hops.slice() } });
+          if (response.headersSent) {
+            try {
+              response.write(`data: ${JSON.stringify({ error: { message: `${alias} failed to start`, type: 'agent_unavailable' } })}\n\n`);
+              response.write('data: [DONE]\n\n');
+              response.end();
+            } catch {}
+            return;
+          }
           continue;   // let the loop end -> media guard / text fallback below
         }
         if (record?.logical) {
@@ -1382,6 +1513,31 @@ export class Gateway {
         const payload = this.prepareTurn(body, agent, issuedSession);
         const path = String((pathname ?? request.url.split('?')[0])).replace(/\/route$/, '') || '/v1/chat/completions';
         const target = `http://127.0.0.1:${agent.port}${path}`;
+        // A slash or lock_alias already chose the model. Peeking for HANDOFF
+        // would throw that choice away and hold the policy until the peek ends.
+        if (slashOrLock) {
+          const unpinLocked = this.processes.pin(alias);
+          try {
+            this.sessions.setAgentAlias(issuedSession, alias);
+            const headers = hopHeaders(alias, reason);
+            this.applyRouteHeaders(response, headers);
+            const proxied = await proxyJson({
+              request,
+              response,
+              body: payload,
+              target,
+              config: this.manifest.gateway,
+              signal: request.abortSignal,
+              fetchImpl: this.fetchImpl,
+              beforeClientWrite: this.beforeClientWrite(startedAt),
+            });
+            const okHop = this.recordProxy(issuedSession, proxied);
+            this.observeHop(okHop ? 'success' : 'agent_unavailable', alias, { ticket: issuedSession, payload: { reason, hops: hops.slice() } });
+            return;
+          } finally {
+            unpinLocked();
+          }
+        }
         if (reason === 'chat_default') {
           if (preferResident) {
             return await this.completeOnResident(request, response, body, issuedSession, cors, hops, 'chat_default_resident');
@@ -1390,7 +1546,7 @@ export class Gateway {
           try {
             this.sessions.setAgentAlias(issuedSession, alias);
             const headers = hopHeaders(alias, reason);
-            for (const [key, value] of Object.entries(headers)) response.setHeader(key, value);
+            this.applyRouteHeaders(response, headers);
             const proxied = await proxyJson({
               request,
               response,
@@ -1427,7 +1583,7 @@ export class Gateway {
               // resident_fallback ramble on the router.
               this.sessions.setAgentAlias(issuedSession, alias);
               const headers = hopHeaders(alias, reason);
-              for (const [key, value] of Object.entries(headers)) response.setHeader(key, value);
+              this.applyRouteHeaders(response, headers);
               if (peek.content || peek.events?.length) {
                 this.noteAssistant(issuedSession, peek.content);
                 await deliverPeek({ peek, request, response, body: payload, headers, beforeClientWrite: this.beforeClientWrite(startedAt) });
@@ -1474,7 +1630,7 @@ export class Gateway {
           this.sessions.setAgentAlias(issuedSession, alias);
           this.noteAssistant(issuedSession, peek.content);
           const headers = hopHeaders(alias, reason);
-          for (const [key, value] of Object.entries(headers)) response.setHeader(key, value);
+          this.applyRouteHeaders(response, headers);
           await deliverPeek({ peek, request, response, body: payload, headers, beforeClientWrite: this.beforeClientWrite(startedAt) });
           this.observeHop('success', alias, { ticket: issuedSession, payload: { reason, hops: hops.slice() } });
           return;
@@ -1509,7 +1665,7 @@ export class Gateway {
             const path = String((pathname ?? request.url.split('?')[0])).replace(/\/route$/, '') || '/v1/chat/completions';
             this.sessions.setAgentAlias(issuedSession, FALLBACK_ALIAS);
             const headers = hopHeaders(FALLBACK_ALIAS, 'text_fallback');
-            for (const [key, value] of Object.entries(headers)) response.setHeader(key, value);
+            this.applyRouteHeaders(response, headers);
             const proxied = await proxyJson({ request, response, body: payload, target: `http://127.0.0.1:${agent.port}${path}`, config: this.manifest.gateway, signal: request.abortSignal, fetchImpl: this.fetchImpl, beforeClientWrite: this.beforeClientWrite(startedAt) });
             const okHop = this.recordProxy(issuedSession, proxied);
             this.observeHop(okHop ? 'success' : 'agent_unavailable', FALLBACK_ALIAS, { ticket: issuedSession, payload: { reason: 'text_fallback', hops: hops.slice() } });

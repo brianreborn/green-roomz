@@ -31,6 +31,7 @@ describe('green-roomz end-to-end', { skip: pre.ok ? false : `e2e prereqs not met
       specialistPort: freePortHint(19000),
       gatewayPort,
       model: pre.model,
+      llama: pre.llama,
     });
     gw = await startGateway({ manifestPath, port: gatewayPort });
     base = gw.base;
@@ -67,6 +68,54 @@ describe('green-roomz end-to-end', { skip: pre.ok ? false : `e2e prereqs not met
     const ids = (await res.json()).data.map((m) => m.id);
     assert.ok(ids.includes('tool-router-agent'));
     assert.ok(ids.includes('general-text-speculator'));
+  });
+
+  it('GET /v1/models/:id includes GGUF identity from the checkpoint on disk', async () => {
+    const res = await fetch(base + '/v1/models/general-text-speculator');
+    assert.equal(res.status, 200);
+    const row = await res.json();
+    assert.equal(row.id, 'general-text-speculator');
+    assert.match(String(row.checkpoint_path || row.root || ''), /\.gguf$/i);
+    assert.equal(row.architecture, 'qwen2');
+    assert.equal(typeof row.num_layers, 'number');
+    assert.ok(row.num_layers > 0);
+  });
+
+  it('GET /v1/weights and /v1/models/:id/weights disclose the tensor index', async () => {
+    const listed = await fetch(base + '/v1/weights?model=general-text-speculator');
+    assert.equal(listed.status, 200);
+    const body = await listed.json();
+    assert.equal(body.object, 'weights');
+    assert.equal(body.format, 'gguf');
+    assert.match(String(body.checkpoint_path || ''), /\.gguf$/i);
+    const names = Object.keys(body.tensors || {});
+    assert.ok(names.length > 0, 'GGUF tensor names');
+    assert.ok(Array.isArray(body.tensors[names[0]].shape));
+    const byId = await fetch(base + '/v1/models/general-text-speculator/weights');
+    assert.equal(byId.status, 200);
+    assert.equal((await byId.json()).model, 'general-text-speculator');
+    const missing = await fetch(base + '/v1/models/not-an-alias/weights');
+    assert.equal(missing.status, 404);
+  });
+
+  it('POST /v1/chat/completions accepts logprobs without failing the turn', async () => {
+    const res = await post('/v1/chat/completions', {
+      model: 'general-text-speculator',
+      lock_alias: true,
+      messages: [{ role: 'user', content: 'Reply with exactly the word: pong' }],
+      max_tokens: 8,
+      logprobs: true,
+      top_logprobs: 5,
+    });
+    assert.equal(res.status, 200);
+    const json = await res.json();
+    const content = json.choices?.[0]?.message?.content;
+    assert.equal(typeof content, 'string');
+    assert.ok(content.length > 0);
+    const lp = json.choices?.[0]?.logprobs;
+    if (lp != null) {
+      assert.ok(lp.content || lp.token_logprobs || lp.top_logprobs);
+    }
   });
 
   it('POST /v1/chat/completions returns a real, sanitized completion', async () => {
@@ -131,12 +180,20 @@ describe('green-roomz end-to-end', { skip: pre.ok ? false : `e2e prereqs not met
 
   it('an oversized body is rejected fast without hanging', async () => {
     const started = Date.now();
-    const res = await fetch(base + '/v1/chat/completions', {
-      method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ messages: [{ role: 'user', content: 'x'.repeat(2 * 1024 * 1024) }] }),
-    });
-    assert.equal(res.status, 400);
+    let status = null;
+    try {
+      const res = await fetch(base + '/v1/chat/completions', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ messages: [{ role: 'user', content: 'x'.repeat(2 * 1024 * 1024) }] }),
+      });
+      status = res.status;
+    } catch {
+      // Node undici often surfaces the gateway's body-limit destroy as a TypeError.
+      status = 'connection-dropped';
+    }
+    assert.ok(status === 400 || status === 'connection-dropped', `got ${status}`);
     assert.ok(Date.now() - started < 15_000);
+    assert.equal((await fetch(base + '/health')).status, 200, 'gateway survived the oversized body');
   });
 
   it('a client that hangs up mid-request does not crash the gateway', async () => {

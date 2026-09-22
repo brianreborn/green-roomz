@@ -23,7 +23,7 @@ export const DEFAULT_MANIFEST = new URL('../config/agents.windows-mvp.json', imp
 
 export const NEXUS_ALIAS = 'tool-router-agent';
 /** User-facing resident completions only. Not the routing kernel (tool-router.md). */
-export const NEXUS_CHAT_SYSTEM = 'Follow the user message exactly. Do not introduce yourself. Do not mention being an LLM. Answer only what was asked.';
+export const NEXUS_CHAT_SYSTEM = 'Follow the user message exactly. Do not introduce yourself. Do not mention being an LLM. Answer only what was asked. Facts about this running checkpoint (architecture, layers, context, quantization, path) may be reported; unknown numbers are null, not guesses.';
 /** High-level role of green-roomz / green-agentz agency: switch specialist registers. */
 export const AGENCY_ROLE = 'code-switching';
 export const MONITOR_ALIAS = 'security-monitor-agent';

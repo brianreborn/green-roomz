@@ -1,6 +1,6 @@
 {
   "name": "green-roomz",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "description": "Local multimodal agent gateway with host-qualified runtime profiles",
@@ -22,6 +22,7 @@
     "eval:e2e:live": "node ./scripts/agent-e2e-eval.mjs --live-only",
     "eval:e2e:full": "node ./scripts/agent-e2e-eval.mjs --full --no-fail-fast --offline-only",
     "agent": "node ./bin/green-roomz.mjs agent",
+    "dogfood": "node ./bin/green-roomz.mjs dogfood",
     "eval:parity": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/mvp-parity-battery.ps1",
     "media:install": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/install-windows-media.ps1",
     "media:install:admin": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/install-windows-media-admin.ps1"

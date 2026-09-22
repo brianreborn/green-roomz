@@ -25,6 +25,23 @@ docker run --rm -p 8080:8080 ghcr.io/brianreborn/green-roomz:try
 
 Bearer token: `try-local`. GitHub Actions builds the image on `main`.
 
+### OpenAI extras (1.0)
+
+Same origin as chat. Bearer matches `/v1/chat/completions`.
+
+| Method | Path | What you get |
+|---|---|---|
+| GET | `/v1/models` | aliases plus GGUF identity when the file exists (`checkpoint_path`, `architecture`, `num_layers`, …) |
+| GET | `/v1/models/{alias}` | one row |
+| GET | `/v1/weights?model={alias}` | tensor **index** (names, shapes, dtypes) — not weight values |
+| GET | `/v1/models/{alias}/weights` | same |
+| POST | `/v1/chat/completions` | `logprobs` / `top_logprobs` mapped to the OpenAI shape. Full logits only with `obliteratus.logits` or `logprobs: "full"` |
+| GET | `/v1/weights?include=values&tensor={name}` | inline a tiny tensor; larger than `max_params` is `413` |
+
+In-band self-report is a claim. `GET /v1/models` and `GET /v1/weights` are the source of truth. See [docs/introspection.md](docs/introspection.md).
+
+Unknown alias → `404`. Missing checkpoint → `404`. Default dump is metadata, not a 7B JSON body.
+
 **VM kit** (Debian qcow2 + seed ISO): release tag [`try-vm`](https://github.com/brianreborn/green-roomz/releases/tag/try-vm) — [packaging/vm/README.md](packaging/vm/README.md). ([#19](https://github.com/brianreborn/green-roomz/issues/19))
 
 ## Quick start on this host

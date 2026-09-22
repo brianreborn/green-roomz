@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import net from 'node:net';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { AgentRegistry } from '../src/registry.mjs';
@@ -10,7 +10,7 @@ import { ProcessManager } from '../src/process-manager.mjs';
 import { PolicyGate } from '../src/scheduler.mjs';
 import { SessionLedger } from '../src/sessions.mjs';
 import { Gateway, prepareInferenceBody } from '../src/gateway.mjs';
-import { sampleManifest } from './helpers.mjs';
+import { sampleManifest, writeTinyF32Gguf } from './helpers.mjs';
 import { NEXUS_CHAT_SYSTEM, REQUIRED_ALIASES } from '../src/constants.mjs';
 
 async function withServer(t, env = {}, extras = {}) {
@@ -18,6 +18,7 @@ async function withServer(t, env = {}, extras = {}) {
   Object.assign(process.env, env);
   const manifest = sampleManifest();
   if (extras.gateway) Object.assign(manifest.gateway, extras.gateway);
+  extras.patchAgents?.(manifest);
   const registry = await new AgentRegistry(manifest).inspect();
   for (const alias of extras.ready ?? []) registry.setStatus(alias, 'ready');
   const hostAdapter = extras.hostAdapter ?? { sampleResources() { return { freeMemoryBytes: 1 }; } };
@@ -125,6 +126,100 @@ test('health is degraded when artifacts are missing and models stay truthful', a
   assert.deepEqual(vision.native_capabilities, ['text', 'image']);
   const models = await request(server, { path: '/v1/models' });
   assert.equal(models.body.data.length, REQUIRED_ALIASES.length);
+});
+
+test('GET /v1/models/:id and /v1/weights disclose GGUF identity when the file exists', async (t) => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'grz-weights-'));
+  const gguf = path.join(dir, 'toy.gguf');
+  writeTinyF32Gguf(gguf, [1, 2]);
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const { server } = await withServer(t, {}, {
+    ready: ['general-text-speculator'],
+    patchAgents(manifest) {
+      manifest.agents.find((agent) => agent.alias === 'general-text-speculator').model = gguf;
+    },
+  });
+  const one = await request(server, { path: '/v1/models/general-text-speculator' });
+  assert.equal(one.status, 200);
+  assert.equal(one.body.architecture, 'qwen2');
+  assert.equal(one.body.num_layers, 2);
+  assert.equal(one.body.quantization, 'F32');
+  assert.equal(one.body.checkpoint_path, gguf);
+  const weights = await request(server, { path: '/v1/models/general-text-speculator/weights' });
+  assert.equal(weights.status, 200);
+  assert.equal(weights.body.format, 'gguf');
+  assert.equal(weights.body.model, 'general-text-speculator');
+  const missing = await request(server, { path: '/v1/models/nope/weights' });
+  assert.equal(missing.status, 404);
+  assert.equal(typeof weights.body.tensors.bias.sha256, 'string');
+  const inline = await request(server, { path: '/v1/models/general-text-speculator/weights?include=values&tensor=bias' });
+  assert.equal(inline.status, 200);
+  assert.equal(inline.body.tensors.bias.values.length, 2);
+  const huge = await request(server, { path: '/v1/models/general-text-speculator/weights?include=values&tensor=bias&max_params=1' });
+  assert.equal(huge.status, 413);
+  assert.equal(huge.body.error.type, 'payload_too_large');
+  assert.equal(huge.body.error.checkpoint_path, gguf);
+});
+
+const INTROSPECTION = 'Reply with ONLY a JSON object. Keys: architecture, num_layers, num_heads, hidden_size, context_length, total_params, quantization, checkpoint_path, notes.';
+
+test('introspection probe returns registry facts and does not call the model', async (t) => {
+  let fetched = false;
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'grz-intro-'));
+  const gguf = path.join(dir, 'toy.gguf');
+  writeTinyF32Gguf(gguf, [1, 2]);
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const { server } = await withServer(t, {}, {
+    ready: ['tool-router-agent'],
+    stubEnsure: true,
+    fetchImpl: async () => { fetched = true; return jsonFetch({ choices: [{ message: { content: 'no' } }] }); },
+    patchAgents(manifest) {
+      manifest.agents.find((agent) => agent.alias === 'tool-router-agent').model = gguf;
+    },
+  });
+  const result = await request(server, {
+    path: '/v1/chat/completions',
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: { model: 'tool-router-agent', messages: [{ role: 'user', content: INTROSPECTION }] },
+  });
+  assert.equal(result.status, 200);
+  assert.equal(fetched, false);
+  const facts = JSON.parse(result.body.choices[0].message.content);
+  assert.equal(facts.architecture, 'qwen2');
+  assert.equal(facts.num_layers, 2);
+  assert.equal(facts.checkpoint_path, gguf);
+  assert.match(facts.notes, /\/v1\/weights/);
+  assert.equal(facts.total_params, 2);
+});
+
+test('chat logprobs from a fake n_probs upstream are OpenAI-shaped', async (t) => {
+  const { server } = await withServer(t, {}, {
+    ready: ['general-text-speculator'],
+    stubEnsure: true,
+    fetchImpl: async () => jsonFetch({
+      choices: [{
+        message: { role: 'assistant', content: 'pong' },
+        logprobs: [{ content: 'pong', probs: [{ tok_str: 'pong', prob: 0.5 }, { tok_str: 'ping', prob: 0.25 }] }],
+      }],
+    }),
+  });
+  const result = await request(server, {
+    path: '/v1/chat/completions',
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: {
+      model: 'general-text-speculator',
+      lock_alias: true,
+      messages: [{ role: 'user', content: 'Reply with exactly the word: pong' }],
+      logprobs: true,
+      top_logprobs: 2,
+    },
+  });
+  assert.equal(result.status, 200);
+  const row = result.body.choices[0].logprobs.content[0];
+  assert.equal(row.token, 'pong');
+  assert.equal(row.top_logprobs.length, 2);
 });
 
 test('health is ok when health_aliases are ready even if vision is missing', async (t) => {
@@ -411,6 +506,88 @@ test('aborted streaming chat leaves the gateway listening', async (t) => {
   const health = await request(server, { path: '/health' });
   assert.equal(health.status, 200);
   resumeRead();
+});
+
+test('locked stream sends SSE bytes before the upstream fetch returns', async (t) => {
+  let releaseFetch;
+  const fetchGate = new Promise((resolve) => { releaseFetch = resolve; });
+  const { server } = await withServer(t, {}, {
+    ready: ['general-text-speculator'],
+    stubEnsure: true,
+    fetchImpl: async () => {
+      await fetchGate;
+      return jsonFetch({ choices: [{ message: { role: 'assistant', content: 'pong' } }] });
+    },
+  });
+  const { port } = server.address();
+  const early = await new Promise((resolve, reject) => {
+    const req = http.request({
+      hostname: '127.0.0.1', port, family: 4, method: 'POST', path: '/v1/chat/completions',
+      headers: { 'content-type': 'application/json' },
+    }, (res) => {
+      let buf = '';
+      res.on('data', (chunk) => {
+        buf += chunk.toString();
+        if (buf.includes(': open')) resolve({ status: res.statusCode, type: res.headers['content-type'], buf });
+      });
+      res.on('error', reject);
+    });
+    req.on('error', reject);
+    req.write(JSON.stringify({
+      model: 'general-text-speculator',
+      lock_alias: true,
+      stream: true,
+      max_tokens: 8,
+      messages: [{ role: 'user', content: 'Say hi' }],
+    }));
+    req.end();
+  });
+  assert.equal(early.status, 200);
+  assert.match(early.type, /text\/event-stream/);
+  assert.match(early.buf, /: open/);
+  releaseFetch();
+});
+
+test('dogfood skips the stock system prompt', () => {
+  const body = prepareInferenceBody({
+    dogfood: true,
+    max_tokens: 32,
+    messages: [
+      { role: 'system', content: 'DIFF ONLY' },
+      { role: 'user', content: 'add a comment' },
+    ],
+  }, { alias: 'general-text-speculator', system_policy: 'policies/general-text.md' });
+  assert.equal(body.dogfood, undefined);
+  assert.equal(body.messages[0].content, 'DIFF ONLY');
+  assert.equal(body.messages.some((message) => String(message.content).includes('general assistant')), false);
+});
+
+test('lock_alias returns a HANDOFF line instead of rerouting', async (t) => {
+  let calls = 0;
+  const { server } = await withServer(t, {}, {
+    ready: ['general-text-speculator', 'qwenstral-code-speculator'],
+    stubEnsure: true,
+    fetchImpl: async () => {
+      calls += 1;
+      return jsonFetch({
+        choices: [{ message: { role: 'assistant', content: 'HANDOFF {"reason":"not mine","suggest":"qwenstral-code-speculator"}' } }],
+      });
+    },
+  });
+  const result = await request(server, {
+    path: '/v1/chat/completions',
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: {
+      model: 'general-text-speculator',
+      lock_alias: true,
+      messages: [{ role: 'user', content: 'Say hi' }],
+    },
+  });
+  assert.equal(result.status, 200);
+  assert.equal(calls, 1);
+  assert.equal(result.headers['x-green-roomz-effective-alias'], 'general-text-speculator');
+  assert.match(result.body.choices[0].message.content, /^HANDOFF /);
 });
 
 test('general-text thinking is off by default including max_tokens 256; explicit true is preserved', () => {
