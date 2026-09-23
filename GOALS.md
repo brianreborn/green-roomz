@@ -25,8 +25,8 @@ Read this file first. `main` does not have this work. The branch is `disclosure-
 1. On a fast machine, fresh clone, `disclosure-acceptance`, run `scripts/with-fleet.ps1` or `with-fleet.sh`, serve, and complete one dry-run `dogfood` that prints a unified diff. Record wall time, prompt tokens, and tokens/second.
 2. If that diff is a real edit to one existing file, apply it with `GRZ_DOGFOOD_APPLY=1` only after `node --test` on the tests that cover the touch would pass. If the model emits a new-file diff over an existing path, reject it and tighten the prompt or the parser. Do not clobber the file.
 3. Cut prefill on that machine: one thread is the Athlon profile (`cpu-1` in `config/agents.windows-mvp.json`). On a box with more cores, stop forcing `--threads 1` for the alias you dogfood. Measure before and after.
-4. When `GREEN_BRAINZ_ROOT` is set, one chat turn must impress through Brainz and the next turn must recall from that store, not from a pasted transcript. Roomz already loads Brainz only when the variable is set (`src/brainz.mjs`).
-5. Leave Note 9, Headroom, and a merge of PR 25 until the four goals above are done.
+4. [x] When `GREEN_BRAINZ_ROOT` is set, one chat turn must impress through Brainz and the next turn must recall from that store, not from a pasted transcript. Roomz already loads Brainz only when the variable is set (`src/brainz.mjs`). Verified in `test/brainz-import.test.mjs`.
+5. Leave Note 9 and Headroom until goals 1-3 (fast-machine dogfooding) are done. (Note: PR 25 has already been merged into `main`).
 
 ## Prompt that points here
 
