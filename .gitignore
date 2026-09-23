@@ -20,6 +20,7 @@ data/*.note.txt
 data/agent-e2e/
 data/agent-ws*/
 data/sessions/
+data/dreamcatcher/
 scripts/_*.ps1
 scripts/_*.mjs
 _qodesh-size-probe.ps1
