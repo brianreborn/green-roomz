@@ -1,0 +1,645 @@
+{
+  "scanned_at": "2026-09-12T00:27:31Z",
+  "trees": [
+    "/workspace/session/green-roomz/",
+    "/workspace/grz-src/{gateway,handoff,nexus,routing,util}.mjs",
+    "/workspace/session/known-bugs.md",
+    "/workspace/session/green-roomz-system-requirements.md",
+    "/workspace/reviews/green-roomz/RELEASE-READINESS.md"
+  ],
+  "findings": [
+    {
+      "id": "P-001",
+      "area": "path",
+      "severity": "blocker",
+      "title": "Default manifest hardcodes C:\\LocalAI; GRZ_ROOT/${} unused",
+      "evidence": [
+        {
+          "file": "session/green-roomz/config/agents.windows.json",
+          "line": 21,
+          "snip": "\"command\": \"C:\\\\LocalAI\\\\llama-b10665-bin-win-vulkan-x64\\\\llama-server.exe\""
+        },
+        {
+          "file": "session/green-roomz/config/agents.windows.json",
+          "line": 99,
+          "snip": "\"model\": \"C:\\\\LocalAI\\\\Qwen3-4B-Q4_K_M.gguf\""
+        },
+        {
+          "file": "session/green-roomz/src/util.mjs",
+          "line": 32,
+          "snip": "export function expandEnvironment(value, env = process.env) {"
+        },
+        {
+          "file": "session/green-roomz/src/util.mjs",
+          "line": 34,
+          "snip": "return value.replace(/\\$\\{([A-Z0-9_]+)\\}/gi, (_, key) => env[key] ?? '');"
+        },
+        {
+          "file": "session/green-roomz/src/config.mjs",
+          "line": 58,
+          "snip": "const manifest = expandEnvironment(JSON.parse(raw), env);"
+        }
+      ],
+      "risk": "Relocatable installs, Termux $HOME, Android /data/local/tmp, D: drive, and POSIX trees cannot use the default manifest. expandEnvironment exists but agents.windows.json never uses ${GRZ_ROOT} or similar, so multi-host packaging is blocked.",
+      "hosts": [
+        "windows",
+        "android",
+        "posix",
+        "note9"
+      ],
+      "fix_pack_hint": "GRZ_ROOT template manifest \u2014 rewrite agents.*.json to ${GRZ_ROOT}/...; document GRZ_ROOT; keep windows absolute as optional override"
+    },
+    {
+      "id": "P-002",
+      "area": "path",
+      "severity": "high",
+      "title": "expandEnvironment silently empties missing ${VAR}",
+      "evidence": [
+        {
+          "file": "session/green-roomz/src/util.mjs",
+          "line": 34,
+          "snip": "return value.replace(/\\$\\{([A-Z0-9_]+)\\}/gi, (_, key) => env[key] ?? '');"
+        },
+        {
+          "file": "session/green-roomz/src/config.mjs",
+          "line": 58,
+          "snip": "const manifest = expandEnvironment(JSON.parse(raw), env);"
+        },
+        {
+          "file": "session/green-roomz/src/config.mjs",
+          "line": 62,
+          "snip": "if (agent[field]) agent[field] = resolveManifestPath(manifestPath, agent[field]);"
+        }
+      ],
+      "risk": "Unset GRZ_ROOT/LOCALAI_ROOT becomes empty string, then resolveManifestPath may treat '' as falsy skip or produce nonsense relatives. Failures look like missing models rather than misconfigured env.",
+      "hosts": [
+        "all"
+      ],
+      "fix_pack_hint": "Strict ${} expansion \u2014 fail loadManifest when referenced env keys are unset"
+    },
+    {
+      "id": "P-003",
+      "area": "path",
+      "severity": "high",
+      "title": "start/stop scripts hardcode Codex output tree paths",
+      "evidence": [
+        {
+          "file": "session/green-roomz/scripts/start-green-roomz.ps1",
+          "line": 2,
+          "snip": "$Root = 'C:\\Users\\brian\\Documents\\Codex\\2026-08-28\\files-pasted-by-the-user-1\\outputs\\green-roomz'"
+        },
+        {
+          "file": "session/green-roomz/scripts/start-green-roomz.ps1",
+          "line": 3,
+          "snip": "$Node = 'C:\\Program Files\\nodejs\\node.exe'"
+        },
+        {
+          "file": "session/green-roomz/scripts/switch-bench.ps1",
+          "line": 3,
+          "snip": "$dir = 'C:\\Users\\brian\\Documents\\Codex\\2026-08-28\\files-pasted-by-the-user-1\\outputs\\green-roomz\\data'"
+        },
+        {
+          "file": "session/green-roomz/scripts/start-green-roomz.cmd",
+          "line": 2,
+          "snip": "powershell -NoProfile -ExecutionPolicy Bypass -File \"%~dp0start-green-roomz.ps1\""
+        }
+      ],
+      "risk": "Scripts break on any other machine, user profile, or git checkout (README points at Documents\\green-roomz). Spaces in 'Program Files' are quoted here but Root is not derived from $PSScriptRoot.",
+      "hosts": [
+        "windows"
+      ],
+      "fix_pack_hint": "Script-relative roots \u2014 derive $Root from $PSScriptRoot/..; optional GRZ_ROOT override"
+    },
+    {
+      "id": "P-004",
+      "area": "path",
+      "severity": "med",
+      "title": "resolveManifestPath: relative \u2192 parent-of-config; no MAX_PATH/\\\\?\\; runtime.command unresolved",
+      "evidence": [
+        {
+          "file": "session/green-roomz/src/util.mjs",
+          "line": 43,
+          "snip": "export function resolveManifestPath(manifestPath, candidate) {"
+        },
+        {
+          "file": "session/green-roomz/src/util.mjs",
+          "line": 45,
+          "snip": "if (path.isAbsolute(candidate) || /^[A-Za-z]:[\\\\/]/.test(candidate) || candidate.startsWith('\\\\\\\\')) return candidate;"
+        },
+        {
+          "file": "session/green-roomz/src/util.mjs",
+          "line": 46,
+          "snip": "return path.resolve(path.dirname(manifestPath), '..', candidate);"
+        },
+        {
+          "file": "session/green-roomz/src/config.mjs",
+          "line": 61,
+          "snip": "for (const field of ['model', 'draft_model', 'projector', 'system_policy']) {"
+        }
+      ],
+      "risk": "Relative policies resolve via config/../policies (works today) but relative runtime.command is never resolved. UNC handled; no \\?\\ long-path, reserved CON/NUL/PRN, or colon-in-name checks. path.normalize quirks on mixed slash untested.",
+      "hosts": [
+        "windows",
+        "posix",
+        "all"
+      ],
+      "fix_pack_hint": "Path resolve hardening \u2014 resolve runtime.command; optional long-path; reject reserved Win names in tests"
+    },
+    {
+      "id": "P-005",
+      "area": "path",
+      "severity": "high",
+      "title": "CLI always constructs WindowsHostAdapter; AndroidSidecar never wired",
+      "evidence": [
+        {
+          "file": "session/green-roomz/bin/green-roomz.mjs",
+          "line": 42,
+          "snip": "const hostAdapter = process.platform === 'win32'"
+        },
+        {
+          "file": "session/green-roomz/bin/green-roomz.mjs",
+          "line": 43,
+          "snip": "? new WindowsHostAdapter({ runtimeCommand: runtime })"
+        },
+        {
+          "file": "session/green-roomz/bin/green-roomz.mjs",
+          "line": 44,
+          "snip": ": new WindowsHostAdapter({ runtimeCommand: runtime });"
+        },
+        {
+          "file": "session/green-roomz/src/hosts/android.mjs",
+          "line": 4,
+          "snip": "export class AndroidSidecarAdapter {"
+        },
+        {
+          "file": "session/green-roomz/src/hosts/android.mjs",
+          "line": 5,
+          "snip": "constructor({ endpoint = 'http://127.0.0.1:8199', token, fetchImpl = fetch } = {}) {"
+        }
+      ],
+      "risk": "POSIX/Termux/note9 fingerprint and priority path always use Windows adapter. GREEN_ROOMZ_ANDROID_SIDECAR only printed in doctor JSON; no spawn/stop via sidecar. Blocks Gate E / note9 host path.",
+      "hosts": [
+        "android",
+        "posix",
+        "note9"
+      ],
+      "fix_pack_hint": "Host adapter selection \u2014 wire AndroidSidecar + posix adapter from env/platform"
+    },
+    {
+      "id": "P-006",
+      "area": "path",
+      "severity": "med",
+      "title": "Mixed GGUF case (Qwen3 vs qwen*) brittle on case-sensitive FS",
+      "evidence": [
+        {
+          "file": "session/green-roomz/config/agents.windows.json",
+          "line": 99,
+          "snip": "\"model\": \"C:\\\\LocalAI\\\\Qwen3-4B-Q4_K_M.gguf\""
+        },
+        {
+          "file": "session/green-roomz/config/agents.windows.json",
+          "line": 127,
+          "snip": "\"model\": \"C:\\\\LocalAI\\\\qwen3-embedding-0.6b-q8_0.gguf\""
+        },
+        {
+          "file": "session/green-roomz/config/agents.windows.json",
+          "line": 154,
+          "snip": "\"model\": \"C:\\\\LocalAI\\\\Qwenstral-Small-3.1-0.5B.Q4_K_M.gguf\""
+        },
+        {
+          "file": "session/green-roomz/src/registry.mjs",
+          "line": 22,
+          "snip": "if (!(await fileExists(runtime.command))) missing.push(`runtime:${runtime.command}`);"
+        }
+      ],
+      "risk": "Windows NTFS usually case-insensitive; Linux/Termux/ext4 are not. Copying artifacts with different casing marks agents unavailable with opaque missing paths.",
+      "hosts": [
+        "posix",
+        "android",
+        "note9"
+      ],
+      "fix_pack_hint": "Artifact case canon \u2014 document exact on-disk names; optional casefold check in doctor"
+    },
+    {
+      "id": "S-001",
+      "area": "signal",
+      "severity": "blocker",
+      "title": "No Job Object / process-group ownership; stop scripts kill by exe name",
+      "evidence": [
+        {
+          "file": "session/green-roomz-system-requirements.md",
+          "line": 500,
+          "snip": "PID plus process-group or Windows Job Object identity;"
+        },
+        {
+          "file": "session/green-roomz-system-requirements.md",
+          "line": 507,
+          "snip": "It SHALL NOT kill arbitrary processes by executable name, port, ancestry, or model filename."
+        },
+        {
+          "file": "session/green-roomz/scripts/stop-green-roomz.ps1",
+          "line": 9,
+          "snip": "Get-Process llama-server -ErrorAction SilentlyContinue | ForEach-Object {"
+        },
+        {
+          "file": "session/green-roomz/scripts/stop-green-roomz.ps1",
+          "line": 10,
+          "snip": "Stop-Process -Id $_.Id -Force"
+        },
+        {
+          "file": "session/green-roomz/scripts/switch-bench.ps1",
+          "line": 27,
+          "snip": "Get-Process llama-server -ErrorAction SilentlyContinue | Stop-Process -Force"
+        },
+        {
+          "file": "session/green-roomz/src/process-manager.mjs",
+          "line": 207,
+          "snip": "const child = this.spawn(launch.command, launch.args, {"
+        },
+        {
+          "file": "session/green-roomz/README.md",
+          "line": 10,
+          "snip": "owned subprocess lifecycle management without killing unrelated processes;"
+        }
+      ],
+      "risk": "Operator stop/bench bounce can kill unrelated llama-server (other tools, other GRZ trees). No Job Object means taskkill of node can orphan children. Violates \u00a79.1/acceptance #19 and README claim.",
+      "hosts": [
+        "windows",
+        "all"
+      ],
+      "fix_pack_hint": "Owned-only stop \u2014 stop by recorded PIDs / job object; rewrite stop-*.ps1 to call gateway drain or PID file"
+    },
+    {
+      "id": "S-002",
+      "area": "signal",
+      "severity": "high",
+      "title": "stopRecord uses POSIX SIGTERM/SIGKILL; no Windows graceful path",
+      "evidence": [
+        {
+          "file": "session/green-roomz/src/process-manager.mjs",
+          "line": 281,
+          "snip": "async stopRecord(record) {"
+        },
+        {
+          "file": "session/green-roomz/src/process-manager.mjs",
+          "line": 285,
+          "snip": "if (record.child.exitCode === null) record.child.kill('SIGTERM');"
+        },
+        {
+          "file": "session/green-roomz/src/process-manager.mjs",
+          "line": 289,
+          "snip": "if (record.child.exitCode === null) record.child.kill('SIGKILL');"
+        },
+        {
+          "file": "session/green-roomz/bin/green-roomz.mjs",
+          "line": 134,
+          "snip": "process.on('SIGINT', shutdown);"
+        },
+        {
+          "file": "session/green-roomz/bin/green-roomz.mjs",
+          "line": 135,
+          "snip": "process.on('SIGTERM', shutdown);"
+        },
+        {
+          "file": "session/green-roomz-system-requirements.md",
+          "line": 80,
+          "snip": "`stop(grace_period)` \u2014 graceful then owned-process-group termination;"
+        }
+      ],
+      "risk": "On win32, child.kill('SIGTERM') is not a POSIX signal to llama-server; often maps to abrupt terminate. 3s then SIGKILL. No HTTP /exit drain of llama-server. Orphans more likely under McAfee/forced Stop-Process.",
+      "hosts": [
+        "windows"
+      ],
+      "fix_pack_hint": "Windows graceful stop \u2014 prefer runtime /exit or CTRL_BREAK when available; document taskkill vs SIGTERM"
+    },
+    {
+      "id": "S-003",
+      "area": "signal",
+      "severity": "high",
+      "title": "CLI `stop` is local-empty ProcessManager no-op; does not drain running serve",
+      "evidence": [
+        {
+          "file": "session/green-roomz/bin/green-roomz.mjs",
+          "line": 33,
+          "snip": "stop [--manifest path]   (asks a running local gateway to drain; currently local-process only)"
+        },
+        {
+          "file": "session/green-roomz/bin/green-roomz.mjs",
+          "line": 172,
+          "snip": "if (command === 'stop') {"
+        },
+        {
+          "file": "session/green-roomz/bin/green-roomz.mjs",
+          "line": 173,
+          "snip": "await ctx.processes.stopAll();"
+        },
+        {
+          "file": "session/green-roomz/bin/green-roomz.mjs",
+          "line": 37,
+          "snip": "async function bootstrap(args) {"
+        }
+      ],
+      "risk": "Fresh ProcessManager has empty processes Map; stopAll returns immediately while detached serve + llama-server keep running. Operators fall back to name-based Stop-Process (S-001).",
+      "hosts": [
+        "windows",
+        "posix",
+        "all"
+      ],
+      "fix_pack_hint": "Remote drain stop \u2014 HTTP admin drain or PID-file stop against running serve"
+    },
+    {
+      "id": "S-004",
+      "area": "signal",
+      "severity": "med",
+      "title": "Cold-start health AbortSignal not chained to parent; scripts use fixed sleeps",
+      "evidence": [
+        {
+          "file": "session/green-roomz/src/process-manager.mjs",
+          "line": 257,
+          "snip": "const response = await this.fetch(`http://127.0.0.1:${agent.port}/health`, {"
+        },
+        {
+          "file": "session/green-roomz/src/process-manager.mjs",
+          "line": 258,
+          "snip": "signal: AbortSignal.timeout(1500),"
+        },
+        {
+          "file": "session/green-roomz/src/process-manager.mjs",
+          "line": 267,
+          "snip": "await sleep(200, signal);"
+        },
+        {
+          "file": "session/green-roomz/scripts/start-green-roomz.ps1",
+          "line": 22,
+          "snip": "Start-Sleep -Seconds 2"
+        },
+        {
+          "file": "session/green-roomz/scripts/start-green-roomz.ps1",
+          "line": 28,
+          "snip": "Start-Sleep -Seconds 4"
+        },
+        {
+          "file": "session/green-roomz-system-requirements.md",
+          "line": 511,
+          "snip": "Fixed post-launch sleeps SHALL NOT establish readiness."
+        }
+      ],
+      "risk": "Client abort only interrupts sleep, not in-flight health fetch; start may continue after disconnect. PS1 readiness is listen-port + sleep, not health/model identity (\u00a79.2).",
+      "hosts": [
+        "windows",
+        "all"
+      ],
+      "fix_pack_hint": "AbortSignal.any chain + health-based start script"
+    },
+    {
+      "id": "S-005",
+      "area": "signal",
+      "severity": "med",
+      "title": "spawn: windowsHide/stdio set; detached unset; orphan on hard kill",
+      "evidence": [
+        {
+          "file": "session/green-roomz/src/process-manager.mjs",
+          "line": 207,
+          "snip": "const child = this.spawn(launch.command, launch.args, {"
+        },
+        {
+          "file": "session/green-roomz/src/process-manager.mjs",
+          "line": 209,
+          "snip": "windowsHide: true,"
+        },
+        {
+          "file": "session/green-roomz/src/process-manager.mjs",
+          "line": 210,
+          "snip": "stdio: ['ignore', 'pipe', 'pipe'],"
+        },
+        {
+          "file": "session/green-roomz/src/process-manager.mjs",
+          "line": 211,
+          "snip": "shell: false,"
+        },
+        {
+          "file": "session/green-roomz/src/process-manager.mjs",
+          "line": 120,
+          "snip": "// Resident CPU nexus (tool-router-agent) stays loaded for the life of serve."
+        }
+      ],
+      "risk": "Default non-detached is good for tree-kill on Unix, but Windows without Job Object still orphans llama-server when node is killed with /F (McAfee/Stop-Process pattern). Resident nexus amplifies orphan cost.",
+      "hosts": [
+        "windows"
+      ],
+      "fix_pack_hint": "Job-object spawn wrap \u2014 AssignProcessToJobObject on win32 children"
+    },
+    {
+      "id": "L-001",
+      "area": "locale",
+      "severity": "high",
+      "title": "Offline intent / translation detection is English-lexeme only",
+      "evidence": [
+        {
+          "file": "session/green-roomz/src/logical-router.mjs",
+          "line": 18,
+          "snip": "const CODE_INTENT = /```|\\btypescript\\b|\\bpython\\b|\\bfunction\\b|\\bjson schema\\b|\\bc\\+\\+|\\bcpp\\b|\\bprogram\\b|\\bcode\\b/i;"
+        },
+        {
+          "file": "session/green-roomz/src/logical-router.mjs",
+          "line": 19,
+          "snip": "const IMAGE_GENERATION_INTENT = /\\b(text[- ]to[- ]image|generate (an? )?(image|picture|...)/i;"
+        },
+        {
+          "file": "session/green-roomz/src/logical-router.mjs",
+          "line": 37,
+          "snip": "if (/\\btranslate\\b|\\btranslation\\b/i.test(text)) {"
+        },
+        {
+          "file": "session/green-roomz/src/routing.mjs",
+          "line": 44,
+          "snip": "return /\\btranslate\\b|\\btranslation\\b/i.test(text);"
+        },
+        {
+          "file": "grz-src/routing.mjs",
+          "line": 44,
+          "snip": "return /\\btranslate\\b|\\btranslation\\b/i.test(text);"
+        }
+      ],
+      "risk": "Spanish/CJK/Hebrew requests (traducir, \u7ffb\u8a33, \u05ea\u05e8\u05d2\u05dd, dibuja) miss offlinePlan and translation_request. Nexus prompts/AVAILABLE are English; far-from-English turns degrade to default_text or wrong specialist.",
+      "hosts": [
+        "all"
+      ],
+      "fix_pack_hint": "Multilingual intent lexicon \u2014 expand translate/draw/code cues; rely on nexus for non-Latin when live"
+    },
+    {
+      "id": "L-002",
+      "area": "locale",
+      "severity": "high",
+      "title": "English-only system policies and en_US Piper voice",
+      "evidence": [
+        {
+          "file": "session/green-roomz/policies/tool-router.md",
+          "line": 3,
+          "snip": "You are the Green-Roomz nexus. Emit ONE minified JSON object only:"
+        },
+        {
+          "file": "session/green-roomz/policies/general-text.md",
+          "line": 8,
+          "snip": "Translate only when the client explicitly requests translation or a configured workflow declares it."
+        },
+        {
+          "file": "session/green-roomz/config/agents.windows.json",
+          "line": 182,
+          "snip": "\"model\": \"C:\\\\LocalAI\\\\piper\\\\voices\\\\en_US-lessac-medium.onnx\""
+        },
+        {
+          "file": "session/green-roomz-system-requirements.md",
+          "line": 220,
+          "snip": "local text-to-speech with selectable voice, language, speed, and output format."
+        }
+      ],
+      "risk": "Nexus/system prompts are English-instruction BPE-friendly; TTS cannot meet 'selectable language' requirement with only en_US. OCR/ASR policies say preserve source language but operator UX assumes Latin UI.",
+      "hosts": [
+        "all",
+        "android",
+        "note9"
+      ],
+      "fix_pack_hint": "Locale policy pack \u2014 voice catalog by lang; optional non-English nexus prompt variant"
+    },
+    {
+      "id": "L-003",
+      "area": "locale",
+      "severity": "med",
+      "title": "Child log decode uses Buffer.toString() default; no chcp/LANG guidance",
+      "evidence": [
+        {
+          "file": "session/green-roomz/src/process-manager.mjs",
+          "line": 229,
+          "snip": "const append = (chunk) => { record.logs = (record.logs + chunk.toString()).slice(-MAX_LOG_CHARS); };"
+        },
+        {
+          "file": "session/green-roomz/src/hosts/windows.mjs",
+          "line": 20,
+          "snip": "runtime = (await execFileAsync(this.runtimeCommand, ['--version'], { windowsHide: true, timeout: 10_000 })).stdout.trim();"
+        },
+        {
+          "file": "session/green-roomz/README.md",
+          "line": 21,
+          "snip": "Models stay on disk under `C:\\LocalAI` (not in this repo). Node 24+ is enough."
+        }
+      ],
+      "risk": "On Windows non-UTF-8 ACP, llama-server CJK/path diagnostics in stderr can mojibake into UnavailableError slices. No docs for chcp 65001 / UTF-8 console / LANG=C.UTF-8 on Termux.",
+      "hosts": [
+        "windows",
+        "android",
+        "posix"
+      ],
+      "fix_pack_hint": "UTF-8 log decode + operator console notes in README/system-requirements"
+    },
+    {
+      "id": "L-004",
+      "area": "locale",
+      "severity": "med",
+      "title": "grz-src stripControls/headerSafe ahead of session tree",
+      "evidence": [
+        {
+          "file": "grz-src/util.mjs",
+          "line": 79,
+          "snip": "const C0_C1 = /[\\u0000-\\u001F\\u007F-\\u009F]/g;"
+        },
+        {
+          "file": "grz-src/util.mjs",
+          "line": 81,
+          "snip": "export function stripControls(value) {"
+        },
+        {
+          "file": "grz-src/gateway.mjs",
+          "line": 219,
+          "snip": "'x-green-roomz-route-reason': headerSafe(routed.reason ?? ''),"
+        },
+        {
+          "file": "session/green-roomz/src/util.mjs",
+          "line": 79,
+          "snip": "export function jsonResponse(response, status, body, headers = {}) {"
+        }
+      ],
+      "risk": "Session tree lacks C0/C1 sanitizer; non-ASCII/control in route reasons can break HTTP headers or console (known-bugs Escape section). qodesh lag compounds platform header issues.",
+      "hosts": [
+        "all"
+      ],
+      "fix_pack_hint": "Sync grz-src util/gateway sanitizers into session before pack"
+    },
+    {
+      "id": "L-005",
+      "area": "locale",
+      "severity": "low",
+      "title": "ASCII toLowerCase for MIME/slash tokens; localeCompare only for profile ids",
+      "evidence": [
+        {
+          "file": "session/green-roomz/src/routing.mjs",
+          "line": 6,
+          "snip": "const type = String(part.type ?? '').toLowerCase();"
+        },
+        {
+          "file": "session/green-roomz/src/profile-selector.mjs",
+          "line": 30,
+          "snip": ".sort((a, b) => b.score - a.score || a.profile.id.localeCompare(b.profile.id));"
+        },
+        {
+          "file": "grz-src/routing.mjs",
+          "line": 107,
+          "snip": "const token = match[1].toLowerCase();"
+        }
+      ],
+      "risk": "ASCII protocol tokens are fine with toLowerCase; localeCompare without 'en' can reorder profile ids under exotic locales (low). No NFC/NFD normalization if macOS ever hosts artifacts.",
+      "hosts": [
+        "posix",
+        "all"
+      ],
+      "fix_pack_hint": "localeCompare('en') + optional Unicode normalize for paths"
+    },
+    {
+      "id": "P-007",
+      "area": "path",
+      "severity": "note",
+      "title": "Android/Termux path + SELinux exec surface undocumented in code",
+      "evidence": [
+        {
+          "file": "session/green-roomz-system-requirements.md",
+          "line": 677,
+          "snip": "The Linux container, proot environment, or Termux-hosted layer SHOULD run:"
+        },
+        {
+          "file": "session/green-roomz-system-requirements.md",
+          "line": 695,
+          "snip": "Green-Roomz SHALL NOT assume a Linux container can access Vulkan, Android GPU devices..."
+        },
+        {
+          "file": "session/green-roomz/README.md",
+          "line": 58,
+          "snip": "The recommended mobile deployment places the gateway in Termux or a container..."
+        },
+        {
+          "file": "session/green-roomz/src/hosts/android.mjs",
+          "line": 9,
+          "snip": "this.kind = 'android-sidecar';"
+        }
+      ],
+      "risk": "No agents.android.json, no /data/local/tmp vs $PREFIX path samples, no SELinux execmem notes. note9 status unknown in release board.",
+      "hosts": [
+        "android",
+        "note9"
+      ],
+      "fix_pack_hint": "Android path cookbook \u2014 Termux $HOME/$PREFIX vs /data/local/tmp; sidecar-only binaries"
+    }
+  ],
+  "gaps": [
+    "No agents.posix.json / agents.android.json / agents.termux.json in tree",
+    "No GRZ_ROOT usage anywhere in manifests despite expandEnvironment",
+    "No MAX_PATH / \\\\?\\ / reserved-name (CON|NUL|PRN|AUX|COM1|LPT1) tests",
+    "No NFC/NFD path tests; macOS not a stated target",
+    "process-manager.mjs / hosts/*.mjs / bin not in grz-src patch pack (only gateway,handoff,nexus,routing,util)",
+    "SELinux exec / Termux $PREFIX binary layout not coded",
+    "No Windows Job Object implementation despite requirements \u00a79.1",
+    "CLI stop remote drain not implemented (usage text oversells)",
+    "No LANG/LC_ALL/chcp UTF-8 operator checklist in README",
+    "note9 machine registration / Termux map absent (RELEASE-READINESS)"
+  ],
+  "note9_status": "unknown \u2014 RELEASE-READINESS: note9/host not in ListMachines; Termux/sidecar path unmapped; AndroidSidecarAdapter exists but unwired in bin/green-roomz.mjs"
+}

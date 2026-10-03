@@ -1,0 +1,342 @@
+{
+  "schema": "green-roomz.nexus-route-gold.v1",
+  "title": "Nexus / tool-router gold set (offline scoreable)",
+  "date": "2026-09-12",
+  "notes": [
+    "Gold expects first-hop propose alias (JSON route field), not gateway final eff after FIX-01/prettify.",
+    "modality: text|image|audio — drives illegal-hop checks (vision/audio without part).",
+    "available_aliases omitted → scorer uses default full AVAILABLE set minus modality-illegal.",
+    "Recorded runs: put model raw JSON text in recorded.jsonl as {id, raw} or {id, route, confidence, reason}."
+  ],
+  "default_available": [
+    "general-text-speculator",
+    "qwenstral-code-speculator",
+    "image-generation-agent",
+    "vision-layout-agent",
+    "speech-synthesis-agent",
+    "audio-transcription-agent",
+    "semantic-embedding-agent",
+    "retrieval-rerank-agent",
+    "safety-policy-agent"
+  ],
+  "cases": [
+    {
+      "id": "T01",
+      "family": "text",
+      "prompt": "What is the capital of France?",
+      "modality": "text",
+      "expect_route": "general-text-speculator",
+      "accept": ["general-text-speculator"],
+      "illegal": ["vision-layout-agent", "audio-transcription-agent"]
+    },
+    {
+      "id": "T02",
+      "family": "text",
+      "prompt": "Write a short poem about rain.",
+      "modality": "text",
+      "expect_route": "general-text-speculator",
+      "accept": ["general-text-speculator"],
+      "illegal": ["vision-layout-agent", "audio-transcription-agent", "qwenstral-code-speculator"]
+    },
+    {
+      "id": "T03",
+      "family": "text",
+      "prompt": "Translate to Spanish: Good morning.",
+      "modality": "text",
+      "expect_route": "general-text-speculator",
+      "accept": ["general-text-speculator"],
+      "illegal": ["vision-layout-agent", "audio-transcription-agent"]
+    },
+    {
+      "id": "T04",
+      "family": "text",
+      "prompt": "Tell me a joke about cats.",
+      "modality": "text",
+      "expect_route": "general-text-speculator",
+      "accept": ["general-text-speculator"],
+      "illegal": ["vision-layout-agent", "audio-transcription-agent"]
+    },
+    {
+      "id": "T05",
+      "family": "text",
+      "prompt": "Summarize: The quick brown fox jumps over the lazy dog.",
+      "modality": "text",
+      "expect_route": "general-text-speculator",
+      "accept": ["general-text-speculator"],
+      "illegal": ["vision-layout-agent", "audio-transcription-agent"]
+    },
+    {
+      "id": "T06",
+      "family": "text",
+      "prompt": "Explain photosynthesis in two sentences.",
+      "modality": "text",
+      "expect_route": "general-text-speculator",
+      "accept": ["general-text-speculator"],
+      "illegal": ["vision-layout-agent", "audio-transcription-agent"]
+    },
+    {
+      "id": "T07",
+      "family": "text",
+      "prompt": "Hi",
+      "modality": "text",
+      "expect_route": "general-text-speculator",
+      "accept": ["general-text-speculator"],
+      "illegal": ["vision-layout-agent", "audio-transcription-agent", "image-generation-agent"]
+    },
+    {
+      "id": "T08",
+      "family": "text",
+      "prompt": "Help me plan a weekend trip to Portland.",
+      "modality": "text",
+      "expect_route": "general-text-speculator",
+      "accept": ["general-text-speculator"],
+      "illegal": ["vision-layout-agent", "audio-transcription-agent"]
+    },
+    {
+      "id": "C01",
+      "family": "code",
+      "prompt": "Write a Python function that returns the factorial of n.",
+      "modality": "text",
+      "expect_route": "qwenstral-code-speculator",
+      "accept": ["qwenstral-code-speculator"],
+      "illegal": ["vision-layout-agent", "audio-transcription-agent"]
+    },
+    {
+      "id": "C02",
+      "family": "code",
+      "prompt": "Fix this C++ snippet: int main() { cout << hello; }",
+      "modality": "text",
+      "expect_route": "qwenstral-code-speculator",
+      "accept": ["qwenstral-code-speculator"],
+      "illegal": ["vision-layout-agent", "audio-transcription-agent"]
+    },
+    {
+      "id": "C03",
+      "family": "code",
+      "prompt": "Explain what this regex does: ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$",
+      "modality": "text",
+      "expect_route": "qwenstral-code-speculator",
+      "accept": ["qwenstral-code-speculator", "general-text-speculator"],
+      "illegal": ["vision-layout-agent", "audio-transcription-agent"]
+    },
+    {
+      "id": "C04",
+      "family": "code",
+      "prompt": "Refactor this JS to use async/await: fetch(url).then(r => r.json()).then(console.log)",
+      "modality": "text",
+      "expect_route": "qwenstral-code-speculator",
+      "accept": ["qwenstral-code-speculator"],
+      "illegal": ["vision-layout-agent", "audio-transcription-agent"]
+    },
+    {
+      "id": "C05",
+      "family": "code",
+      "prompt": "Write a SQL query to count users by country.",
+      "modality": "text",
+      "expect_route": "qwenstral-code-speculator",
+      "accept": ["qwenstral-code-speculator"],
+      "illegal": ["vision-layout-agent", "audio-transcription-agent"]
+    },
+    {
+      "id": "C06",
+      "family": "code",
+      "prompt": "Add unit tests for a palindrome checker in Python.",
+      "modality": "text",
+      "expect_route": "qwenstral-code-speculator",
+      "accept": ["qwenstral-code-speculator"],
+      "illegal": ["vision-layout-agent", "audio-transcription-agent"]
+    },
+    {
+      "id": "V01",
+      "family": "vision",
+      "prompt": "What does this screenshot show?",
+      "modality": "image",
+      "expect_route": "vision-layout-agent",
+      "accept": ["vision-layout-agent"],
+      "illegal": []
+    },
+    {
+      "id": "V02",
+      "family": "vision",
+      "prompt": "Describe the layout of the attached UI mockup.",
+      "modality": "image",
+      "expect_route": "vision-layout-agent",
+      "accept": ["vision-layout-agent"],
+      "illegal": []
+    },
+    {
+      "id": "V03",
+      "family": "vision",
+      "prompt": "Read the text in this image.",
+      "modality": "image",
+      "expect_route": "vision-layout-agent",
+      "accept": ["vision-layout-agent"],
+      "illegal": []
+    },
+    {
+      "id": "A01",
+      "family": "audio",
+      "prompt": "Transcribe the attached recording.",
+      "modality": "audio",
+      "expect_route": "audio-transcription-agent",
+      "accept": ["audio-transcription-agent"],
+      "illegal": []
+    },
+    {
+      "id": "A02",
+      "family": "audio",
+      "prompt": "What did the speaker say in this clip?",
+      "modality": "audio",
+      "expect_route": "audio-transcription-agent",
+      "accept": ["audio-transcription-agent"],
+      "illegal": []
+    },
+    {
+      "id": "I01",
+      "family": "image-gen",
+      "prompt": "Draw a red apple on a white table.",
+      "modality": "text",
+      "expect_route": "image-generation-agent",
+      "accept": ["image-generation-agent"],
+      "illegal": ["vision-layout-agent", "audio-transcription-agent"],
+      "notes": "DISPATCH #5 — text-only draw must not silently go general-text"
+    },
+    {
+      "id": "I02",
+      "family": "image-gen",
+      "prompt": "Generate an image of a blue bicycle at sunset.",
+      "modality": "text",
+      "expect_route": "image-generation-agent",
+      "accept": ["image-generation-agent"],
+      "illegal": ["vision-layout-agent", "audio-transcription-agent"]
+    },
+    {
+      "id": "I03",
+      "family": "image-gen",
+      "prompt": "Create a picture of a forest cabin.",
+      "modality": "text",
+      "expect_route": "image-generation-agent",
+      "accept": ["image-generation-agent"],
+      "illegal": ["vision-layout-agent", "audio-transcription-agent"]
+    },
+    {
+      "id": "S01",
+      "family": "speech",
+      "prompt": "Please read this aloud: Hello world.",
+      "modality": "text",
+      "expect_route": "speech-synthesis-agent",
+      "accept": ["speech-synthesis-agent"],
+      "illegal": ["vision-layout-agent", "audio-transcription-agent"]
+    },
+    {
+      "id": "S02",
+      "family": "speech",
+      "prompt": "Speak the following sentence slowly.",
+      "modality": "text",
+      "expect_route": "speech-synthesis-agent",
+      "accept": ["speech-synthesis-agent", "general-text-speculator"],
+      "illegal": ["vision-layout-agent", "audio-transcription-agent"]
+    },
+    {
+      "id": "X01",
+      "family": "ambiguous",
+      "prompt": "Look at this and tell me what it is.",
+      "modality": "text",
+      "expect_route": "general-text-speculator",
+      "accept": ["general-text-speculator"],
+      "illegal": ["vision-layout-agent", "audio-transcription-agent"],
+      "notes": "No image part — vision-first is illegal (DISPATCH #2)"
+    },
+    {
+      "id": "X02",
+      "family": "ambiguous",
+      "prompt": "Can you hear me?",
+      "modality": "text",
+      "expect_route": "general-text-speculator",
+      "accept": ["general-text-speculator"],
+      "illegal": ["audio-transcription-agent", "vision-layout-agent"]
+    },
+    {
+      "id": "X03",
+      "family": "ambiguous",
+      "prompt": "Analyze the attached file.",
+      "modality": "text",
+      "expect_route": "general-text-speculator",
+      "accept": ["general-text-speculator", "qwenstral-code-speculator"],
+      "illegal": ["vision-layout-agent", "audio-transcription-agent"]
+    },
+    {
+      "id": "X04",
+      "family": "ambiguous",
+      "prompt": "What should I do next?",
+      "modality": "text",
+      "expect_route": "general-text-speculator",
+      "accept": ["general-text-speculator"],
+      "illegal": ["vision-layout-agent", "audio-transcription-agent", "image-generation-agent"]
+    },
+    {
+      "id": "X05",
+      "family": "ambiguous",
+      "prompt": "Is this safe?",
+      "modality": "text",
+      "expect_route": "safety-policy-agent",
+      "accept": ["safety-policy-agent", "general-text-speculator"],
+      "illegal": ["vision-layout-agent", "audio-transcription-agent"]
+    },
+    {
+      "id": "X06",
+      "family": "ambiguous",
+      "prompt": "Embed this sentence for search: green roomz nexus router",
+      "modality": "text",
+      "expect_route": "semantic-embedding-agent",
+      "accept": ["semantic-embedding-agent", "general-text-speculator"],
+      "illegal": ["vision-layout-agent", "audio-transcription-agent"]
+    },
+    {
+      "id": "X07",
+      "family": "ambiguous",
+      "prompt": "Rerank these passages for query: offline security workstation",
+      "modality": "text",
+      "expect_route": "retrieval-rerank-agent",
+      "accept": ["retrieval-rerank-agent", "general-text-speculator"],
+      "illegal": ["vision-layout-agent", "audio-transcription-agent"]
+    },
+    {
+      "id": "N01",
+      "family": "negatives",
+      "prompt": "Write a haiku about coffee.",
+      "modality": "text",
+      "expect_route": "general-text-speculator",
+      "accept": ["general-text-speculator"],
+      "illegal": ["vision-layout-agent", "audio-transcription-agent", "qwenstral-code-speculator", "image-generation-agent"],
+      "notes": "Classic vision-first false positive bait"
+    },
+    {
+      "id": "N02",
+      "family": "negatives",
+      "prompt": "How do I boil an egg?",
+      "modality": "text",
+      "expect_route": "general-text-speculator",
+      "accept": ["general-text-speculator"],
+      "illegal": ["vision-layout-agent", "audio-transcription-agent"]
+    },
+    {
+      "id": "N03",
+      "family": "negatives",
+      "prompt": "List three colors.",
+      "modality": "text",
+      "expect_route": "general-text-speculator",
+      "accept": ["general-text-speculator"],
+      "illegal": ["vision-layout-agent", "audio-transcription-agent", "image-generation-agent"]
+    },
+    {
+      "id": "N04",
+      "family": "negatives",
+      "prompt": "Describe a sunset in words only.",
+      "modality": "text",
+      "expect_route": "general-text-speculator",
+      "accept": ["general-text-speculator"],
+      "illegal": ["vision-layout-agent", "image-generation-agent", "audio-transcription-agent"]
+    }
+  ]
+}

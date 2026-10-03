@@ -1,0 +1,22 @@
+{
+    "live":  true,
+    "alias":  "general-text-speculator",
+    "profile":  "vulkan-all",
+    "ctx_size":  1024,
+    "draft_enabled":  false,
+    "serve_pid":  30292,
+    "llama":  [
+                  {
+                      "Id":  26892,
+                      "Name":  "llama-server",
+                      "WS_MB":  5027.8
+                  }
+              ],
+    "http_status":  200,
+    "curl_exit":  0,
+    "wall_ms":  16260,
+    "free_ram_gb_before":  5.78,
+    "free_ram_gb_during":  1.31,
+    "free_ram_gb_after":  6.31,
+    "leftovers_llama":  0
+}

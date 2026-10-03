@@ -1,0 +1,145 @@
+Green-Roomz pickup — console
+Left off: Codex usage-limit at 8:33 AM PT during Qwen3-4B + EAGLE-3 swap
+---
+15:50:27Z continuing Green-Roomz Gate A — 24/25 tests passing, fixing projector assertion and process stop race
+15:50:42Z patched projector test + owned-process stop race (listen for exit before SIGTERM)
+15:51:03Z re-running Gate A tests
+status: patching projector test
+15:52:06Z re-running Gate A tests
+15:52:13Z Gate A tests 25/25 pass; validating CLI
+15:52:29Z packing Gate A tree for Windows copy-back
+15:52:41Z extracting Gate A tree onto Windows Codex outputs
+15:53:00Z watch dashboard up: worker progress (top) + /usage every 2 min (bottom)
+15:53:27Z continue pickup — Windows extract done, retrying host tests with simpler node command
+15:53:37Z found node C:\Program Files\nodejs\node.exe + bundled Codex runtime — running Gate A tests on Windows
+15:54:02Z Windows node v24.19.0 — --test .\test failed MODULE_NOT_FOUND; retrying glob test/*.test.mjs
+15:55:57Z Windows test hang after config 3/3 pass — killing pid 34796, isolating gateway.test.mjs
+15:56:51Z patched gateway abortSignal + IPv4 test timeout; re-running box tests then copying to Windows
+15:56:57Z box tests 25/25 pass after abortSignal fix; copying gateway files to Windows
+15:57:10Z Windows gateway.test.mjs 5/5 pass (968ms) — running remaining test files
+15:57:24Z Windows Gate A 25/25 pass (gateway 5 + rest 20) — validating real C:\LocalAI inventory
+15:57:43Z validate on host — llama-server found; code-speculator COLD (models present); tool-router READY; 8 aliases missing artifacts including Qwen3-4B
+15:57:50Z fingerprint win32 Ryzen5-7520U 8cpu 16GB Vulkan0 AMD Radeon 8058MiB — starting loopback serve smoke test
+15:58:12Z live serve :18080 HEALTH=degraded ROUTER=ready CODE=cold; logical POST routed write-python-function -> qwenstral-code-speculator conf=0.75
+15:58:12Z stopped serve pid 2692
+15:58:12Z DONE leftover=Gate B first live llama.cpp inference for qwenstral-code-speculator (cold, artifacts present) plus fetch Qwen3-4B-Q4_K_M; produced=bin/green-roomz.mjs gateway tests policies, 25/25 tests on box and Windows, validate+fingerprint+loopback smoke on shalom
+16:08:17Z Gate B start — first live llama.cpp inference for qwenstral-code-speculator (no new GGUF fetch, no grok login)
+09:08 PT killed /usage pane. Console is worker progress only.
+16:08:45Z shalom probe — llama-server yes; 7B=4.36GiB 1.5B=1.04GiB; RAM 15.24GB total / 5.69GB free; :18080 LISTEN pid 27044; project present
+16:09:20Z leftover gateway still on :18080 pid 27044 (~49MB) from Gate A; will stop after live run. Choosing vulkan-all (ngl=99, ctx=1024) because 5.69GB free RAM cannot hold 4.36+1.04GB CPU-resident weights.
+16:09:33Z launching llama-server vulkan-all ngl=99 ctx=1024 draft=CPU on :8183 (7B+1.5B already on disk)
+16:10:16Z llama-server READY pid=34988 :8183 HEALTH=ok load~33s ws=2579MB — posting max_tokens=24
+16:10:50Z LIVE OK HTTP200 7.7s prompt=14.64t/s gen=2.12t/s draft_acc=9/9 Vulkan0 AMD Radeon iGPU (shared mem) ngl=99 ctx=1024 — stopping pid 34988
+16:11:13Z stopped llama-server pid 34988 + leftover gateway 27044; free RAM now 7.18GB; running validate/doctor
+16:11:48Z validate+doctor saved: code-speculator COLD (artifacts present), tool-router READY, 8 aliases still missing (no Qwen3-4B fetch)
+16:11:48Z DONE Gate B live inference OK. leftover=Qwen3-4B fetch still unapproved; gateway-path live start still untried (CLI would pick cpu-4 first). produced=data/gate-b-*.json + llama-server.err.log on shalom and /workspace/session/gate-b/
+09:14 PT btop on console (CPU/RAM). GPU N/A on this machine.
+09:23 PT resource pane now fits the font: btop if the pane is big enough, compact meter otherwise.
+09:31 PT live split: worker progress | resources (btop if it fits the font).
+09:33 PT layout: wider log, compact mem, bigger CPU.
+09:34 PT CPU fills the resource pane; mem on the status line.
+09:37 PT small mem pane under CPU.
+09:38 PT right column: btop CPU, core history, btop mem. Green-Roomz serve continuing.
+16:39:54Z gateway-path live start — no Qwen3-4B, no grok, no console-layout; prefer vulkan-all over cpu-4
+16:40:57Z shalom probe — 15.24GB total / 5.93GB free; no leftover node/llama-server; cpu-4 would OOM so serve manifest is vulkan-all-only ctx=1024
+16:41:23Z serve up pid=36196 http://127.0.0.1:18080 (vulkan-all-only manifest); posting short python hello via /v1/chat/completions
+16:41:34Z POST failed HTTP500 JSON parse (UTF-8 BOM from PowerShell Set-Content); rewriting request without BOM and retrying — serve pid 36196 still up, no llama-server spawned
+16:42:39Z patched gateway abort (client hangup only) + do not mark unavailable on abort; copying to shalom and restarting serve
+16:43:25Z serve restarted pid=28860 after abort patch; code-speculator COLD; posting python hello (max_tokens=24)
+16:44:16Z LIVE GATEWAY POST HTTP200 alias=qwenstral-code-speculator profile=vulkan-all gen=2.27t/s prompt=14.20t/s draft=9/9 wall=32.8s — llama-server pid=12988 ws=7203MB freeRAM=0.30GB; STOPPING now
+16:45:06Z stopped serve 28860 + llama-server 12988; leftovers=none; free RAM 7.98GB. DONE gateway-path live POST OK.
+09:55 PT fetching Qwen3-4B-Q4_K_M.gguf for general-text-speculator (EAGLE-3 draft optional).
+[2026-08-28T16:56:49Z] general-text-speculator leftover: start — check LocalAI + green-roomz state
+[2026-08-28T16:57:06Z] probing shalom for Qwen3-4B GGUF, RAM, disk, download tools
+[2026-08-28T16:57:41Z] Qwen3-4B missing on C:\LocalAI; freeRAM=6.11GB disk=478GB; curl/aria2/hf-cli TBD; skip EAGLE-3 (long convert)
+[2026-08-28T16:58:53Z] downloading Qwen3-4B-Q4_K_M.gguf (2497280256 bytes) via curl to C:\LocalAI; sha256 expected 7485fe6f...
+[2026-08-28T16:59:58Z] Qwen3-4B download 86.9% (2170118144/2497280256) curl pid 35176
+[2026-08-28T17:00:35Z] Qwen3-4B GGUF OK path=C:\LocalAI\Qwen3-4B-Q4_K_M.gguf size=2497280256 sha256=7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5 (~67s curl). skip EAGLE-3 convert (needs HF snapshots + convert_hf_to_gguf). running validate/doctor
+[2026-08-28T17:01:39Z] validate: general-text-speculator COLD (required GGUF present). 7 aliases still missing. freeRAM=6.05GB. starting vulkan-all-only serve + short POST (draft off, ctx=1024)
+[2026-08-28T17:02:08Z] launching serve :18080 vulkan-all-only ctx=1024 draft=off then POST general-text-speculator
+[2026-08-28T17:02:33Z] serve :18080 up; llama-server pid=26892 ws=5028MB freeRAM=1.02GB — POST in flight, not OOM
+[2026-08-28T17:02:55Z] LIVE POST HTTP200 alias=general-text-speculator profile=vulkan-all gen=3.43t/s prompt=9.47t/s wall=16.3s llama ws=5028MB freeRAM_during=1.31GB after=6.31GB leftovers=0 STOPPED
+[2026-08-28T17:03:21Z] DONE general-text-speculator leftover. GGUF 2497280256 bytes sha256=7485fe6f... validate=COLD live POST=HTTP200 vulkan-all. leftover=EAGLE-3 convert skipped + 7 other missing aliases. no grok.
+10:03 PT laptop cleared for suspend. Continuing on this computer from existing benches only. No live inference.
+[2026-08-28T17:04:20Z] 10:04 PT box-only continue — no machineId/Windows, no live inference, no downloads. Using measured benches only.
+[2026-08-28T17:07:05Z] patched process-manager: vulkan-all first on Windows manifest; RAM-aware reorder (CPU-resident last when GGUF bytes > freeMemoryBytes, not rejected); skip optional missing --model-draft
+[2026-08-28T17:07:20Z] patched gateway prepareInferenceBody: general-text max_tokens<64 disables Qwen3 thinking unless client set it (10:02 PT empty content)
+[2026-08-28T17:08:40Z] wrote /workspace/session/RETURN-WHEN-LAPTOP.md — existing bench table, real llama-bench re-run, EAGLE-3 convert, 7 missing aliases
+[2026-08-28T17:09:15Z] box node --test 29/29 pass (was 25). leftover=copy patches to shalom, green-roomz benchmark (not smoke POST), optional EAGLE-3, 7 artifacts. no llama-server.
+[2026-08-28T17:14:26Z] Green-Roomz resume on shalom — tests, validate, fingerprint, real benchmark (no fetch, no EAGLE-3)
+[2026-08-28T17:14:33Z] shalom probe — RAM 15.24GB total / 5.57GB free; leftover llama-server/:18080/:8183/:8080=none; ollama idle only; node v24.19.0; project present
+[2026-08-28T17:14:51Z] running Windows node --test .\test\*.test.mjs (glob; patches copied 10:13 PT)
+[2026-08-28T17:15:06Z] Windows tests 29/29 pass (7217ms) — validate + fingerprint
+[2026-08-28T17:15:54Z] validate: code-speculator COLD, general-text COLD, tool-router READY, 7 aliases missing; fingerprint win32 Ryzen5-7520U 8cpu 15.24GB Vulkan0 8058MiB; starting --quick benches (pp64/tg16 x1)
+[2026-08-28T17:18:01Z] code --quick: vulkan-all pp=24.36 tg=1.93 cold=30.9s; hybrid-12 pp=20.66 tg=2.70 cold=22.1s; cpu-4 SKIPPED OOM-guard (ws=7260MB free=0.17GB killed). RAM recovered 7.32GB. starting general-text --quick
+[2026-08-28T17:19:38Z] text --quick OK all 3: vulkan-all pp=42.77 tg=3.93 winner(throughput); hybrid-12 pp=29.4 tg=4.04; cpu-4 pp=23.27 tg=7.85; minFree=2.9GB recovered=7.04GB. starting FULL --force (pp256/tg64 x3)
+[2026-08-28T17:23:41Z] text FULL --force OK: winner vulkan-all pp=41.33 tg=5.31; hybrid-12 pp=38.06 tg=4.16; cpu-4 pp=22.69 tg=8.05; recovered 7.58GB. starting code FULL --force (cpu-4 will OOM-skip)
+[2026-08-28T17:30:07Z] code FULL --force OK all 3: winner vulkan-all pp=27.22 tg=2.55; hybrid-12 pp=22.93 tg=3.56; cpu-4 pp=13.57 tg=4.55 (minFree=0.62GB, quick cpu-4 had been OOM-killed). recovered 8.12GB. stopping llama + watchdog
+[2026-08-28T17:30:36Z] STOPPED llama-server/llama-bench; leftovers=none (ollama idle only); RAM 15.24/8.03GB free; copied benchmarks.json + stdout logs to /workspace/session/green-roomz/data/. tests 29/29. no fetch, no EAGLE-3. DONE real llama-bench.
+17:51:55 retry: user closed apps; retrying cpu-4 OOM skip
+2026-08-28T17:53:08Z cpu-4 retry — measure RAM first; skip if impractical (no headroom for other apps); no fetch
+[2026-08-28T17:54:14Z] cpu-4 retry skipped as impractical. freeRAM_before=8.96GB after=8.97GB/15.24GB llama=none. code cpu-4 WS~7284MB would leave ~1.68GB. quick still OOM-skip; full 13.57/4.55 technical-only. winner vulkan-all. no fetch, llama not started.
+18:19:21 finish: admission skip + wire bench winners into serve; copy to shalom; tests; no leftover llama
+[2026-08-28T18:21:52Z] finish Green-Roomz: admission helper + start/qualify skip + winnersFromStore; no fetch, no EAGLE-3, no leftover llama
+[2026-08-28T18:24:03Z] box tests 38/38 pass; copying src/memory.mjs + process-manager + benchmark + bin + tests to shalom
+[2026-08-28T18:25:25Z] shalom tests 38/38; validate COLD/degraded (7 missing); fingerprint ok; leftovers llama=none; winners vulkan-all; no fetch no EAGLE-3
+18:31:17 autotune: expand ngl candidates, deploy cmd, smoke official serve on shalom
+[2026-08-28T18:32:40Z] autotune start — src/autotune.mjs + qualify expand + deploy; no fetch, no EAGLE-3
+18:35:12 watch: added live prompt|response under log; right stack unchanged
+[2026-08-28T18:36:00Z] writing src/autotune.mjs hybrid expand + GGUF block_count parser
+[2026-08-28T18:38:20Z] box tests 50/50 pass (autotune+qualify+deploy); copying src/bin/test to shalom
+[2026-08-28T18:39:10Z] shalom tests 50/50; probing leftovers/RAM then --quick hybrid qualify
+[2026-08-28T18:39:40Z] shalom probe RAM 15.24/8.78GB free leftover=none; GGUF code=28→hybrid-7/14/21 text=36→hybrid-9/18/27; starting code --quick
+[2026-08-28T18:40:40Z] code --quick OK winner=vulkan-all pp=27.22 tg=2.55; hybrid-21=24.21/3.01 hybrid-14=22.21/3.60 hybrid-7=20.40/4.18; cpu-4 cache; no full needed. leftover=none RAM=8.78GB. starting text --quick
+[2026-08-28T18:41:30Z] text --quick OK winner=vulkan-all pp=41.33 tg=5.31; hybrid-27=40.32/4.35 hybrid-18=34.93/4.32 hybrid-9=32.34/4.39; no hybrid beat vulkan-all; skip full. leftover=none RAM=8.81GB. starting serve :18080 smoke
+[2026-08-28T18:44:11Z] 4B smoke POST starting (serve already listening); no shalom-ram.log
+[2026-08-28T18:44:38Z] 4B smoke HTTP500 fetch failed (vulkan-all started, not cpu-4); retrying POST once while warm
+[2026-08-28T18:47:11Z] 4B gateway fetch-failed while direct llama HTTP200; drain health body and retry smoke once
+[2026-08-28T18:49:04Z] box tests 51/51; proxy skips content-length so 4B thinking-off body can grow; retrying 4B smoke
+[2026-08-28T18:50:04Z] 4B smoke HTTP200 vulkan-all ngl=all finish=stop thinking-off; stopping serve/llama
+18:50:34 watch: rebuilt layout — wide log 50/50 io, 80col cpu>hist>mem, no backend strip, no shalom scrape
+18:51:17 watch: layout restored 50/50 log|io, 80col cpu>hist>mem, fullscreen
+[2026-08-28T18:52:14Z] DONE autotune+deploy. tests 51/51 box+win; winners vulkan-all both; smoke HTTP200/200; leftover=none; no fetch no EAGLE-3
+19:11:25 deploy: starting official serve on shalom :8080 for daily use
+19:12:08 deploy: serve up http://127.0.0.1:8080 models=200 code+text=cold router=ready
+[2026-08-28T20:45:00Z] router+thinking+threads shipped. box+win tests 74/74 earlier. copied src/config/test to Codex outputs + Documents\green-roomz. serve :8080 pid=17608 HEALTH=degraded code=cold text=cold router=ready. NO live POST (Brian tests llama.app). leftover=none-started; llama stays off until first chat.
+=== Green-Roomz model download started 2026-08-28T20:57:26Z ===
+2026-08-28T21:00:26Z START Green-Roomz missing-model download on shalom
+2026-08-28T21:04:19Z ggml-small.bin 487601967 (partial, awaiting rename)
+2026-08-28T21:04:19Z qwen3-embedding-0.6b-q8_0.gguf 639150592 (partial, awaiting rename)
+2026-08-28T21:04:19Z qwen3-reranker-0.6b-q8_0.gguf 639153184 (partial, awaiting rename)
+[2026-08-28T21:06:05Z] nexus kernel shipped. box tests 75/75. copied src/bin/config/policies/test to Codex outputs + Documents\green-roomz. serve :8080 pid=24984 HEALTH=degraded router=ready(cpu 0.5B :8187 resident) code=cold text=cold image-gen=unavailable (missing sd-server.exe + sd15-q4_0.gguf) — hop will refuse-fast. NO live POST (Brian tests llama.app). leftover=nexus-only llama-server pid=8428 --device none --threads 2.
+2026-08-28T21:09:46Z DONE qwen2.5-vl-3b-instruct-q4_k_m.gguf bytes=1929901056 sha256=d02fe9b69ad8cadbbd228e387667af66612c44bed29ffc8eb1e7caf9ac486c12
+2026-08-28T21:09:46Z DONE qwen2.5-vl-3b-mmproj-f16.gguf bytes=1338428128 sha256=b9160fe9d814d1fadf68395677468534778b39ac33c2e7561b7b218626e60d5e
+2026-08-28T21:09:46Z DONE qwen3-embedding-0.6b-q8_0.gguf bytes=639150592 sha256=06507c7b42688469c4e7298b0a1e16deff06caf291cf0a5b278c308249c3e439
+2026-08-28T21:09:46Z DONE qwen3-reranker-0.6b-q8_0.gguf bytes=639153184 sha256=22c9979ce4fbcdc5acdc310c6641c32797eff1aa980b8f7a2db8a8ea23429a48
+2026-08-28T21:09:46Z DONE qwen3guard-gen-0.6b-q4_k_m.gguf bytes=484220416 sha256=2e73a1411746e6dbd8a71b4d22dc66369044283f433b81ed6e4006cab4af9859
+2026-08-28T21:09:46Z DONE ggml-small.bin bytes=487601967 sha256=1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b
+2026-08-28T21:09:46Z DONE en_US-lessac-medium.onnx bytes=63201294 sha256=5efe09e69902187827af646e1a6e9d269dee769f9877d17b16b1b46eeaaf019f
+2026-08-28T21:09:46Z DONE en_US-lessac-medium.onnx.json bytes=4885 sha256=efe19c417bed055f2d69908248c6ba650fa135bc868b0e6abb3da181dab690a0
+2026-08-28T21:09:46Z DONE sd15-q4_0.gguf bytes=1566768416 sha256=b8944e9fe0b69b36ae1b5bb0185b3a7b8ef14347fe0fa9af6c64c4829022261f
+2026-08-28T21:09:46Z DONE whisper-server.exe bytes=726016 sha256=9eb6ee297215f07ba77a6d588a6a2715f2235f665528529c377b775bbab3cd2d
+2026-08-28T21:09:46Z DONE piper.exe bytes=509952 sha256=96f3da3811151580073e40bb4dd20eb0fb8115f5f5f76e2fb54282b3edfa5c1f
+2026-08-28T21:09:46Z DONE sd-server.exe bytes=1111552 sha256=3bb8ece98163664631d2b2c4971dada9052c6b8317838fdd034e17ba7cad34f7
+2026-08-28T21:09:46Z SKIP Qwen3-4B-eagle3-BF16.gguf no preconverted GGUF on HF (would need convert_hf_to_gguf.py)
+2026-08-28T21:09:46Z Green-Roomz missing-model download complete on shalom
+dl  vis 1.79G/1.79G .partial  mmproj 1.24G/1.24G .partial  embed 610M  rerank 610M  guard 462M  whisper 465M  piper 60M  sd 1.45G  zips 100%
+dl DONE vis=ok mmproj=ok embed=ok rerank=ok guard=ok whisper=ok+exe piper=ok+exe sd=ok+exe eagle=skip (no preconverted GGUF)
+DONE vis=1.79G/ok mmproj=1.24G/ok embed=ok rerank=ok guard=ok whisper=ok piper=ok sd=ok exe:whisper=ok piper=ok sd=ok eagle=no zips=ok
+EAGLE-3: starting — search HF for preconverted Qwen3-4B-eagle3-BF16.gguf, inspect shalom C:\LocalAI
+EAGLE-3: no preconverted GGUF on HF; inspecting convert_hf_to_gguf.py + Python/RAM on shalom
+EAGLE-3: no preconverted GGUF; py3.8 only; 6.5GB free RAM; llama-server pid 8428 small 0.5B mmap; inspecting convert script
+EAGLE-3: downloading AngelSlim draft (~417MB) + Qwen3-4B tokenizer; installing Python 3.12 for convert (3.8 too old for torch 2.11)
+EAGLE-3: snapshots OK — draft 436899680 bytes sha256 MATCH 58ac5bbf...; target tokenizer+config present. Installing Python 3.12.
+EAGLE-3: Python 3.12.10 installed via winget; creating C:\LocalAI\_tmp\eagle3-venv and pip-installing convert deps
+EAGLE-3: steering — download FULL Qwen/Qwen3-4B (all shards) + finish venv pip BEFORE convert; draft already sha-matched
+EAGLE-3: launching full Qwen/Qwen3-4B hf_hub_download of every repo file + finishing venv pip (transformers/gguf)
+EAGLE-3: venv PIP_OK — torch 2.11.0+cpu numpy 1.26.4 gguf 0.19.0 transformers 4.57.6 sentencepiece 0.2.2 (offline-ready)
+EAGLE-3: LAND .gitattributes=1570 LICENSE=11343 README.md=16857 config.json=726 generation_config.json=239 merges.txt=1671853
+EAGLE-3: LAND model-00001-of-00003.safetensors bytes=3957900840 (exact HF size)
+EAGLE-3: LAND model-00002-of-00003.safetensors bytes=3987450520 (exact HF size)
+EAGLE-3: LAND model-00003-of-00003.safetensors bytes=99630640 (exact HF size)
+EAGLE-3: LAND model.safetensors.index.json=32819 tokenizer.json=11422654 tokenizer_config.json=9732 vocab.json=2776833
+EAGLE-3: FULL_SNAPSHOT_OK 13/13 Qwen3-4B files exact sizes; venv PIP_OK — starting convert to C:\LocalAI\Qwen3-4B-eagle3-BF16.gguf
+EAGLE-3 DONE: C:\LocalAI\Qwen3-4B-eagle3-BF16.gguf bytes=442700800 magic=GGUF sha256=8fa28bedf2a7ea83a57c6ae4b7e2017f4f65db65946735b9d684c646ad266299 serve_restarted=no (llama-server 8428 + green-roomz 24984 still up)
+fleet-console: starting live watch on box

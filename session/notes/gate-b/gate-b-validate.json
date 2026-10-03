@@ -1,0 +1,268 @@
+﻿{
+  "ok": true,
+  "digest": "54850da7ad644ef1f36532ce1602e867a9ffd699fb473627563a222153b3b5d7",
+  "required_aliases": [
+    "vision-layout-agent",
+    "audio-transcription-agent",
+    "qwenstral-code-speculator",
+    "general-text-speculator",
+    "semantic-embedding-agent",
+    "retrieval-rerank-agent",
+    "tool-router-agent",
+    "safety-policy-agent",
+    "speech-synthesis-agent",
+    "image-generation-agent"
+  ],
+  "degraded": [
+    {
+      "id": "vision-layout-agent",
+      "reasons": [
+        "model:C:\\LocalAI\\qwen2.5-vl-3b-instruct-q4_k_m.gguf",
+        "projector:C:\\LocalAI\\qwen2.5-vl-3b-mmproj-f16.gguf"
+      ]
+    },
+    {
+      "id": "audio-transcription-agent",
+      "reasons": [
+        "runtime:C:\\LocalAI\\whisper\\whisper-server.exe",
+        "model:C:\\LocalAI\\whisper\\models\\ggml-small.bin"
+      ]
+    },
+    {
+      "id": "general-text-speculator",
+      "reasons": [
+        "model:C:\\LocalAI\\Qwen3-4B-Q4_K_M.gguf"
+      ]
+    },
+    {
+      "id": "semantic-embedding-agent",
+      "reasons": [
+        "model:C:\\LocalAI\\qwen3-embedding-0.6b-q8_0.gguf"
+      ]
+    },
+    {
+      "id": "retrieval-rerank-agent",
+      "reasons": [
+        "model:C:\\LocalAI\\qwen3-reranker-0.6b-q8_0.gguf"
+      ]
+    },
+    {
+      "id": "safety-policy-agent",
+      "reasons": [
+        "model:C:\\LocalAI\\qwen3guard-gen-0.6b-q4_k_m.gguf"
+      ]
+    },
+    {
+      "id": "speech-synthesis-agent",
+      "reasons": [
+        "runtime:C:\\LocalAI\\piper\\piper.exe",
+        "model:C:\\LocalAI\\piper\\voices\\en_US-lessac-medium.onnx"
+      ]
+    },
+    {
+      "id": "image-generation-agent",
+      "reasons": [
+        "runtime:C:\\LocalAI\\stable-diffusion.cpp\\bin\\sd-server.exe",
+        "model:C:\\LocalAI\\stable-diffusion.cpp\\models\\sd15-q4_0.gguf"
+      ]
+    }
+  ],
+  "agents": [
+    {
+      "id": "vision-layout-agent",
+      "object": "model",
+      "owned_by": "green-roomz",
+      "native_capabilities": [
+        "text",
+        "image"
+      ],
+      "gateway_accepted_capabilities": [
+        "text",
+        "image",
+        "file"
+      ],
+      "routing_behavior": "modality_override",
+      "availability": "unavailable",
+      "unavailable_reasons": [
+        "model:C:\\LocalAI\\qwen2.5-vl-3b-instruct-q4_k_m.gguf",
+        "projector:C:\\LocalAI\\qwen2.5-vl-3b-mmproj-f16.gguf"
+      ],
+      "experimental_features": []
+    },
+    {
+      "id": "audio-transcription-agent",
+      "object": "model",
+      "owned_by": "green-roomz",
+      "native_capabilities": [
+        "audio"
+      ],
+      "gateway_accepted_capabilities": [
+        "audio",
+        "file"
+      ],
+      "routing_behavior": "modality_override",
+      "availability": "unavailable",
+      "unavailable_reasons": [
+        "runtime:C:\\LocalAI\\whisper\\whisper-server.exe",
+        "model:C:\\LocalAI\\whisper\\models\\ggml-small.bin"
+      ],
+      "experimental_features": []
+    },
+    {
+      "id": "qwenstral-code-speculator",
+      "object": "model",
+      "owned_by": "green-roomz",
+      "native_capabilities": [
+        "text",
+        "json",
+        "code"
+      ],
+      "gateway_accepted_capabilities": [
+        "text",
+        "file"
+      ],
+      "routing_behavior": "explicit",
+      "availability": "cold",
+      "unavailable_reasons": [],
+      "experimental_features": []
+    },
+    {
+      "id": "general-text-speculator",
+      "object": "model",
+      "owned_by": "green-roomz",
+      "native_capabilities": [
+        "text",
+        "json",
+        "translation-on-request"
+      ],
+      "gateway_accepted_capabilities": [
+        "text",
+        "file"
+      ],
+      "routing_behavior": "explicit",
+      "availability": "unavailable",
+      "unavailable_reasons": [
+        "model:C:\\LocalAI\\Qwen3-4B-Q4_K_M.gguf"
+      ],
+      "experimental_features": [
+        "qualification-gated-eagle3-speculation"
+      ]
+    },
+    {
+      "id": "semantic-embedding-agent",
+      "object": "model",
+      "owned_by": "green-roomz",
+      "native_capabilities": [
+        "text",
+        "embedding"
+      ],
+      "gateway_accepted_capabilities": [
+        "text",
+        "file"
+      ],
+      "routing_behavior": "explicit",
+      "availability": "unavailable",
+      "unavailable_reasons": [
+        "model:C:\\LocalAI\\qwen3-embedding-0.6b-q8_0.gguf"
+      ],
+      "experimental_features": []
+    },
+    {
+      "id": "retrieval-rerank-agent",
+      "object": "model",
+      "owned_by": "green-roomz",
+      "native_capabilities": [
+        "text",
+        "reranking"
+      ],
+      "gateway_accepted_capabilities": [
+        "text"
+      ],
+      "routing_behavior": "explicit",
+      "availability": "unavailable",
+      "unavailable_reasons": [
+        "model:C:\\LocalAI\\qwen3-reranker-0.6b-q8_0.gguf"
+      ],
+      "experimental_features": []
+    },
+    {
+      "id": "tool-router-agent",
+      "object": "model",
+      "owned_by": "green-roomz",
+      "native_capabilities": [
+        "text",
+        "routing",
+        "json"
+      ],
+      "gateway_accepted_capabilities": [
+        "text",
+        "image",
+        "audio",
+        "file"
+      ],
+      "routing_behavior": "explicit",
+      "availability": "ready",
+      "unavailable_reasons": [],
+      "experimental_features": []
+    },
+    {
+      "id": "safety-policy-agent",
+      "object": "model",
+      "owned_by": "green-roomz",
+      "native_capabilities": [
+        "text",
+        "classification",
+        "json"
+      ],
+      "gateway_accepted_capabilities": [
+        "text"
+      ],
+      "routing_behavior": "explicit",
+      "availability": "unavailable",
+      "unavailable_reasons": [
+        "model:C:\\LocalAI\\qwen3guard-gen-0.6b-q4_k_m.gguf"
+      ],
+      "experimental_features": []
+    },
+    {
+      "id": "speech-synthesis-agent",
+      "object": "model",
+      "owned_by": "green-roomz",
+      "native_capabilities": [
+        "text",
+        "audio-output"
+      ],
+      "gateway_accepted_capabilities": [
+        "text"
+      ],
+      "routing_behavior": "explicit",
+      "availability": "unavailable",
+      "unavailable_reasons": [
+        "runtime:C:\\LocalAI\\piper\\piper.exe",
+        "model:C:\\LocalAI\\piper\\voices\\en_US-lessac-medium.onnx"
+      ],
+      "experimental_features": []
+    },
+    {
+      "id": "image-generation-agent",
+      "object": "model",
+      "owned_by": "green-roomz",
+      "native_capabilities": [
+        "text",
+        "image-output",
+        "image-edit"
+      ],
+      "gateway_accepted_capabilities": [
+        "text",
+        "image"
+      ],
+      "routing_behavior": "explicit",
+      "availability": "unavailable",
+      "unavailable_reasons": [
+        "runtime:C:\\LocalAI\\stable-diffusion.cpp\\bin\\sd-server.exe",
+        "model:C:\\LocalAI\\stable-diffusion.cpp\\models\\sd15-q4_0.gguf"
+      ],
+      "experimental_features": []
+    }
+  ]
+}

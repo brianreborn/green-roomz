@@ -1,0 +1,352 @@
+{
+  "schema": "green-roomz.nexus-route-score.v1",
+  "gold": "gold-routes.json",
+  "recorded": "recorded.sample.jsonl",
+  "n_cases": 35,
+  "n_scored": 7,
+  "n_missing": 28,
+  "metrics": {
+    "top1_accuracy": 0.1143,
+    "accept_accuracy": 0.1143,
+    "illegal_hop_rate": 0.0571,
+    "json_parse_rate": 0.2,
+    "top1_count": 4,
+    "accept_count": 4,
+    "illegal_count": 2,
+    "json_ok_count": 7
+  },
+  "per_family": {
+    "text": {
+      "n": 8,
+      "top1": 2,
+      "accept": 2,
+      "illegal": 0,
+      "json_ok": 2,
+      "missing": 6
+    },
+    "code": {
+      "n": 6,
+      "top1": 1,
+      "accept": 1,
+      "illegal": 0,
+      "json_ok": 1,
+      "missing": 5
+    },
+    "vision": {
+      "n": 3,
+      "top1": 1,
+      "accept": 1,
+      "illegal": 0,
+      "json_ok": 1,
+      "missing": 2
+    },
+    "audio": {
+      "n": 2,
+      "top1": 0,
+      "accept": 0,
+      "illegal": 0,
+      "json_ok": 0,
+      "missing": 2
+    },
+    "image-gen": {
+      "n": 3,
+      "top1": 0,
+      "accept": 0,
+      "illegal": 0,
+      "json_ok": 1,
+      "missing": 2
+    },
+    "speech": {
+      "n": 2,
+      "top1": 0,
+      "accept": 0,
+      "illegal": 0,
+      "json_ok": 0,
+      "missing": 2
+    },
+    "ambiguous": {
+      "n": 7,
+      "top1": 0,
+      "accept": 0,
+      "illegal": 1,
+      "json_ok": 1,
+      "missing": 6
+    },
+    "negatives": {
+      "n": 4,
+      "top1": 0,
+      "accept": 0,
+      "illegal": 1,
+      "json_ok": 1,
+      "missing": 3
+    }
+  },
+  "pass_bar": {
+    "top1_ge_0_85": false,
+    "illegal_lt_0_05": false,
+    "json_ge_0_95": false,
+    "coverage_complete": false
+  },
+  "all_bars_pass": false,
+  "details": [
+    {
+      "id": "T01",
+      "family": "text",
+      "expect": "general-text-speculator",
+      "got": "general-text-speculator",
+      "confidence": 0.91,
+      "reason": "qa",
+      "json_ok": true,
+      "top1": true,
+      "accept": true,
+      "illegal": false,
+      "status": "pass_top1"
+    },
+    {
+      "id": "T02",
+      "family": "text",
+      "expect": "general-text-speculator",
+      "got": "general-text-speculator",
+      "confidence": 0.88,
+      "reason": "poem",
+      "json_ok": true,
+      "top1": true,
+      "accept": true,
+      "illegal": false,
+      "status": "pass_top1"
+    },
+    {
+      "id": "T03",
+      "family": "text",
+      "status": "missing_recording",
+      "expect": "general-text-speculator"
+    },
+    {
+      "id": "T04",
+      "family": "text",
+      "status": "missing_recording",
+      "expect": "general-text-speculator"
+    },
+    {
+      "id": "T05",
+      "family": "text",
+      "status": "missing_recording",
+      "expect": "general-text-speculator"
+    },
+    {
+      "id": "T06",
+      "family": "text",
+      "status": "missing_recording",
+      "expect": "general-text-speculator"
+    },
+    {
+      "id": "T07",
+      "family": "text",
+      "status": "missing_recording",
+      "expect": "general-text-speculator"
+    },
+    {
+      "id": "T08",
+      "family": "text",
+      "status": "missing_recording",
+      "expect": "general-text-speculator"
+    },
+    {
+      "id": "C01",
+      "family": "code",
+      "expect": "qwenstral-code-speculator",
+      "got": "qwenstral-code-speculator",
+      "confidence": 0.93,
+      "reason": "python",
+      "json_ok": true,
+      "top1": true,
+      "accept": true,
+      "illegal": false,
+      "status": "pass_top1"
+    },
+    {
+      "id": "C02",
+      "family": "code",
+      "status": "missing_recording",
+      "expect": "qwenstral-code-speculator"
+    },
+    {
+      "id": "C03",
+      "family": "code",
+      "status": "missing_recording",
+      "expect": "qwenstral-code-speculator"
+    },
+    {
+      "id": "C04",
+      "family": "code",
+      "status": "missing_recording",
+      "expect": "qwenstral-code-speculator"
+    },
+    {
+      "id": "C05",
+      "family": "code",
+      "status": "missing_recording",
+      "expect": "qwenstral-code-speculator"
+    },
+    {
+      "id": "C06",
+      "family": "code",
+      "status": "missing_recording",
+      "expect": "qwenstral-code-speculator"
+    },
+    {
+      "id": "V01",
+      "family": "vision",
+      "expect": "vision-layout-agent",
+      "got": "vision-layout-agent",
+      "confidence": 0.9,
+      "reason": "image",
+      "json_ok": true,
+      "top1": true,
+      "accept": true,
+      "illegal": false,
+      "status": "pass_top1"
+    },
+    {
+      "id": "V02",
+      "family": "vision",
+      "status": "missing_recording",
+      "expect": "vision-layout-agent"
+    },
+    {
+      "id": "V03",
+      "family": "vision",
+      "status": "missing_recording",
+      "expect": "vision-layout-agent"
+    },
+    {
+      "id": "A01",
+      "family": "audio",
+      "status": "missing_recording",
+      "expect": "audio-transcription-agent"
+    },
+    {
+      "id": "A02",
+      "family": "audio",
+      "status": "missing_recording",
+      "expect": "audio-transcription-agent"
+    },
+    {
+      "id": "I01",
+      "family": "image-gen",
+      "expect": "image-generation-agent",
+      "got": "general-text-speculator",
+      "confidence": 0.7,
+      "reason": "chat",
+      "json_ok": true,
+      "top1": false,
+      "accept": false,
+      "illegal": false,
+      "status": "wrong_route"
+    },
+    {
+      "id": "I02",
+      "family": "image-gen",
+      "status": "missing_recording",
+      "expect": "image-generation-agent"
+    },
+    {
+      "id": "I03",
+      "family": "image-gen",
+      "status": "missing_recording",
+      "expect": "image-generation-agent"
+    },
+    {
+      "id": "S01",
+      "family": "speech",
+      "status": "missing_recording",
+      "expect": "speech-synthesis-agent"
+    },
+    {
+      "id": "S02",
+      "family": "speech",
+      "status": "missing_recording",
+      "expect": "speech-synthesis-agent"
+    },
+    {
+      "id": "X01",
+      "family": "ambiguous",
+      "expect": "general-text-speculator",
+      "got": "vision-layout-agent",
+      "confidence": 0.6,
+      "reason": "look",
+      "json_ok": true,
+      "top1": false,
+      "accept": false,
+      "illegal": true,
+      "status": "illegal_hop"
+    },
+    {
+      "id": "X02",
+      "family": "ambiguous",
+      "status": "missing_recording",
+      "expect": "general-text-speculator"
+    },
+    {
+      "id": "X03",
+      "family": "ambiguous",
+      "status": "missing_recording",
+      "expect": "general-text-speculator"
+    },
+    {
+      "id": "X04",
+      "family": "ambiguous",
+      "status": "missing_recording",
+      "expect": "general-text-speculator"
+    },
+    {
+      "id": "X05",
+      "family": "ambiguous",
+      "status": "missing_recording",
+      "expect": "safety-policy-agent"
+    },
+    {
+      "id": "X06",
+      "family": "ambiguous",
+      "status": "missing_recording",
+      "expect": "semantic-embedding-agent"
+    },
+    {
+      "id": "X07",
+      "family": "ambiguous",
+      "status": "missing_recording",
+      "expect": "retrieval-rerank-agent"
+    },
+    {
+      "id": "N01",
+      "family": "negatives",
+      "expect": "general-text-speculator",
+      "got": "vision-layout-agent",
+      "confidence": 0.55,
+      "reason": "describe",
+      "json_ok": true,
+      "top1": false,
+      "accept": false,
+      "illegal": true,
+      "status": "illegal_hop"
+    },
+    {
+      "id": "N02",
+      "family": "negatives",
+      "status": "missing_recording",
+      "expect": "general-text-speculator"
+    },
+    {
+      "id": "N03",
+      "family": "negatives",
+      "status": "missing_recording",
+      "expect": "general-text-speculator"
+    },
+    {
+      "id": "N04",
+      "family": "negatives",
+      "status": "missing_recording",
+      "expect": "general-text-speculator"
+    }
+  ]
+}

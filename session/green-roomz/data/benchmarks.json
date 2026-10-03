@@ -1,0 +1,443 @@
+{
+  "schema_version": 1,
+  "results": {
+    "e4a43e47e079607352a1eace04594b4afc07138609a9e1c182254375ac8c406f": {
+      "key": "e4a43e47e079607352a1eace04594b4afc07138609a9e1c182254375ac8c406f",
+      "alias": "qwenstral-code-speculator",
+      "profile": {
+        "id": "vulkan-all",
+        "args": [
+          "--load-mode",
+          "mmap",
+          "--fit",
+          "off",
+          "--device",
+          "Vulkan0",
+          "--op-offload",
+          "--threads",
+          "4",
+          "--threads-batch",
+          "4",
+          "--n-gpu-layers",
+          "all",
+          "--batch-size",
+          "512",
+          "--ubatch-size",
+          "128",
+          "--cache-type-k",
+          "q8_0",
+          "--cache-type-v",
+          "q8_0"
+        ]
+      },
+      "metrics": {
+        "promptTps": 27.22,
+        "generationTps": 2.55,
+        "coldStartMs": 122162
+      },
+      "measured_at": "2026-08-28T17:25:47.246Z"
+    },
+    "2583b4a651aa7b5e9a65f57efcc84e63dd4e697478ec30053c16c7f615a375a9": {
+      "key": "2583b4a651aa7b5e9a65f57efcc84e63dd4e697478ec30053c16c7f615a375a9",
+      "alias": "qwenstral-code-speculator",
+      "profile": {
+        "id": "hybrid-12",
+        "args": [
+          "--load-mode",
+          "mmap",
+          "--fit",
+          "off",
+          "--device",
+          "Vulkan0",
+          "--op-offload",
+          "--threads",
+          "4",
+          "--threads-batch",
+          "4",
+          "--n-gpu-layers",
+          "12",
+          "--batch-size",
+          "512",
+          "--ubatch-size",
+          "128",
+          "--cache-type-k",
+          "q8_0",
+          "--cache-type-v",
+          "q8_0"
+        ]
+      },
+      "metrics": {
+        "promptTps": 22.93,
+        "generationTps": 3.56,
+        "coldStartMs": 106207
+      },
+      "measured_at": "2026-08-28T17:27:33.943Z"
+    },
+    "5b56ad4b1161459983704197a4aad4d86ccb015dd55cea1eb33a41f63fc0e555": {
+      "key": "5b56ad4b1161459983704197a4aad4d86ccb015dd55cea1eb33a41f63fc0e555",
+      "alias": "general-text-speculator",
+      "profile": {
+        "id": "vulkan-all",
+        "args": [
+          "--load-mode",
+          "mmap",
+          "--fit",
+          "off",
+          "--device",
+          "Vulkan0",
+          "--op-offload",
+          "--threads",
+          "4",
+          "--threads-batch",
+          "4",
+          "--n-gpu-layers",
+          "all",
+          "--batch-size",
+          "512",
+          "--ubatch-size",
+          "128",
+          "--cache-type-k",
+          "q8_0",
+          "--cache-type-v",
+          "q8_0"
+        ]
+      },
+      "metrics": {
+        "promptTps": 41.33,
+        "generationTps": 5.31,
+        "coldStartMs": 64277
+      },
+      "measured_at": "2026-08-28T17:20:56.582Z"
+    },
+    "1b48fb04b3d09290991b5d332125325f00ae13138be750bff9a18d83d2d6d9d7": {
+      "key": "1b48fb04b3d09290991b5d332125325f00ae13138be750bff9a18d83d2d6d9d7",
+      "alias": "general-text-speculator",
+      "profile": {
+        "id": "hybrid-12",
+        "args": [
+          "--load-mode",
+          "mmap",
+          "--fit",
+          "off",
+          "--device",
+          "Vulkan0",
+          "--op-offload",
+          "--threads",
+          "4",
+          "--threads-batch",
+          "4",
+          "--n-gpu-layers",
+          "12",
+          "--batch-size",
+          "512",
+          "--ubatch-size",
+          "128",
+          "--cache-type-k",
+          "q8_0",
+          "--cache-type-v",
+          "q8_0"
+        ]
+      },
+      "metrics": {
+        "promptTps": 38.06,
+        "generationTps": 4.16,
+        "coldStartMs": 76393
+      },
+      "measured_at": "2026-08-28T17:22:13.370Z"
+    },
+    "2773f56b7d6bfcb7f1621ec4d06362595dad06855d512334a16e0100e68361c6": {
+      "key": "2773f56b7d6bfcb7f1621ec4d06362595dad06855d512334a16e0100e68361c6",
+      "alias": "general-text-speculator",
+      "profile": {
+        "id": "cpu-4",
+        "args": [
+          "--load-mode",
+          "mmap",
+          "--fit",
+          "off",
+          "--device",
+          "none",
+          "--no-op-offload",
+          "--threads",
+          "4",
+          "--threads-batch",
+          "4",
+          "--n-gpu-layers",
+          "0",
+          "--batch-size",
+          "512",
+          "--ubatch-size",
+          "128",
+          "--cache-type-k",
+          "q8_0",
+          "--cache-type-v",
+          "q8_0"
+        ]
+      },
+      "metrics": {
+        "promptTps": 22.69,
+        "generationTps": 8.05,
+        "coldStartMs": 72785
+      },
+      "measured_at": "2026-08-28T17:23:26.531Z"
+    },
+    "7a3d60421340e02dbe039b210cb732f9629730fba03c659836ce6fc5912ba8f3": {
+      "key": "7a3d60421340e02dbe039b210cb732f9629730fba03c659836ce6fc5912ba8f3",
+      "alias": "qwenstral-code-speculator",
+      "profile": {
+        "id": "cpu-4",
+        "args": [
+          "--load-mode",
+          "mmap",
+          "--fit",
+          "off",
+          "--device",
+          "none",
+          "--no-op-offload",
+          "--threads",
+          "4",
+          "--threads-batch",
+          "4",
+          "--n-gpu-layers",
+          "0",
+          "--batch-size",
+          "512",
+          "--ubatch-size",
+          "128",
+          "--cache-type-k",
+          "q8_0",
+          "--cache-type-v",
+          "q8_0"
+        ]
+      },
+      "metrics": {
+        "promptTps": 13.57,
+        "generationTps": 4.55,
+        "coldStartMs": 125690
+      },
+      "measured_at": "2026-08-28T17:29:40.130Z"
+    },
+    "e31fb32fa85e494382d4c30123b227ef59c5052f3711787bd12f87b05f566316": {
+      "key": "e31fb32fa85e494382d4c30123b227ef59c5052f3711787bd12f87b05f566316",
+      "alias": "qwenstral-code-speculator",
+      "profile": {
+        "id": "hybrid-7",
+        "args": [
+          "--load-mode",
+          "mmap",
+          "--fit",
+          "off",
+          "--device",
+          "Vulkan0",
+          "--op-offload",
+          "--threads",
+          "4",
+          "--threads-batch",
+          "4",
+          "--n-gpu-layers",
+          "7",
+          "--batch-size",
+          "512",
+          "--ubatch-size",
+          "128",
+          "--cache-type-k",
+          "q8_0",
+          "--cache-type-v",
+          "q8_0"
+        ]
+      },
+      "metrics": {
+        "promptTps": 20.4,
+        "generationTps": 4.18,
+        "coldStartMs": 18359
+      },
+      "measured_at": "2026-08-28T18:39:36.484Z",
+      "quick": true
+    },
+    "57fe930ff13a12f65e5a76b9c11d687409603dbd3786592916135092e5dd5079": {
+      "key": "57fe930ff13a12f65e5a76b9c11d687409603dbd3786592916135092e5dd5079",
+      "alias": "qwenstral-code-speculator",
+      "profile": {
+        "id": "hybrid-14",
+        "args": [
+          "--load-mode",
+          "mmap",
+          "--fit",
+          "off",
+          "--device",
+          "Vulkan0",
+          "--op-offload",
+          "--threads",
+          "4",
+          "--threads-batch",
+          "4",
+          "--n-gpu-layers",
+          "14",
+          "--batch-size",
+          "512",
+          "--ubatch-size",
+          "128",
+          "--cache-type-k",
+          "q8_0",
+          "--cache-type-v",
+          "q8_0"
+        ]
+      },
+      "metrics": {
+        "promptTps": 22.21,
+        "generationTps": 3.6,
+        "coldStartMs": 17240
+      },
+      "measured_at": "2026-08-28T18:39:54.187Z",
+      "quick": true
+    },
+    "39d31feadf4785e26df4c2f611437955a12701d8c9ff246b4eba6274081e9257": {
+      "key": "39d31feadf4785e26df4c2f611437955a12701d8c9ff246b4eba6274081e9257",
+      "alias": "qwenstral-code-speculator",
+      "profile": {
+        "id": "hybrid-21",
+        "args": [
+          "--load-mode",
+          "mmap",
+          "--fit",
+          "off",
+          "--device",
+          "Vulkan0",
+          "--op-offload",
+          "--threads",
+          "4",
+          "--threads-batch",
+          "4",
+          "--n-gpu-layers",
+          "21",
+          "--batch-size",
+          "512",
+          "--ubatch-size",
+          "128",
+          "--cache-type-k",
+          "q8_0",
+          "--cache-type-v",
+          "q8_0"
+        ]
+      },
+      "metrics": {
+        "promptTps": 24.21,
+        "generationTps": 3.01,
+        "coldStartMs": 17716
+      },
+      "measured_at": "2026-08-28T18:40:12.362Z",
+      "quick": true
+    },
+    "daf2a3637a86a4217ae9c8860fbb3b19a1fb31bf11984b1189a54d4280054699": {
+      "key": "daf2a3637a86a4217ae9c8860fbb3b19a1fb31bf11984b1189a54d4280054699",
+      "alias": "general-text-speculator",
+      "profile": {
+        "id": "hybrid-9",
+        "args": [
+          "--load-mode",
+          "mmap",
+          "--fit",
+          "off",
+          "--device",
+          "Vulkan0",
+          "--op-offload",
+          "--threads",
+          "4",
+          "--threads-batch",
+          "4",
+          "--n-gpu-layers",
+          "9",
+          "--batch-size",
+          "512",
+          "--ubatch-size",
+          "128",
+          "--cache-type-k",
+          "q8_0",
+          "--cache-type-v",
+          "q8_0"
+        ]
+      },
+      "metrics": {
+        "promptTps": 32.34,
+        "generationTps": 4.39,
+        "coldStartMs": 12801
+      },
+      "measured_at": "2026-08-28T18:40:39.481Z",
+      "quick": true
+    },
+    "3c5fddd6c2b80a3a7fdad7ba9370a99e07b6ed226dd34e901aa690987554e1aa": {
+      "key": "3c5fddd6c2b80a3a7fdad7ba9370a99e07b6ed226dd34e901aa690987554e1aa",
+      "alias": "general-text-speculator",
+      "profile": {
+        "id": "hybrid-18",
+        "args": [
+          "--load-mode",
+          "mmap",
+          "--fit",
+          "off",
+          "--device",
+          "Vulkan0",
+          "--op-offload",
+          "--threads",
+          "4",
+          "--threads-batch",
+          "4",
+          "--n-gpu-layers",
+          "18",
+          "--batch-size",
+          "512",
+          "--ubatch-size",
+          "128",
+          "--cache-type-k",
+          "q8_0",
+          "--cache-type-v",
+          "q8_0"
+        ]
+      },
+      "metrics": {
+        "promptTps": 34.93,
+        "generationTps": 4.32,
+        "coldStartMs": 10406
+      },
+      "measured_at": "2026-08-28T18:40:50.252Z",
+      "quick": true
+    },
+    "45a2fb201abb0674ab0e513dc920b1b708e80dd0099e46155171ddfd96a4e40d": {
+      "key": "45a2fb201abb0674ab0e513dc920b1b708e80dd0099e46155171ddfd96a4e40d",
+      "alias": "general-text-speculator",
+      "profile": {
+        "id": "hybrid-27",
+        "args": [
+          "--load-mode",
+          "mmap",
+          "--fit",
+          "off",
+          "--device",
+          "Vulkan0",
+          "--op-offload",
+          "--threads",
+          "4",
+          "--threads-batch",
+          "4",
+          "--n-gpu-layers",
+          "27",
+          "--batch-size",
+          "512",
+          "--ubatch-size",
+          "128",
+          "--cache-type-k",
+          "q8_0",
+          "--cache-type-v",
+          "q8_0"
+        ]
+      },
+      "metrics": {
+        "promptTps": 40.32,
+        "generationTps": 4.35,
+        "coldStartMs": 10124
+      },
+      "measured_at": "2026-08-28T18:41:00.782Z",
+      "quick": true
+    }
+  }
+}

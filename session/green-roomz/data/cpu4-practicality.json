@@ -1,0 +1,175 @@
+{
+  "schema_version": 1,
+  "title": "cpu-4 practicality (no cramped retry)",
+  "measured_at_utc": "2026-08-28T17:53:49Z",
+  "measured_at_pt": "2026-08-28T10:53:49 PT",
+  "host": {
+    "machine": "shalom",
+    "total_ram_gb": 15.24,
+    "free_ram_gb_before": 8.96,
+    "free_ram_kb_before": 9399884,
+    "llama_server": "none",
+    "llama_bench": "none",
+    "listen_18080_8183_8080_8081": "none",
+    "other": "ollama idle pid 17820 ~19MB; ollama app pid 21764 ~14MB; :11434 only",
+    "free_ram_gb_after": 8.97,
+    "free_ram_kb_after": 9404292
+  },
+  "decision": {
+    "retry_cpu4_code": false,
+    "reason": "cpu-4 code working set is ~7284 MB. With 8.96 GB free that leaves ~1.68 GB. Other apps could not run concurrently. Brian: a technical success at ~0.6 GB free is still impractical; do not squeeze cramped runs. Skip further cpu-4 retries. Prefer already-winning vulkan-all.",
+    "expected_remaining_gb_if_loaded": 1.68,
+    "impractical_threshold": "leave enough RAM for other apps; ~0.6 GB remaining is unusable; ~1.9 GB still no concurrent-app headroom on this 16 GB laptop"
+  },
+  "profiles": {
+    "qwenstral-code-speculator": {
+      "winner_practical": "vulkan-all",
+      "profiles": [
+        {
+          "id": "vulkan-all",
+          "practical": true,
+          "technical": true,
+          "full": {
+            "promptTps": 27.22,
+            "generationTps": 2.55,
+            "coldStartMs": 122162,
+            "measured_at": "2026-08-28T17:25:47.246Z"
+          },
+          "quick": {
+            "promptTps": 24.36,
+            "generationTps": 1.93,
+            "coldStartMs": 30932,
+            "measured_at": "2026-08-28T17:16:34.821Z"
+          },
+          "ram": {
+            "llama_bench_ws_mb": 4706,
+            "min_free_gb_during_full": 2.81,
+            "start_free_gb_then": 7.58,
+            "expected_remaining_gb_now": 4.25
+          },
+          "notes": "llama-bench offload; gateway-with-draft WS was higher (~7203 MB) and is a different path"
+        },
+        {
+          "id": "hybrid-12",
+          "practical": true,
+          "technical": true,
+          "full": {
+            "promptTps": 22.93,
+            "generationTps": 3.56,
+            "coldStartMs": 106207,
+            "measured_at": "2026-08-28T17:27:33.943Z"
+          },
+          "quick": {
+            "promptTps": 20.66,
+            "generationTps": 2.7,
+            "coldStartMs": 22091,
+            "measured_at": "2026-08-28T17:16:57.857Z"
+          },
+          "ram": {
+            "llama_bench_ws_mb": 4709,
+            "min_free_gb_during_full": 2.79,
+            "start_free_gb_then": 7.61,
+            "expected_remaining_gb_now": 4.25
+          }
+        },
+        {
+          "id": "cpu-4",
+          "practical": false,
+          "technical": true,
+          "full": {
+            "promptTps": 13.57,
+            "generationTps": 4.55,
+            "coldStartMs": 125690,
+            "measured_at": "2026-08-28T17:29:40.130Z",
+            "min_free_gb": 0.62,
+            "ws_mb": 7284,
+            "start_free_gb": 7.61
+          },
+          "quick": {
+            "status": "OOM-skipped",
+            "when_pt": "2026-08-28 10:17 PT",
+            "ws_mb": 7260,
+            "free_gb": 0.17,
+            "retried_now": false
+          },
+          "ram": {
+            "expected_remaining_gb_now": 1.68,
+            "why_skipped": "even with 8.96 GB free, ~7.28 GB WS leaves ~1.68 GB \u2014 not concurrent-app headroom"
+          },
+          "notes": "Technical success on full is not a qualified winner. Do not retry."
+        }
+      ]
+    },
+    "general-text-speculator": {
+      "winner_practical": "vulkan-all",
+      "profiles": [
+        {
+          "id": "vulkan-all",
+          "practical": true,
+          "technical": true,
+          "full": {
+            "promptTps": 41.33,
+            "generationTps": 5.31,
+            "coldStartMs": 64277,
+            "measured_at": "2026-08-28T17:20:56.582Z"
+          },
+          "quick": {
+            "promptTps": 42.77,
+            "generationTps": 3.93,
+            "coldStartMs": 16065,
+            "measured_at": "2026-08-28T17:18:38.177Z"
+          },
+          "ram": {
+            "llama_bench_ws_mb": 2931,
+            "free_gb_during_quick": 4.0
+          }
+        },
+        {
+          "id": "hybrid-12",
+          "practical": true,
+          "technical": true,
+          "full": {
+            "promptTps": 38.06,
+            "generationTps": 4.16,
+            "coldStartMs": 76393,
+            "measured_at": "2026-08-28T17:22:13.370Z"
+          },
+          "quick": {
+            "promptTps": 29.4,
+            "generationTps": 4.04,
+            "coldStartMs": 11730,
+            "measured_at": "2026-08-28T17:18:50.328Z"
+          }
+        },
+        {
+          "id": "cpu-4",
+          "practical": true,
+          "technical": true,
+          "full": {
+            "promptTps": 22.69,
+            "generationTps": 8.05,
+            "coldStartMs": 72785,
+            "measured_at": "2026-08-28T17:23:26.531Z"
+          },
+          "quick": {
+            "promptTps": 23.27,
+            "generationTps": 7.85,
+            "coldStartMs": 11765,
+            "measured_at": "2026-08-28T17:19:02.486Z"
+          },
+          "ram": {
+            "llama_bench_ws_mb": 4192,
+            "min_free_gb_during_full": 3.16,
+            "notes": "4B target-only; not cramped. Not re-run."
+          }
+        }
+      ]
+    }
+  },
+  "not_done": [
+    "cpu-4 code --quick still has no successful llama-bench number (OOM-skipped; retry skipped as impractical)",
+    "7 missing artifacts not fetched",
+    "EAGLE-3 conversion not run"
+  ],
+  "llama_left_loaded": false
+}

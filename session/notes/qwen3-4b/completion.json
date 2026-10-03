@@ -1,0 +1,55 @@
+{
+  "gate": "general-text-speculator leftover",
+  "when_utc": "2026-08-28T17:02:41Z",
+  "when_pt": "2026-08-28 10:02:41 PT",
+  "download": {
+    "path": "C:\\LocalAI\\Qwen3-4B-Q4_K_M.gguf",
+    "size_bytes": 2497280256,
+    "size_gib": 2.326,
+    "sha256": "7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5",
+    "source": "Qwen/Qwen3-4B-GGUF file Qwen3-4B-Q4_K_M.gguf",
+    "method": "curl -L -C - (resume-capable)",
+    "skipped_existing": false,
+    "elapsed_s": 67
+  },
+  "validate": {
+    "general-text-speculator": "cold",
+    "qwenstral-code-speculator": "cold",
+    "tool-router-agent": "ready",
+    "still_missing": [
+      "vision-layout-agent",
+      "audio-transcription-agent",
+      "semantic-embedding-agent",
+      "retrieval-rerank-agent",
+      "safety-policy-agent",
+      "speech-synthesis-agent",
+      "image-generation-agent"
+    ]
+  },
+  "live_post": {
+    "ran": true,
+    "http_status": 200,
+    "alias": "general-text-speculator",
+    "profile": "vulkan-all",
+    "ctx_size": 1024,
+    "draft_enabled": false,
+    "prompt_tps": 9.47,
+    "generation_tps": 3.43,
+    "wall_ms": 16260,
+    "llama_ws_mb": 5027.8,
+    "finish_reason": "length",
+    "note": "Qwen3 thinking used all 24 max_tokens in reasoning_content; content empty. Inference OK.",
+    "stopped": true,
+    "leftovers": false,
+    "free_ram_gb_before": 5.78,
+    "free_ram_gb_during": 1.31,
+    "free_ram_gb_after": 6.31
+  },
+  "eagle3": {
+    "converted": false,
+    "reason": "Optional. convert_hf_to_gguf.py exists at C:\\LocalAI\\llama.cpp-0.3.0\\convert_hf_to_gguf.py but conversion needs AngelSlim/Qwen3-4B_eagle3 safetensors plus a Qwen/Qwen3-4B HF snapshot as --target-model-dir. That is a new project; skipped.",
+    "expected_path": "C:\\LocalAI\\Qwen3-4B-eagle3-BF16.gguf"
+  },
+  "code_fixes": "none \u2014 official agents.windows.json already declared the model; hangup patch already in src/gateway.mjs. Live serve used temp data/serve-vulkan-all-4b.json (vulkan-all only, ctx=1024, draft_enabled=false) because default profile order is cpu-4 first and missing EAGLE-3 would be passed as --model-draft.",
+  "no_grok_login": true
+}

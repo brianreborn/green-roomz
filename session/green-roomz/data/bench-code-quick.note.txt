@@ -1,0 +1,4 @@
+code --quick cpu-4 SKIPPED: OOM-guard killed llama-bench at 10:17:16 PT (ws=7260MB, free=0.17GB).
+vulkan-all and hybrid-12 were already saved to benchmarks.json (then overwritten by full --force).
+code FULL cpu-4 later succeeded at 10:29:40 PT because start free was 7.61GB (min 0.62GB, ws=7284MB).
+CLI JSON for --quick was not printed (process threw after kill). See ram-watch.log and benchmarks.quick.json.

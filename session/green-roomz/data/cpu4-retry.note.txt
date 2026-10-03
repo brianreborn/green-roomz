@@ -1,0 +1,6 @@
+cpu-4 code NOT retried (impractical).
+Before: 8.96 GB free of 15.24 GB; llama-server/bench none; ollama idle only.
+After: 8.97 GB free (9404292 KB); llama never started.
+cpu-4 code WS~7284 MB => expected remaining ~1.68 GB — other apps cannot run.
+Quick cpu-4 still OOM-skipped (10:17 PT, 0.17 GB); full technical 13.57 pp / 4.55 tg at min free 0.62 GB is impractical.
+Winner remains vulkan-all (code 27.22/2.55, text 41.33/5.31). No fetch. llama not started.

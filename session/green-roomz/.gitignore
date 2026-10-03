@@ -1,0 +1,15 @@
+node_modules/
+data/*.log
+data/*.out.log
+data/*.hdr.txt
+data/*.req.json
+data/*.res.json
+data/serve*
+data/ram-watch*
+data/open-taskmgr.ps1
+data/shalom-ram-watch.ps1
+data/*.stdout.log
+data/*.note.txt
+*.gguf
+.DS_Store
+Thumbs.db

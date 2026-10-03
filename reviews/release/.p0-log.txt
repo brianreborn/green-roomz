@@ -1,0 +1,10 @@
+2026-09-12T00:52Z
+P0#1 cloud agent kicked by New Bot — watch PR no merge; next prettify
+cloud agents unavailable; box grz-src path; bounce notes ready
+review accept; bounce blocked local-exec
+FIX-01 CLOSED live bounce Senior Dev; BND-04 closed
+PR#12 opened fix/dispatch-01-explicit-model-pin; no parallel routing rewrite
+nexus model-iter lane opened; P0#2 not blocking
+nexus-eval harness landed gold-routes+score-routes; NX-08 confirmed
+OPNsense+kit ISO on box; qodesh C:9.1GB no VBox — create-vm blocked on volume+install
+VBox 7.2.16 present full path; blocker volume only

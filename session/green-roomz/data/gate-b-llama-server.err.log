@@ -1,0 +1,22 @@
+0.00.178.577 I cmn  common_param: common_params_print_info: verbosity = 3 (adjust with the `-lv N` CLI arg)
+0.00.181.326 W srv  llama_server: -----------------
+0.00.181.340 W srv  llama_server: CORS is set to allow all origins ('*') and no API key is set
+0.00.181.341 W srv  llama_server: this can be a security risk (cross-origin attacks)
+0.00.181.342 W srv  llama_server: more info: https://github.com/ggml-org/llama.cpp/pull/25655
+0.00.181.342 W srv  llama_server: -----------------
+0.00.184.675 I srv    load_model: loading model 'C:\LocalAI\qwen2.5-coder-7b-instruct-q4_k_m.gguf'
+0.00.603.904 W load: control-looking token: 128247 '</s>' was not control-type; this is probably a bug in the model. its type will be overridden
+0.27.191.713 I cmn          init: llama threadpool init, n_threads = 4
+0.28.733.586 I common_speculative_init_result: loading draft model 'C:\LocalAI\qwen2.5-coder-1.5b-instruct-q4_k_m.gguf'
+0.29.123.104 W load: control-looking token: 128247 '</s>' was not control-type; this is probably a bug in the model. its type will be overridden
+0.32.636.081 I srv    load_model: initializing, n_slots = 1, n_ctx_slot = 1024, kv_unified = 'false'
+0.33.305.226 I srv  llama_server: model loaded
+0.33.305.450 I srv  llama_server: listening on http://127.0.0.1:8183
+0.50.407.712 I slot get_availabl: id  0 | task -1 | selected slot by LRU, t_last = -1
+0.50.408.183 I slot launch_slot_: id  0 | task 0 | processing task, is_child = 0
+0.58.005.406 I slot print_timing: id  0 | task 0 | prompt eval time =    2868.25 ms /    42 tokens (   68.29 ms per token,    14.64 tokens per second)
+0.58.005.415 I slot print_timing: id  0 | task 0 |        eval time =    4727.44 ms /    11 tokens (  472.74 ms per token,     2.12 tokens per second)
+0.58.005.417 I slot print_timing: id  0 | task 0 |       total time =    7595.68 ms /    53 tokens
+0.58.005.419 I slot print_timing: id  0 | task 0 |    graphs reused =          3
+0.58.005.442 I slot print_timing: id  0 | task 0 | draft acceptance = 1.00000 (    9 accepted /     9 generated), mean len =  4.00
+0.58.007.136 I slot      release: id  0 | task 0 | stop processing: n_tokens = 54, truncated = 0

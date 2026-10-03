@@ -1,0 +1,42 @@
+{
+  "gate": "gateway-live",
+  "when_utc": "2026-08-28T16:43:59Z",
+  "when_pt": "2026-08-28 09:43:59 PT",
+  "live_inference_via_gateway": true,
+  "http_status": 200,
+  "gateway": "http://127.0.0.1:18080/v1/chat/completions",
+  "requested_alias": "qwenstral-code-speculator",
+  "effective_alias": "qwenstral-code-speculator",
+  "route_reason": "requested_alias",
+  "profile": "vulkan-all",
+  "ctx_size": 1024,
+  "serve_pid": 28860,
+  "llama_pid": 12988,
+  "working_set_mb_while_up": 7203.5,
+  "free_ram_gb_before": 5.86,
+  "free_ram_gb_during": 0.3,
+  "free_ram_gb_after_stop": 7.98,
+  "prompt_tps": 14.204,
+  "generation_tps": 2.265,
+  "draft_accepted": "9/9",
+  "prompt_n": 37,
+  "predicted_n": 11,
+  "wall_ms": 32774,
+  "body_snippet": "```python\nprint(\"Hello, World!\")\n```",
+  "stopped": true,
+  "leftovers": false,
+  "notes": "Default serve profile order is cpu-4 first; 5.93GB free could not hold 4.36+1.04GB CPU-resident, so a vulkan-all-only temp manifest (ctx=1024) was used. First POST hit Node IncomingMessage 'close' abort-after-body; patched to abort only on client hangup. No Qwen3-4B fetch. No grok login.",
+  "logs": {
+    "windows_project": "C:\\Users\\brian\\Documents\\Codex\\2026-08-28\\files-pasted-by-the-user-1\\outputs\\green-roomz",
+    "windows_report": "C:\\Users\\brian\\Documents\\Codex\\2026-08-28\\files-pasted-by-the-user-1\\outputs\\green-roomz\\data\\gateway-live-report.json",
+    "windows_post_response": "C:\\Users\\brian\\Documents\\Codex\\2026-08-28\\files-pasted-by-the-user-1\\outputs\\green-roomz\\data\\post-response.json",
+    "windows_serve_err": "C:\\Users\\brian\\Documents\\Codex\\2026-08-28\\files-pasted-by-the-user-1\\outputs\\green-roomz\\data\\serve-err.log",
+    "windows_temp_manifest": "C:\\Users\\brian\\Documents\\Codex\\2026-08-28\\files-pasted-by-the-user-1\\outputs\\green-roomz\\data\\serve-vulkan-all.json",
+    "box_dir": "/workspace/session/gateway-live/",
+    "console": "/workspace/session/console.log"
+  },
+  "patches": [
+    "src/gateway.mjs: abort only if response closes before writableFinished",
+    "src/process-manager.mjs: aborted starts stay cold, not unavailable"
+  ]
+}

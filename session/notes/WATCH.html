@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<title>Codex session — last output</title>
+<style>
+  html,body{margin:0;background:#111;color:#e8e4d9;font:16px/1.45 ui-sans-serif,system-ui;height:100%}
+  body{padding:24px 32px;box-sizing:border-box}
+  h1{font-size:20px;margin:0 0 6px;color:#fff}
+  .meta{color:#9aa;font-size:13px;margin-bottom:20px}
+  .msg{margin:0 0 18px;padding:14px 16px;border-radius:10px;background:#1c1c1c;border:1px solid #2a2a2a}
+  .who{font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:#8ab4ff;margin-bottom:6px}
+  .user .who{color:#f0c36d}
+  .fail{border-color:#a33;background:#241111}
+  .fail .who{color:#f88}
+  pre{white-space:pre-wrap;margin:0;font:15px/1.45 ui-sans-serif,system-ui}
+</style></head>
+<body>
+<h1>Green-Roomz — Codex Desktop session</h1>
+<div class="meta">C:\Users\brian\Documents\Codex\2026-08-28\files-pasted-by-the-user-1 · left off 8:33 AM PT</div>
+
+<div class="msg user"><div class="who">You · 8:20 AM</div>
+<pre>we need to fix the Qwenstral/Mistral thing since a model of this type is critical</pre></div>
+
+<div class="msg"><div class="who">Codex · 8:20 AM</div>
+<pre>Agreed. A general-language agent without viable speculative acceleration would leave a core design goal unresolved. Treating this as a required fix, not merely disabling the draft.</pre></div>
+
+<div class="msg user"><div class="who">You · 8:22 AM</div>
+<pre>We just need to make sure to select working models. Thank you for being flexible.</pre></div>
+
+<div class="msg"><div class="who">Codex · 8:22 AM</div>
+<pre>Understood. I’ll stop treating the custom Mistral pairing as something we must salvage. The general-language slot will use a known-compatible target/speculator family instead. Preferred replacement: Qwen3-4B with its target-specific Qwen3-4B EAGLE-3 draft.</pre></div>
+
+<div class="msg"><div class="who">Codex · 8:28 AM</div>
+<pre>Absolutely. I’m replacing the broken Qwenstral/Mistral pairing with a target–draft pair that is explicitly compatible, then I’ll validate the manifest and runtime behavior end to end. Model availability and loadability will be hard gates rather than optimistic assumptions.</pre></div>
+
+<div class="msg"><div class="who">Codex · 8:32 AM  — last real output</div>
+<pre>The local runtime check is now concrete: build b10665 supports EAGLE-3, and the exact upstream pair is Qwen3-4B Instruct GGUF plus the Qwen3-4B-specific AngelSlim EAGLE-3 draft — not Qwen3 Base, not Mistral, and not a vocabulary-transplanted hybrid. Encoding the exact repositories, filenames, hashes, conversion rule, and a target-only fallback so the agent stays usable if speculation fails qualification.</pre></div>
+
+<div class="msg fail"><div class="who">Stopped · 8:33 AM</div>
+<pre>Usage limit hit. Final requirements + runtime manifest agents errored.
+
+This is where the ChatGPT/Codex session died. Pickup continues from the Qwen3-4B + EAGLE-3 swap, then finish the Green-Roomz requirements and first Windows implementation.</pre></div>
+</body></html>

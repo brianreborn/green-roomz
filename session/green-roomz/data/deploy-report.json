@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-08-28T18:52:00Z",
+  "leftover": "none",
+  "tests": { "box": "51/51", "windows": "51/51" },
+  "expanded_profile_ids": {
+    "qwenstral-code-speculator": { "nLayers": 28, "ids": ["vulkan-all", "hybrid-7", "hybrid-14", "hybrid-21", "cpu-4"] },
+    "general-text-speculator": { "nLayers": 36, "ids": ["vulkan-all", "hybrid-9", "hybrid-18", "hybrid-27", "cpu-4"] }
+  },
+  "winners": {
+    "qwenstral-code-speculator": "vulkan-all",
+    "general-text-speculator": "vulkan-all"
+  },
+  "new_hybrid_measurements": {
+    "qwenstral-code-speculator": {
+      "vulkan-all": { "promptTps": 27.22, "generationTps": 2.55, "source": "cached-full", "score": 17.84719 },
+      "hybrid-7": { "promptTps": 20.4, "generationTps": 4.18, "quick": true, "coldStartMs": 18359 },
+      "hybrid-14": { "promptTps": 22.21, "generationTps": 3.6, "quick": true, "coldStartMs": 17240 },
+      "hybrid-21": { "promptTps": 24.21, "generationTps": 3.01, "quick": true, "coldStartMs": 17716 }
+    },
+    "general-text-speculator": {
+      "vulkan-all": { "promptTps": 41.33, "generationTps": 5.31, "source": "cached-full", "score": 28.136115 },
+      "hybrid-9": { "promptTps": 32.34, "generationTps": 4.39, "quick": true, "coldStartMs": 12801 },
+      "hybrid-18": { "promptTps": 34.93, "generationTps": 4.32, "quick": true, "coldStartMs": 10406 },
+      "hybrid-27": { "promptTps": 40.32, "generationTps": 4.35, "quick": true, "coldStartMs": 10124 }
+    }
+  },
+  "full_rebench": "skipped — no new hybrid beat vulkan-all on throughput score",
+  "smoke": {
+    "serve": "node bin/green-roomz.mjs serve --port 18080 (official manifest)",
+    "models_http": 200,
+    "health_http": 200,
+    "health_status": "degraded",
+    "code": {
+      "http": 200,
+      "profile": "vulkan-all",
+      "ngl": "all",
+      "cpu4": false,
+      "finish_reason": "length",
+      "content": "python hello world snippet",
+      "prompt_per_second": 8.656,
+      "predicted_per_second": 2.022,
+      "draft_accepted": "17/17"
+    },
+    "text": {
+      "http": 200,
+      "profile": "vulkan-all",
+      "ngl": "all",
+      "cpu4": false,
+      "finish_reason": "stop",
+      "content": "Hello! How can I assist you today?",
+      "prompt_per_second": 9.609,
+      "predicted_per_second": 2.918,
+      "note": "first POSTs HTTP500 because proxy forwarded curl Content-Length after thinking-off enlarged the body; proxy now skips content-length"
+    }
+  },
+  "ram": {
+    "before_gb_free": 8.78,
+    "during_7b_post_gb_free": 0.54,
+    "after_stop_gb_free": 9.42,
+    "total_gb": 15.24
+  },
+  "files_copied": [
+    "src/autotune.mjs",
+    "src/benchmark.mjs",
+    "src/process-manager.mjs",
+    "src/proxy.mjs",
+    "bin/green-roomz.mjs",
+    "test/autotune.test.mjs",
+    "test/benchmark.test.mjs",
+    "test/helpers.mjs",
+    "test/proxy.test.mjs"
+  ],
+  "skipped": {
+    "fetch_7_artifacts": true,
+    "eagle3_convert": true,
+    "cpu4_7b": "impractical; not spawned for smoke"
+  }
+}

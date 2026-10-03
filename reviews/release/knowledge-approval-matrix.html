@@ -1,0 +1,1090 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Knowledge Pack Approval Matrix · Brian</title>
+<style>
+  :root {
+    --bg: #0b1220;
+    --bg-elev: #111827;
+    --bg-row: #0f172a;
+    --bg-row-alt: #132033;
+    --bg-group: #0a1628;
+    --border: #1e293b;
+    --border-soft: #243044;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --faint: #64748b;
+    --accent: #34d399;
+    --accent-dim: rgba(52, 211, 153, 0.12);
+    --accent-border: rgba(52, 211, 153, 0.35);
+    --free: #34d399;
+    --free-bg: rgba(52, 211, 153, 0.14);
+    --borrow: #fbbf24;
+    --borrow-bg: rgba(251, 191, 36, 0.14);
+    --own: #fb923c;
+    --own-bg: rgba(251, 146, 60, 0.14);
+    --ops: #60a5fa;
+    --ops-bg: rgba(96, 165, 250, 0.14);
+    --defer: #a78bfa;
+    --defer-bg: rgba(167, 139, 250, 0.14);
+    --include: #34d399;
+    --cite: #94a3b8;
+    --skip: #f87171;
+    --warn: #fbbf24;
+    --radius: 10px;
+    --shadow: 0 8px 32px rgba(0,0,0,0.45);
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background:
+      radial-gradient(1200px 600px at 10% -10%, rgba(52,211,153,0.08), transparent 55%),
+      radial-gradient(900px 500px at 90% 0%, rgba(96,165,250,0.07), transparent 50%),
+      var(--bg);
+    color: var(--text);
+    line-height: 1.45;
+    min-height: 100vh;
+  }
+
+  .wrap {
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 28px 20px 64px;
+  }
+
+  header.hero {
+    background: linear-gradient(180deg, rgba(17,24,39,0.95), rgba(15,23,42,0.85));
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 28px 28px 22px;
+    box-shadow: var(--shadow);
+    margin-bottom: 22px;
+  }
+
+  .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent);
+    font-weight: 600;
+    margin-bottom: 10px;
+  }
+  .eyebrow::before {
+    content: "";
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 12px var(--accent);
+  }
+
+  h1 {
+    margin: 0 0 8px;
+    font-size: clamp(1.55rem, 2.5vw, 2rem);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+
+  .subtitle {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.98rem;
+    max-width: 72ch;
+  }
+
+  .meta-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 18px;
+  }
+
+  .meta-pill {
+    font-size: 12px;
+    color: var(--muted);
+    background: var(--bg-row);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 6px 12px;
+  }
+  .meta-pill strong { color: var(--text); font-weight: 600; }
+
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 0 0 18px;
+    padding: 14px 16px;
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+  }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    padding: 6px 11px;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    white-space: nowrap;
+  }
+  .chip small {
+    font-weight: 500;
+    opacity: 0.85;
+    letter-spacing: 0;
+  }
+  .chip-free { color: var(--free); background: var(--free-bg); border-color: rgba(52,211,153,0.35); }
+  .chip-borrow { color: var(--borrow); background: var(--borrow-bg); border-color: rgba(251,191,36,0.35); }
+  .chip-own { color: var(--own); background: var(--own-bg); border-color: rgba(251,146,60,0.35); }
+  .chip-ops { color: var(--ops); background: var(--ops-bg); border-color: rgba(96,165,250,0.35); }
+  .chip-defer { color: var(--defer); background: var(--defer-bg); border-color: rgba(167,139,250,0.35); }
+
+  .panel {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    overflow: hidden;
+    box-shadow: var(--shadow);
+  }
+
+  .table-scroll {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    min-width: 980px;
+    font-size: 13.5px;
+  }
+
+  thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: #0d1524;
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    text-align: left;
+    padding: 14px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  tbody tr.group-row td {
+    background: linear-gradient(90deg, rgba(52,211,153,0.10), rgba(15,23,42,0.95) 40%);
+    color: var(--accent);
+    font-weight: 700;
+    font-size: 12px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    padding: 12px 14px;
+    border-top: 1px solid var(--accent-border);
+    border-bottom: 1px solid var(--border);
+  }
+
+  tbody tr.data-row td {
+    padding: 13px 12px;
+    vertical-align: top;
+    border-bottom: 1px solid var(--border-soft);
+    background: var(--bg-row);
+  }
+  tbody tr.data-row:nth-child(even of .data-row) td,
+  tbody tr.data-row.alt td {
+    background: var(--bg-row-alt);
+  }
+  tbody tr.data-row:hover td {
+    background: #172554;
+  }
+
+  .id {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+    color: var(--faint);
+    white-space: nowrap;
+  }
+
+  .work {
+    font-weight: 600;
+    color: var(--text);
+  }
+  .work .hint {
+    display: block;
+    margin-top: 4px;
+    font-weight: 400;
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  .source a {
+    color: #93c5fd;
+    text-decoration: none;
+    word-break: break-all;
+  }
+  .source a:hover { text-decoration: underline; color: #bfdbfe; }
+  .source .note {
+    display: block;
+    margin-top: 4px;
+    font-size: 11.5px;
+    color: var(--faint);
+  }
+
+  .why { color: var(--muted); max-width: 280px; }
+
+  .rights-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    align-items: flex-start;
+  }
+
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    padding: 4px 9px;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    white-space: nowrap;
+  }
+  .pill-free { color: var(--free); background: var(--free-bg); border-color: rgba(52,211,153,0.4); }
+  .pill-borrow { color: var(--borrow); background: var(--borrow-bg); border-color: rgba(251,191,36,0.4); }
+  .pill-own { color: var(--own); background: var(--own-bg); border-color: rgba(251,146,60,0.4); }
+  .pill-ops { color: var(--ops); background: var(--ops-bg); border-color: rgba(96,165,250,0.4); }
+  .pill-defer { color: var(--defer); background: var(--defer-bg); border-color: rgba(167,139,250,0.4); }
+  .pill-verify { color: #fde68a; background: rgba(234,179,8,0.18); border-color: rgba(234,179,8,0.45); }
+
+  .action {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    align-items: flex-start;
+  }
+  .rec {
+    display: inline-flex;
+    align-items: center;
+    font-size: 11.5px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    padding: 5px 10px;
+    border-radius: 8px;
+    border: 1px solid transparent;
+  }
+  .rec-include { color: #065f46; background: #6ee7b7; border-color: #34d399; }
+  .rec-cite { color: #1e293b; background: #cbd5e1; border-color: #94a3b8; }
+  .rec-skip { color: #7f1d1d; background: #fca5a5; border-color: #f87171; }
+  .action .detail {
+    font-size: 12px;
+    color: var(--muted);
+    max-width: 220px;
+  }
+
+  .tier {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--accent);
+    white-space: nowrap;
+  }
+
+  footer.note {
+    margin-top: 18px;
+    padding: 16px 18px;
+    background: rgba(251, 191, 36, 0.06);
+    border: 1px solid rgba(251, 191, 36, 0.28);
+    border-radius: var(--radius);
+    color: #fde68a;
+    font-size: 13px;
+  }
+  footer.note strong { color: #fbbf24; }
+
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 10px;
+    margin: 18px 0;
+  }
+  .stat {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+  }
+  .stat .n {
+    font-size: 1.55rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+  .stat .l {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+  .stat.free .n { color: var(--free); }
+  .stat.borrow .n { color: var(--borrow); }
+  .stat.ops .n { color: var(--ops); }
+  .stat.defer .n { color: var(--defer); }
+
+  @media (max-width: 720px) {
+    .wrap { padding: 16px 12px 48px; }
+    header.hero { padding: 20px 16px; }
+    thead th, tbody tr.data-row td { padding: 10px 8px; }
+  }
+
+  @media print {
+    body { background: white; color: black; }
+    .panel, header.hero { box-shadow: none; }
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="hero">
+      <div class="eyebrow">Operator Brian · release knowledge track</div>
+      <h1>Knowledge Pack Approval Matrix</h1>
+      <p class="subtitle">offline security workstation · compressed always-on · gapped online OK for on-demand</p>
+      <div class="meta-row">
+        <span class="meta-pill"><strong>Date</strong> 2026-09-12</span>
+        <span class="meta-pill"><strong>Scope</strong> 3-OS + Note9 VM</span>
+        <span class="meta-pill"><strong>Rule</strong> cite IA / official URLs — no book text dump</span>
+        <span class="meta-pill"><strong>Companion</strong> KNOWLEDGE-LIBRARY-CANDIDATES · USENIX-DEFCON</span>
+        <span class="meta-pill"><strong>Addendum</strong> KNOWLEDGE-SCHNEIER-FREE-2026-09-12</span>
+      </div>
+    </header>
+
+    <div class="legend" role="list" aria-label="Rights legend">
+      <span class="chip chip-free" role="listitem">FREE <small>redistributable</small></span>
+      <span class="chip chip-borrow" role="listitem">BORROW-ONLY <small>IA controlled digital lending — do not mirror into kit</small></span>
+      <span class="chip chip-own" role="listitem">OWN <small>buy/keep legal copy; cite only in kit</small></span>
+      <span class="chip chip-ops" role="listitem">OPS <small>our generated cards</small></span>
+      <span class="chip chip-defer" role="listitem">DEFER <small>on-demand pointer</small></span>
+    </div>
+
+    <div class="legend" style="margin-top:-8px;border-color:rgba(52,211,153,0.45)">
+      <span class="chip chip-free">POLICY 2026-09-12</span>
+      <span style="font-size:13px;color:var(--muted)">
+        OS handbooks = <strong style="color:var(--accent)">APPROVED-FULL-COMPRESSED</strong>
+        (not extract-only) · extreme <code>zstd -19</code> · harden-default + vuln-class test ·
+        see <code>KNOWLEDGE-PACK-POLICY-2026-09-12.md</code> · archive
+        <code>knowledge/os-handbooks-extreme.tar.zst</code>
+      </span>
+    </div>
+
+    <div class="stats" aria-label="Row counts">
+      <div class="stat free"><div class="n" id="n-free">—</div><div class="l">FREE / FREE-ptr</div></div>
+      <div class="stat borrow"><div class="n" id="n-borrow">—</div><div class="l">BORROW / OWN</div></div>
+      <div class="stat ops"><div class="n" id="n-ops">—</div><div class="l">OPS</div></div>
+      <div class="stat defer"><div class="n" id="n-defer">—</div><div class="l">DEFER</div></div>
+    </div>
+
+    <div class="panel">
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th style="width:4.5rem">ID</th>
+              <th style="width:18%">Work</th>
+              <th style="width:20%">Author / Source</th>
+              <th style="width:18%">Why for kit</th>
+              <th style="width:12%">Rights</th>
+              <th style="width:16%">Proposed action</th>
+              <th style="width:8%">Tier</th>
+            </tr>
+          </thead>
+          <tbody>
+
+            <!-- GROUP A -->
+            <tr class="group-row"><td colspan="7">A · Free always-on core</td></tr>
+
+            <tr class="data-row" data-rights="free">
+              <td class="id">A1</td>
+              <td class="work">FreeBSD Handbook (FULL)
+                <span class="hint">APPROVED-FULL-COMPRESSED · Security · Jails · MAC · Audit · Network · Firewalls · entire PDF</span>
+              </td>
+              <td class="source">
+                Prefer official:
+                <a href="https://download.freebsd.org/doc/en/books/handbook/handbook_en.pdf" target="_blank" rel="noopener">download.freebsd.org …/handbook_en.pdf</a>
+                <span class="note">docs: docs.freebsd.org/en/books/handbook · IA: freebsd_handbook · free-bsd-handbook-en</span>
+              </td>
+              <td class="why">BSD-line hardening + PF mental model for FreeBSD/pqfreebsd &amp; HardenedBSD baseline</td>
+              <td><div class="rights-stack"><span class="pill pill-free">FREE</span></div></td>
+              <td class="action">
+                <span class="rec rec-include">Include</span>
+                <span class="detail">APPROVED-FULL-COMPRESSED · official PDF in os-handbooks-extreme.tar.zst</span>
+              </td>
+              <td class="tier">always-on</td>
+            </tr>
+
+            <tr class="data-row alt" data-rights="free">
+              <td class="id">A2</td>
+              <td class="work">Debian Administrator’s Handbook (FULL)
+                <span class="hint">APPROVED-FULL-COMPRESSED · free CC ebook + Securing Debian Manual</span>
+              </td>
+              <td class="source">
+                <a href="https://debian-handbook.info/" target="_blank" rel="noopener">debian-handbook.info</a>
+                · <a href="https://www.debian.org/doc/manuals/debian-handbook/" target="_blank" rel="noopener">debian.org manuals</a>
+                <span class="note">CC-BY-SA / GPL dual · EN ebook primary</span>
+              </td>
+              <td class="why">Debian-class kit primary admin text</td>
+              <td><div class="rights-stack"><span class="pill pill-free">FREE</span></div></td>
+              <td class="action">
+                <span class="rec rec-include">Include</span>
+                <span class="detail">APPROVED-FULL-COMPRESSED · stable EPUB + buster PDF + Securing Debian Manual</span>
+              </td>
+              <td class="tier">always-on</td>
+            </tr>
+
+            <tr class="data-row" data-rights="ops">
+              <td class="id">A3</td>
+              <td class="work">HardenedBSD wiki export (FULL)
+                <span class="hint">APPROVED-FULL-COMPRESSED · hbsdcontrol / secadm / mitigations</span>
+              </td>
+              <td class="source">
+                <a href="https://hardenedbsd.org/content/hardenedbsd-handbook" target="_blank" rel="noopener">hardenedbsd.org handbook → wiki</a>
+                <span class="note">GitHub mirror HardenedBSD/gitlab-wiki · no IA texts hit 2026-09-12</span>
+              </td>
+              <td class="why">Third OS line — what differs from FreeBSD</td>
+              <td><div class="rights-stack"><span class="pill pill-ops">OPS</span><span class="pill pill-free">FREE</span></div></td>
+              <td class="action">
+                <span class="rec rec-include">Include</span>
+                <span class="detail">APPROVED-FULL-COMPRESSED · full gitlab-wiki export (official mirror)</span>
+              </td>
+              <td class="tier">always-on</td>
+            </tr>
+
+            <tr class="data-row alt" data-rights="free" data-id="A3b">
+              <td class="id">A3b</td>
+              <td class="work">OpenBSD FAQ + PF docs (FULL)
+                <span class="hint">APPROVED-FULL-COMPRESSED · faq + pf-faq + HTML</span>
+              </td>
+              <td class="source">
+                <a href="https://www.openbsd.org/faq/" target="_blank" rel="noopener">openbsd.org/faq</a>
+                · <a href="https://ftp.eu.openbsd.org/pub/OpenBSD/doc/" target="_blank" rel="noopener">ftp.eu.openbsd.org/doc</a>
+              </td>
+              <td class="why">PF / secure-by-default mental model shared with BSD kit lines</td>
+              <td><div class="rights-stack"><span class="pill pill-free">FREE</span></div></td>
+              <td class="action">
+                <span class="rec rec-include">Include</span>
+                <span class="detail">APPROVED-FULL-COMPRESSED</span>
+              </td>
+              <td class="tier">always-on</td>
+            </tr>
+
+            <tr class="data-row" data-rights="free" data-id="A3c">
+              <td class="id">A3c</td>
+              <td class="work">Linux official security docs (FULL relevant)
+                <span class="hint">kernel security HTML · admin-guide LSM · man-pages · Ubuntu security how-to</span>
+              </td>
+              <td class="source">
+                <a href="https://www.kernel.org/doc/html/latest/security/" target="_blank" rel="noopener">kernel.org security</a>
+                · <a href="https://cdn.kernel.org/pub/linux/docs/man-pages/" target="_blank" rel="noopener">man-pages</a>
+                · <a href="https://documentation.ubuntu.com/server/how-to/security/" target="_blank" rel="noopener">Ubuntu security</a>
+              </td>
+              <td class="why">Debian-class / Linux cell harden + vuln-class vocabulary</td>
+              <td><div class="rights-stack"><span class="pill pill-free">FREE</span></div></td>
+              <td class="action">
+                <span class="rec rec-include">Include</span>
+                <span class="detail">APPROVED-FULL-COMPRESSED · official only</span>
+              </td>
+              <td class="tier">always-on</td>
+            </tr>
+
+            <tr class="data-row alt" data-rights="free" data-id="A3d">
+              <td class="id">A3d</td>
+              <td class="work">Alpine security pointers (thin)
+                <span class="hint">no single handbook · official wiki/docs pointers</span>
+              </td>
+              <td class="source">
+                <a href="https://wiki.alpinelinux.org/wiki/Tutorials_and_Howtos" target="_blank" rel="noopener">Alpine wiki tutorials</a>
+                · <a href="https://security.alpinelinux.org/" target="_blank" rel="noopener">security tracker</a>
+              </td>
+              <td class="why">Thin always-on pointers when Alpine cell present</td>
+              <td><div class="rights-stack"><span class="pill pill-free">FREE</span></div></td>
+              <td class="action">
+                <span class="rec rec-include">Include</span>
+                <span class="detail">APPROVED-FULL-COMPRESSED (thin corpus)</span>
+              </td>
+              <td class="tier">always-on</td>
+            </tr>
+
+            <tr class="data-row alt" data-rights="free">
+              <td class="id">A4</td>
+              <td class="work">RFC compact set
+                <span class="hint">791 · 793 · 1122 · 1918 · 1034/1035 · 4251 · 4301 · 5246 · 8446 · 2001</span>
+              </td>
+              <td class="source">
+                IA rfcseries —
+                <a href="https://archive.org/details/rfc791" target="_blank" rel="noopener">rfc791</a> …
+                <a href="https://archive.org/details/rfc8446" target="_blank" rel="noopener">rfc8446</a>
+                <span class="note">Freely redistributable RFC series</span>
+              </td>
+              <td class="why">Protocol ground truth for netadmin RAG</td>
+              <td><div class="rights-stack"><span class="pill pill-free">FREE</span></div></td>
+              <td class="action">
+                <span class="rec rec-include">Include</span>
+                <span class="detail">Plaintext only + optional index card</span>
+              </td>
+              <td class="tier">always-on</td>
+            </tr>
+
+            <tr class="data-row" data-rights="free">
+              <td class="id">A5</td>
+              <td class="work">Project Gibralter — FreeBSD Security</td>
+              <td class="source">
+                <a href="https://archive.org/details/project-gibralter" target="_blank" rel="noopener">archive.org/details/project-gibralter</a>
+                <span class="note">CC-BY-SA 4.0</span>
+              </td>
+              <td class="why">Small FreeBSD security pamphlet; high always-on density</td>
+              <td><div class="rights-stack"><span class="pill pill-free">FREE</span></div></td>
+              <td class="action">
+                <span class="rec rec-include">Include</span>
+                <span class="detail">Whole item if small; else TOC+security sections</span>
+              </td>
+              <td class="tier">always-on</td>
+            </tr>
+
+            <tr class="data-row alt" data-rights="free">
+              <td class="id">A6</td>
+              <td class="work">FreeBSD Compact Guide</td>
+              <td class="source">
+                <a href="https://archive.org/details/FreeBSD.Compact.Guide" target="_blank" rel="noopener">archive.org/details/FreeBSD.Compact.Guide</a>
+                <span class="note">CC-BY-SA 4.0</span>
+              </td>
+              <td class="why">Fast orientation for Note9 VM / mid-tier hosts</td>
+              <td><div class="rights-stack"><span class="pill pill-free">FREE</span></div></td>
+              <td class="action">
+                <span class="rec rec-include">Include</span>
+                <span class="detail">Whole guide if compact; else day-1 admin pages</span>
+              </td>
+              <td class="tier">always-on</td>
+            </tr>
+
+            <tr class="data-row" data-rights="ops">
+              <td class="id">A7</td>
+              <td class="work">Green-Roomz offline ops card</td>
+              <td class="source">
+                In-tree: docs/deployment.md · security-monitor · MODEL-PACK-INVENTORY
+                <span class="note">Kit-native generated</span>
+              </td>
+              <td class="why">Bind rules, monitor reject stubs, peer allowlist, fetch-models build-time only</td>
+              <td><div class="rights-stack"><span class="pill pill-ops">OPS</span></div></td>
+              <td class="action">
+                <span class="rec rec-include">Include</span>
+                <span class="detail">Always ship with image · ≤ few dozen KB</span>
+              </td>
+              <td class="tier">always-on</td>
+            </tr>
+
+            <tr class="data-row alt" data-rights="ops">
+              <td class="id">A8</td>
+              <td class="work">Fleet / Note9 VM ops card</td>
+              <td class="source">
+                docs/note9-termux.md · GOAL-UPDATE-3OS-NOTE9VM · readiness boards
+                <span class="note">Kit-native generated</span>
+              </td>
+              <td class="why">Phone Termux client vs Note9 VM ship cell; USB+adb-from-qodesh</td>
+              <td><div class="rights-stack"><span class="pill pill-ops">OPS</span></div></td>
+              <td class="action">
+                <span class="rec rec-include">Include</span>
+                <span class="detail">One card: T0 phone · VM guest matrix · no ListMachines to note9</span>
+              </td>
+              <td class="tier">always-on</td>
+            </tr>
+
+            <tr class="data-row" data-rights="ops">
+              <td class="id">A9</td>
+              <td class="work">3-OS harden checklist
+                <span class="hint">package-audit &amp; first-boot</span>
+              </td>
+              <td class="source">
+                pkg audit / HardenedBSD equiv · Debian debsecan/apt audit class
+                <span class="note">Kit-generated checklist</span>
+              </td>
+              <td class="why">First-boot offline audit recipe names without full man trees</td>
+              <td><div class="rights-stack"><span class="pill pill-ops">OPS</span></div></td>
+              <td class="action">
+                <span class="rec rec-include">Include</span>
+                <span class="detail">Operator checklist + command cheat — not full manpages</span>
+              </td>
+              <td class="tier">always-on</td>
+            </tr>
+
+            <tr class="data-row alt" data-rights="ops">
+              <td class="id">A10</td>
+              <td class="work">Defensive capture cheat
+                <span class="hint">observe-only</span>
+              </td>
+              <td class="source">
+                Handbook network + OS man summaries (full mans on-demand)
+                <span class="note">Kit-generated</span>
+              </td>
+              <td class="why">tcpdump/wireshark-class vocabulary for airgap kit</td>
+              <td><div class="rights-stack"><span class="pill pill-ops">OPS</span></div></td>
+              <td class="action">
+                <span class="rec rec-include">Include</span>
+                <span class="detail">Flags/filters cheat only; no offensive scripts</span>
+              </td>
+              <td class="tier">always-on</td>
+            </tr>
+
+            <tr class="data-row" data-rights="free">
+              <td class="id">A11</td>
+              <td class="work">UNIXBooksAndDocs — curated subset index</td>
+              <td class="source">
+                <a href="https://archive.org/details/UNIXBooksAndDocs" target="_blank" rel="noopener">archive.org/details/UNIXBooksAndDocs</a>
+                <span class="note">CC-BY-ND 4.0 collection · FBSD-handbook* ok; third-party titles need review</span>
+              </td>
+              <td class="why">Index + FBSD handbook extract pointer already on IA</td>
+              <td><div class="rights-stack"><span class="pill pill-free">FREE</span></div></td>
+              <td class="action">
+                <span class="rec rec-include">Include</span>
+                <span class="detail">Index + FBSD extract only; leave Tanenbaum/etc. for legal review</span>
+              </td>
+              <td class="tier">always-on</td>
+            </tr>
+
+            <tr class="data-row alt" data-rights="free">
+              <td class="id">A12</td>
+              <td class="work">Crypto-Gram entire-issue pack
+                <span class="hint">Bruce Schneier · official reprint grant</span>
+              </td>
+              <td class="source">
+                <a href="https://www.schneier.com/crypto-gram/" target="_blank" rel="noopener">schneier.com/crypto-gram</a>
+                <span class="note">APPROVED-FREE · pack /workspace/knowledge/schneier-crypto-gram/ · tarball schneier-crypto-gram.tar.gz · 72 complete issues (2026-09-12)</span>
+              </td>
+              <td class="why">Living security commentary without commercial book mirror; entire issues only</td>
+              <td><div class="rights-stack"><span class="pill pill-free">APPROVED-FREE</span></div></td>
+              <td class="action">
+                <span class="rec rec-include">Include</span>
+                <span class="detail">Starter 72: recent 12 months + 2000/2005/2010/2015/2020. HTML+md. More via fetch-more.sh (schneier.com only). No book text.</span>
+              </td>
+              <td class="tier">always-on</td>
+            </tr>
+
+
+            <tr class="data-row" data-rights="free">
+              <td class="id">A13</td>
+              <td class="work">USENIX seed corpus
+                <span class="hint">Security/systems papers · classic / mid / modern · compressed always-on</span>
+              </td>
+              <td class="source">
+                <a href="https://www.usenix.org/publications/proceedings" target="_blank" rel="noopener">usenix.org/publications/proceedings</a>
+                <span class="note">Open access · authors retain copyright · personal/offline kit OK with attribution (cite USENIX + paper) · see KNOWLEDGE-USENIX-DEFCON-2026-09-12.md</span>
+              </td>
+              <td class="why">Broad systems/netadmin vocabulary for curated RAG alongside handbooks + Crypto-Gram</td>
+              <td><div class="rights-stack"><span class="pill pill-free">FREE</span></div></td>
+              <td class="action">
+                <span class="rec rec-include">Include</span>
+                <span class="detail">Always-on <strong>seed</strong> only (≤ ~dozen PDFs/era) — not full proceedings trees · fetch stub knowledge/scripts/fetch-usenix-seed.sh</span>
+              </td>
+              <td class="tier">always-on seed</td>
+            </tr>
+
+            <tr class="data-row alt" data-rights="free">
+              <td class="id">A14</td>
+              <td class="work">DEF CON slides seed
+                <span class="hint">Official media.defcon.org / defcon.org · slides &amp; whitepapers</span>
+              </td>
+              <td class="source">
+                <a href="https://media.defcon.org/" target="_blank" rel="noopener">media.defcon.org</a>
+                · <a href="https://defcon.org/" target="_blank" rel="noopener">defcon.org</a>
+                <span class="note">Official only · NO random mirrors · video = on-demand (size) · see KNOWLEDGE-USENIX-DEFCON-2026-09-12.md</span>
+              </td>
+              <td class="why">Practitioner netadmin / SSH / DNS / TLS / perimeter lessons for security-rag</td>
+              <td><div class="rights-stack"><span class="pill pill-free">FREE</span></div></td>
+              <td class="action">
+                <span class="rec rec-include">Include</span>
+                <span class="detail">Always-on <strong>slides/PDF/WP seed</strong> — defer multi-GB video/torrents · fetch stub knowledge/scripts/fetch-defcon-slides-seed.sh</span>
+              </td>
+              <td class="tier">always-on seed</td>
+            </tr>
+
+            <!-- GROUP B -->
+            <tr class="group-row"><td colspan="7">B · Classics (Schneier / Knuth / Hofstadter / Stevens)</td></tr>
+
+            <tr class="data-row" data-rights="borrow">
+              <td class="id">B1</td>
+              <td class="work">Applied Cryptography
+                <span class="hint">Bruce Schneier</span>
+              </td>
+              <td class="source">
+                <a href="https://archive.org/details/appliedcryptogra0000schn" target="_blank" rel="noopener">archive.org/details/appliedcryptogra0000schn</a>
+              </td>
+              <td class="why">Crypto design vocabulary / historical reference for defensive posture</td>
+              <td><div class="rights-stack"><span class="pill pill-borrow">BORROW</span><span class="pill pill-own">OWN</span></div></td>
+              <td class="action">
+                <span class="rec rec-cite">Cite-only</span>
+                <span class="detail"><strong>EXCLUDE-FROM-MIRROR</strong> · cite only · OWN-path mount at runtime OK if operator buys</span>
+              </td>
+              <td class="tier">cite / OWN</td>
+            </tr>
+
+            <tr class="data-row alt" data-rights="borrow">
+              <td class="id">B2</td>
+              <td class="work">Secrets and Lies
+                <span class="hint">Bruce Schneier</span>
+              </td>
+              <td class="source">
+                <a href="https://archive.org/details/secretsliesdigit0000schn_n2e3" target="_blank" rel="noopener">archive.org/details/secretsliesdigit0000schn_n2e3</a>
+              </td>
+              <td class="why">Threat-model / digital risk framing for operators</td>
+              <td><div class="rights-stack"><span class="pill pill-borrow">BORROW</span><span class="pill pill-own">OWN</span></div></td>
+              <td class="action">
+                <span class="rec rec-cite">Cite-only</span>
+                <span class="detail"><strong>EXCLUDE-FROM-MIRROR</strong> · CDL borrow or personal purchase — no airgap bulk copy</span>
+              </td>
+              <td class="tier">cite / OWN</td>
+            </tr>
+
+            <tr class="data-row" data-rights="borrow">
+              <td class="id">B3</td>
+              <td class="work">Data and Goliath
+                <span class="hint">Bruce Schneier</span>
+              </td>
+              <td class="source">
+                <a href="https://archive.org/details/datagoliathhidde0000schn" target="_blank" rel="noopener">archive.org/details/datagoliathhidde0000schn</a>
+              </td>
+              <td class="why">Surveillance / data-power context for defensive kit narrative</td>
+              <td><div class="rights-stack"><span class="pill pill-borrow">BORROW</span><span class="pill pill-own">OWN</span></div></td>
+              <td class="action">
+                <span class="rec rec-cite">Cite-only</span>
+                <span class="detail"><strong>EXCLUDE-FROM-MIRROR</strong> · pointer + OWN-path only</span>
+              </td>
+              <td class="tier">cite / OWN</td>
+            </tr>
+
+            <tr class="data-row alt" data-rights="free">
+              <td class="id">B4</td>
+              <td class="work">Crypto-Gram entire-issue pack
+                <span class="hint">same as A12 · official newsletter</span>
+              </td>
+              <td class="source">
+                <a href="https://www.schneier.com/crypto-gram/" target="_blank" rel="noopener">schneier.com/crypto-gram</a>
+                <span class="note">APPROVED-FREE — reprint entire issue only (quoted on each issue). Same pack as A12.</span>
+              </td>
+              <td class="why">Complete Crypto-Gram issues; not Applied Cryptography / Secrets and Lies / Data and Goliath</td>
+              <td><div class="rights-stack"><span class="pill pill-free">APPROVED-FREE</span></div></td>
+              <td class="action">
+                <span class="rec rec-include">Include</span>
+                <span class="detail">Always-on <strong>entire issues</strong> (72 fetched) — no book text · see KNOWLEDGE-SCHNEIER-FREE-2026-09-12.md</span>
+              </td>
+              <td class="tier">always-on pack</td>
+            </tr>
+
+            <tr class="data-row" data-rights="borrow">
+              <td class="id">B5</td>
+              <td class="work">The Art of Computer Programming (vol set)
+                <span class="hint">Donald Knuth</span>
+              </td>
+              <td class="source">
+                <a href="https://archive.org/details/artofcomputerpro0001knut_l0h13rdedition" target="_blank" rel="noopener">archive.org/details/artofcomputerpro0001knut_l0h13rdedition</a>
+              </td>
+              <td class="why">Classic algorithms reference — cite, do not ship</td>
+              <td><div class="rights-stack"><span class="pill pill-borrow">BORROW</span><span class="pill pill-own">OWN</span></div></td>
+              <td class="action">
+                <span class="rec rec-cite">Cite-only</span>
+                <span class="detail"><strong>EXCLUDE-FROM-MIRROR</strong> · BORROW/OWN — no kit mirror</span>
+              </td>
+              <td class="tier">cite / OWN</td>
+            </tr>
+
+            <tr class="data-row alt" data-rights="borrow">
+              <td class="id">B6</td>
+              <td class="work">Concrete Mathematics
+                <span class="hint">Knuth · Graham · Patashnik</span>
+              </td>
+              <td class="source">
+                <a href="https://archive.org/details/B-001-002-135" target="_blank" rel="noopener">archive.org/details/B-001-002-135</a>
+                <span class="note">VERIFY — often restricted / unclear upload rights</span>
+              </td>
+              <td class="why">Discrete math grounding for crypto/netadmin reasoning</td>
+              <td><div class="rights-stack"><span class="pill pill-borrow">BORROW</span><span class="pill pill-own">OWN</span><span class="pill pill-verify">VERIFY</span></div></td>
+              <td class="action">
+                <span class="rec rec-skip">Skip</span>
+                <span class="detail"><strong>EXCLUDE-FROM-MIRROR</strong> · default skip until rights verified; OWN if operator holds legal copy</span>
+              </td>
+              <td class="tier">verify / OWN</td>
+            </tr>
+
+            <tr class="data-row" data-rights="borrow">
+              <td class="id">B7</td>
+              <td class="work">Gödel, Escher, Bach
+                <span class="hint">Douglas Hofstadter</span>
+              </td>
+              <td class="source">
+                <a href="https://archive.org/details/gdelescherbach00hofs" target="_blank" rel="noopener">gdelescherbach00hofs</a>
+                · <a href="https://archive.org/details/gdelescherbachan00hofs" target="_blank" rel="noopener">gdelescherbachan00hofs</a>
+              </td>
+              <td class="why">Systems / recursion / strange-loop mental model</td>
+              <td><div class="rights-stack"><span class="pill pill-borrow">BORROW</span><span class="pill pill-own">OWN</span></div></td>
+              <td class="action">
+                <span class="rec rec-cite">Cite-only</span>
+                <span class="detail"><strong>EXCLUDE-FROM-MIRROR</strong> · do not mirror · cite in kit bibliography</span>
+              </td>
+              <td class="tier">cite / OWN</td>
+            </tr>
+
+            <tr class="data-row alt" data-rights="borrow">
+              <td class="id">B8</td>
+              <td class="work">I Am a Strange Loop
+                <span class="hint">Douglas Hofstadter</span>
+              </td>
+              <td class="source">
+                <a href="https://archive.org/details/iamstrangeloop0000hofs" target="_blank" rel="noopener">archive.org/details/iamstrangeloop0000hofs</a>
+              </td>
+              <td class="why">Consciousness / identity framing adjacent to GEB</td>
+              <td><div class="rights-stack"><span class="pill pill-borrow">BORROW</span><span class="pill pill-own">OWN</span></div></td>
+              <td class="action">
+                <span class="rec rec-cite">Cite-only</span>
+                <span class="detail"><strong>EXCLUDE-FROM-MIRROR</strong> · BORROW/OWN path</span>
+              </td>
+              <td class="tier">cite / OWN</td>
+            </tr>
+
+            <tr class="data-row" data-rights="borrow">
+              <td class="id">B9</td>
+              <td class="work">The Mind’s I
+                <span class="hint">Hofstadter &amp; Dennett</span>
+              </td>
+              <td class="source">
+                <a href="https://archive.org/details/mindsifantasiesr0000hofs" target="_blank" rel="noopener">archive.org/details/mindsifantasiesr0000hofs</a>
+              </td>
+              <td class="why">Essay anthology — self / AI reflection for operator culture</td>
+              <td><div class="rights-stack"><span class="pill pill-borrow">BORROW</span><span class="pill pill-own">OWN</span></div></td>
+              <td class="action">
+                <span class="rec rec-cite">Cite-only</span>
+                <span class="detail"><strong>EXCLUDE-FROM-MIRROR</strong> · BORROW/OWN — bibliography only in kit</span>
+              </td>
+              <td class="tier">cite / OWN</td>
+            </tr>
+
+            <tr class="data-row alt" data-rights="borrow">
+              <td class="id">B10</td>
+              <td class="work">TCP/IP Illustrated
+                <span class="hint">W. Richard Stevens</span>
+              </td>
+              <td class="source">
+                <a href="https://archive.org/details/tcpipillustrated00stev" target="_blank" rel="noopener">tcpipillustrated00stev</a>
+                <span class="note">printdisabled CDL · other upload claims PD Mark — <strong>FLAG: do not trust PD claim</strong></span>
+              </td>
+              <td class="why">Classic TCP/IP admin reading — treat as commercial</td>
+              <td><div class="rights-stack"><span class="pill pill-borrow">BORROW</span><span class="pill pill-own">OWN</span><span class="pill pill-verify">VERIFY</span></div></td>
+              <td class="action">
+                <span class="rec rec-cite">Cite-only</span>
+                <span class="detail"><strong>EXCLUDE-FROM-MIRROR</strong> · VERIFY/OWN — never trust PD Mark upload; no kit mirror</span>
+              </td>
+              <td class="tier">verify / OWN</td>
+            </tr>
+
+            <!-- GROUP C -->
+            <tr class="group-row"><td colspan="7">C · Netadmin models</td></tr>
+
+            <tr class="data-row" data-rights="ops">
+              <td class="id">C1</td>
+              <td class="work">netadmin-rag
+                <span class="hint">RAG over approved compressed corpus</span>
+              </td>
+              <td class="source">
+                Reuse semantic-embedding-agent + retrieval-rerank-agent (MODEL-PACK)
+                <span class="note">No new specialist weights required</span>
+              </td>
+              <td class="why">Grounded airgap answers over §A corpus; fits 3-OS + Note9 VM</td>
+              <td><div class="rights-stack"><span class="pill pill-ops">OPS</span></div></td>
+              <td class="action">
+                <span class="rec rec-include">Include</span>
+                <span class="detail"><strong>YES — recommend</strong> as always-on netadmin path</span>
+              </td>
+              <td class="tier">always-on</td>
+            </tr>
+
+            <tr class="data-row alt" data-rights="defer">
+              <td class="id">C2</td>
+              <td class="work">netadmin-chat
+                <span class="hint">specialist LLM · GGUF TBD</span>
+              </td>
+              <td class="source">
+                GGUF filename: <strong>TBD</strong> — do not invent
+                <span class="note">No tip agents.*.json currently names a netadmin specialist</span>
+              </td>
+              <td class="why">Fluent synthesis optional; hallucination risk offline</td>
+              <td><div class="rights-stack"><span class="pill pill-defer">DEFER</span></div></td>
+              <td class="action">
+                <span class="rec rec-skip">Skip</span>
+                <span class="detail">Defer until real GGUF name/hash pinned from existing pack</span>
+              </td>
+              <td class="tier">deferred</td>
+            </tr>
+
+            <!-- GROUP D -->
+            <tr class="group-row"><td colspan="7">D · On-demand pointers</td></tr>
+
+            <tr class="data-row" data-rights="defer">
+              <td class="id">D1</td>
+              <td class="work">Full FreeBSD Handbook (current) — now always-on compressed
+                <span class="hint">whole-platform admin</span>
+              </td>
+              <td class="source">
+                <a href="https://docs.freebsd.org/en/books/handbook/" target="_blank" rel="noopener">docs.freebsd.org</a>
+                · docs-archive · IA mirrors as courier fallback
+              </td>
+              <td class="why">Full depth when gapped-but-online / USB courier</td>
+              <td><div class="rights-stack"><span class="pill pill-defer">DEFER</span><span class="pill pill-free">FREE</span></div></td>
+              <td class="action">
+                <span class="rec rec-cite">Cite-only</span>
+                <span class="detail">Pointer only — do not pre-seed always-on volume</span>
+              </td>
+              <td class="tier">on-demand</td>
+            </tr>
+
+            <tr class="data-row alt" data-rights="defer">
+              <td class="id">D2</td>
+              <td class="work">Full Debian Handbook ebook</td>
+              <td class="source">
+                <a href="https://debian-handbook.info/get/" target="_blank" rel="noopener">debian-handbook.info/get</a>
+              </td>
+              <td class="why">Now APPROVED-FULL-COMPRESSED in always-on pack</td>
+              <td><div class="rights-stack"><span class="pill pill-defer">DEFER</span><span class="pill pill-free">FREE</span></div></td>
+              <td class="action">
+                <span class="rec rec-cite">Cite-only</span>
+                <span class="detail">On-demand fetch</span>
+              </td>
+              <td class="tier">on-demand</td>
+            </tr>
+
+            <tr class="data-row" data-rights="defer">
+              <td class="id">D3</td>
+              <td class="work">HardenedBSD wiki (full)</td>
+              <td class="source">
+                git.hardenedbsd.org wiki / GitHub HardenedBSD/gitlab-wiki
+              </td>
+              <td class="why">Live delta docs beyond always-on card</td>
+              <td><div class="rights-stack"><span class="pill pill-defer">DEFER</span><span class="pill pill-free">FREE</span></div></td>
+              <td class="action">
+                <span class="rec rec-cite">Cite-only</span>
+                <span class="detail">Pointer — no IA substitute</span>
+              </td>
+              <td class="tier">on-demand</td>
+            </tr>
+
+            <tr class="data-row alt" data-rights="defer">
+              <td class="id">D4</td>
+              <td class="work">Per-OS manpages / release notes</td>
+              <td class="source">
+                man · pkg · apt · release ERRATA on installed SKU
+              </td>
+              <td class="why">Platform truth for installed base — not a dump into image</td>
+              <td><div class="rights-stack"><span class="pill pill-defer">DEFER</span></div></td>
+              <td class="action">
+                <span class="rec rec-skip">Skip</span>
+                <span class="detail">On-demand per base — never bulk-mirror</span>
+              </td>
+              <td class="tier">on-demand</td>
+            </tr>
+
+            <tr class="data-row" data-rights="defer">
+              <td class="id">D5</td>
+              <td class="work">FreeBSD Journal pack</td>
+              <td class="source">
+                <a href="https://archive.org/details/freebsdjournal" target="_blank" rel="noopener">archive.org/details/freebsdjournal</a>
+                <span class="note">CC-BY-ND 4.0 · large</span>
+              </td>
+              <td class="why">Optional depth articles</td>
+              <td><div class="rights-stack"><span class="pill pill-defer">DEFER</span><span class="pill pill-free">FREE</span></div></td>
+              <td class="action">
+                <span class="rec rec-cite">Cite-only</span>
+                <span class="detail">Pull articles by need</span>
+              </td>
+              <td class="tier">on-demand</td>
+            </tr>
+
+            <tr class="data-row alt" data-rights="defer">
+              <td class="id">D6</td>
+              <td class="work">RFC series beyond core set</td>
+              <td class="source">
+                <a href="https://archive.org/details/rfcseries" target="_blank" rel="noopener">archive.org/details/rfcseries</a>
+              </td>
+              <td class="why">Extra protocols when a ticket needs them</td>
+              <td><div class="rights-stack"><span class="pill pill-defer">DEFER</span><span class="pill pill-free">FREE</span></div></td>
+              <td class="action">
+                <span class="rec rec-cite">Cite-only</span>
+                <span class="detail">Collection pointer</span>
+              </td>
+              <td class="tier">on-demand</td>
+            </tr>
+
+
+            <tr class="data-row" data-rights="defer">
+              <td class="id">D7</td>
+              <td class="work">DEF CON video / torrent packs
+                <span class="hint">multi-GB · on-demand only</span>
+              </td>
+              <td class="source">
+                <a href="https://media.defcon.org/" target="_blank" rel="noopener">media.defcon.org</a>
+                · defcon.org torrents
+                <span class="note">Official — never pre-seed always-on volume</span>
+              </td>
+              <td class="why">Full talk audio/video when courier bandwidth allows</td>
+              <td><div class="rights-stack"><span class="pill pill-defer">DEFER</span><span class="pill pill-free">FREE</span></div></td>
+              <td class="action">
+                <span class="rec rec-cite">Cite-only</span>
+                <span class="detail">Pointer only — slides seed is always-on; video stays on-demand</span>
+              </td>
+              <td class="tier">on-demand</td>
+            </tr>
+
+
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <footer class="note">
+      <strong>Rights note:</strong> commercial scans are <strong>EXCLUDE-FROM-MIRROR</strong> — never bulk-mirrored into the airgap image.
+      Operator may approve <strong>OWN-path</strong> (personal legal copies mounted at runtime) separately.
+      Controlled Digital Lending (Internet Archive) = BORROW-ONLY — never ship into kit.
+      Untrusted “Public Domain Mark” claims on commercial titles (e.g. Stevens) → treat as VERIFY/OWN.
+      <strong>Crypto-Gram</strong> is <strong>APPROVED-FREE</strong> (entire-issue reprint grant on schneier.com). Schneier books are not.
+    </footer>
+  </div>
+
+  <script>
+    (function () {
+      var rows = document.querySelectorAll('tr.data-row');
+      var free = 0, borrow = 0, ops = 0, defer = 0;
+      rows.forEach(function (r) {
+        var k = r.getAttribute('data-rights');
+        if (k === 'free') free++;
+        else if (k === 'borrow') borrow++;
+        else if (k === 'ops') ops++;
+        else if (k === 'defer') defer++;
+      });
+      document.getElementById('n-free').textContent = free;
+      document.getElementById('n-borrow').textContent = borrow;
+      document.getElementById('n-ops').textContent = ops;
+      document.getElementById('n-defer').textContent = defer;
+    })();
+  </script>
+</body>
+</html>

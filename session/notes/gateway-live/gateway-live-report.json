@@ -1,0 +1,20 @@
+﻿{
+    "routed_agent":  "qwenstral-code-speculator",
+    "notes":  "Gateway-path live POST. vulkan-all-only temp manifest ctx=1024. Patched request-close abort. No Qwen3-4B fetch. No grok login.",
+    "leftover_after_stop":  false,
+    "profile":  "vulkan-all",
+    "serve_pid":  28860,
+    "free_ram_gb_before":  5.86,
+    "http_status":  200,
+    "gate":  "gateway-live",
+    "route_reason":  "requested_alias",
+    "stopped":  true,
+    "draft_accepted":  "9/9",
+    "working_set_mb":  7203.5,
+    "wall_ms":  32774,
+    "llama_pid":  12988,
+    "free_ram_gb_during":  0.3,
+    "when_utc":  "2026-08-28T16:44:27.3578073Z",
+    "prompt_tps":  14.204,
+    "generation_tps":  2.265
+}

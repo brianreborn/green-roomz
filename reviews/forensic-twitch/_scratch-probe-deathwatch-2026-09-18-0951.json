@@ -1,0 +1,278 @@
+{
+  "probe_timestamp_pt": "2026-09-18T09:54:34-07:00",
+  "client_id_used": "kimne78kx3ncx6brgo4mv6wki5h1ko",
+  "prior_board_status": "all 18 partial as of 2026-09-18T08:56:42-07:00",
+  "results": [
+    {
+      "vod_id": "2871190456",
+      "gql_status": 200,
+      "token_ok": true,
+      "usher_status": 200,
+      "usher_extm3u": true,
+      "documented_cf_index_status": 200,
+      "documented_cf_extm3u": true,
+      "segment_line_count": 531,
+      "documented_cf_seg_status": 206,
+      "playability": "playable",
+      "status_changes_vs_prior": [
+        "playability partial->playable"
+      ]
+    },
+    {
+      "vod_id": "2871154099",
+      "gql_status": 200,
+      "token_ok": true,
+      "usher_status": 200,
+      "usher_extm3u": true,
+      "documented_cf_index_status": 200,
+      "documented_cf_extm3u": true,
+      "segment_line_count": 325,
+      "documented_cf_seg_status": 206,
+      "playability": "playable",
+      "status_changes_vs_prior": [
+        "playability partial->playable"
+      ]
+    },
+    {
+      "vod_id": "2871138129",
+      "gql_status": 200,
+      "token_ok": true,
+      "usher_status": 200,
+      "usher_extm3u": true,
+      "documented_cf_index_status": 200,
+      "documented_cf_extm3u": true,
+      "segment_line_count": 166,
+      "documented_cf_seg_status": 206,
+      "playability": "playable",
+      "status_changes_vs_prior": [
+        "playability partial->playable"
+      ]
+    },
+    {
+      "vod_id": "2870695078",
+      "gql_status": 200,
+      "token_ok": false,
+      "usher_status": null,
+      "usher_extm3u": false,
+      "documented_cf_index_status": 403,
+      "documented_cf_extm3u": false,
+      "segment_line_count": 0,
+      "documented_cf_seg_status": 403,
+      "playability": "partial",
+      "status_changes_vs_prior": []
+    },
+    {
+      "vod_id": "2870687483",
+      "gql_status": 200,
+      "token_ok": false,
+      "usher_status": null,
+      "usher_extm3u": false,
+      "documented_cf_index_status": 403,
+      "documented_cf_extm3u": false,
+      "segment_line_count": 0,
+      "documented_cf_seg_status": 403,
+      "playability": "partial",
+      "status_changes_vs_prior": []
+    },
+    {
+      "vod_id": "2870617776",
+      "gql_status": 200,
+      "token_ok": false,
+      "usher_status": null,
+      "usher_extm3u": false,
+      "documented_cf_index_status": 403,
+      "documented_cf_extm3u": false,
+      "segment_line_count": 0,
+      "documented_cf_seg_status": 403,
+      "playability": "partial",
+      "status_changes_vs_prior": []
+    },
+    {
+      "vod_id": "2870501048",
+      "gql_status": 200,
+      "token_ok": false,
+      "usher_status": null,
+      "usher_extm3u": false,
+      "documented_cf_index_status": 403,
+      "documented_cf_extm3u": false,
+      "segment_line_count": 0,
+      "documented_cf_seg_status": 403,
+      "playability": "partial",
+      "status_changes_vs_prior": []
+    },
+    {
+      "vod_id": "2869662539",
+      "gql_status": 200,
+      "token_ok": false,
+      "usher_status": null,
+      "usher_extm3u": false,
+      "documented_cf_index_status": 403,
+      "documented_cf_extm3u": false,
+      "segment_line_count": 0,
+      "documented_cf_seg_status": 403,
+      "playability": "partial",
+      "status_changes_vs_prior": []
+    },
+    {
+      "vod_id": "2869651031",
+      "gql_status": 200,
+      "token_ok": false,
+      "usher_status": null,
+      "usher_extm3u": false,
+      "documented_cf_index_status": 403,
+      "documented_cf_extm3u": false,
+      "segment_line_count": 0,
+      "documented_cf_seg_status": 403,
+      "playability": "partial",
+      "status_changes_vs_prior": []
+    },
+    {
+      "vod_id": "2869007624",
+      "gql_status": 200,
+      "token_ok": false,
+      "usher_status": null,
+      "usher_extm3u": false,
+      "documented_cf_index_status": 403,
+      "documented_cf_extm3u": false,
+      "segment_line_count": 0,
+      "documented_cf_seg_status": 403,
+      "playability": "partial",
+      "status_changes_vs_prior": []
+    },
+    {
+      "vod_id": "2868988256",
+      "gql_status": 200,
+      "token_ok": false,
+      "usher_status": null,
+      "usher_extm3u": false,
+      "documented_cf_index_status": 403,
+      "documented_cf_extm3u": false,
+      "segment_line_count": 0,
+      "documented_cf_seg_status": 403,
+      "playability": "partial",
+      "status_changes_vs_prior": []
+    },
+    {
+      "vod_id": "2868974867",
+      "gql_status": 200,
+      "token_ok": false,
+      "usher_status": null,
+      "usher_extm3u": false,
+      "documented_cf_index_status": 403,
+      "documented_cf_extm3u": false,
+      "segment_line_count": 0,
+      "documented_cf_seg_status": 403,
+      "playability": "partial",
+      "status_changes_vs_prior": []
+    },
+    {
+      "vod_id": "2868939423",
+      "gql_status": 200,
+      "token_ok": false,
+      "usher_status": null,
+      "usher_extm3u": false,
+      "documented_cf_index_status": 403,
+      "documented_cf_extm3u": false,
+      "segment_line_count": 0,
+      "documented_cf_seg_status": 403,
+      "playability": "partial",
+      "status_changes_vs_prior": []
+    },
+    {
+      "vod_id": "2868280588",
+      "gql_status": 200,
+      "token_ok": false,
+      "usher_status": null,
+      "usher_extm3u": false,
+      "documented_cf_index_status": 403,
+      "documented_cf_extm3u": false,
+      "segment_line_count": 0,
+      "documented_cf_seg_status": 403,
+      "playability": "partial",
+      "status_changes_vs_prior": []
+    },
+    {
+      "vod_id": "2867596264",
+      "gql_status": 200,
+      "token_ok": false,
+      "usher_status": null,
+      "usher_extm3u": false,
+      "documented_cf_index_status": 403,
+      "documented_cf_extm3u": false,
+      "segment_line_count": 0,
+      "documented_cf_seg_status": 403,
+      "playability": "partial",
+      "status_changes_vs_prior": []
+    },
+    {
+      "vod_id": "2866581522",
+      "gql_status": 200,
+      "token_ok": false,
+      "usher_status": null,
+      "usher_extm3u": false,
+      "documented_cf_index_status": 403,
+      "documented_cf_extm3u": false,
+      "segment_line_count": 0,
+      "documented_cf_seg_status": 403,
+      "playability": "partial",
+      "status_changes_vs_prior": []
+    },
+    {
+      "vod_id": "2866549765",
+      "gql_status": 200,
+      "token_ok": false,
+      "usher_status": null,
+      "usher_extm3u": false,
+      "documented_cf_index_status": 403,
+      "documented_cf_extm3u": false,
+      "segment_line_count": 0,
+      "documented_cf_seg_status": 403,
+      "playability": "partial",
+      "status_changes_vs_prior": []
+    },
+    {
+      "vod_id": "2866319914",
+      "gql_status": 200,
+      "token_ok": false,
+      "usher_status": null,
+      "usher_extm3u": false,
+      "documented_cf_index_status": 403,
+      "documented_cf_extm3u": false,
+      "segment_line_count": 0,
+      "documented_cf_seg_status": 403,
+      "playability": "partial",
+      "status_changes_vs_prior": []
+    }
+  ],
+  "changed_ids": [
+    "2871190456",
+    "2871154099",
+    "2871138129"
+  ],
+  "changes": [
+    {
+      "vod_id": "2871190456",
+      "changes": [
+        "playability partial->playable"
+      ]
+    },
+    {
+      "vod_id": "2871154099",
+      "changes": [
+        "playability partial->playable"
+      ]
+    },
+    {
+      "vod_id": "2871138129",
+      "changes": [
+        "playability partial->playable"
+      ]
+    }
+  ],
+  "summary_counts": {
+    "playable": 3,
+    "partial": 15,
+    "dead": 0
+  },
+  "board_update_and_user_notify_required": true
+}

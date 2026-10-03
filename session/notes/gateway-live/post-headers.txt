@@ -1,0 +1,13 @@
+HTTP/1.1 200 OK
+x-session-id: 6e77b4b4-8166-460f-a803-0ae08e805ad5
+x-green-roomz-requested-alias: qwenstral-code-speculator
+x-green-roomz-effective-alias: qwenstral-code-speculator
+x-green-roomz-route-reason: requested_alias
+access-control-allow-origin: 
+content-length: 707
+content-type: application/json; charset=utf-8
+server: llama.cpp
+Date: Fri, 28 Aug 2026 16:43:59 GMT
+Connection: keep-alive
+Keep-Alive: timeout=5
+

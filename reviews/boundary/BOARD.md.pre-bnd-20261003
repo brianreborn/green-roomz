@@ -1,0 +1,105 @@
+# Trust-boundary board — Green-Roomz
+
+**Owner:** Boundary Reviewer  
+**Updated:** 2026-09-12  
+**Trees:** `/workspace/session/green-roomz` (authoritative box session) · `/workspace/grz-src` (slash+/auto+sanitizer patch drop only; prettify NOT landed)  
+**Rules:** no exploits/PoCs · hardening fixes only · no reboot/lockdown/git push · boards + fix packs → Researcher/Release Driver for integrate
+
+## Status snapshot
+
+| Area | Grade | Notes |
+|------|-------|-------|
+| Gateway parse / route allowlist | **D+** | `endsWith('/route')` open; client pathname proxied to backends |
+| Headers / model→IPC sanitization | **D** box session · **B** `main@381491c` / grz-src | Box `/workspace/session/green-roomz` still missing strip; GitHub `main@381491c` has slash/`/auto` + header/HANDOFF sanitizers (Senior Dev Aug 28). Cut-2 gate = vision/audio enum prettify (grz-src only, never bounced live) |
+| Capability bits | **D** | Declared + advertised; never enforced at request time |
+| CORS | **B** | Allowlist-only; port-less origins often inert (safe-fail) |
+| Monitor lockdown/reboot stubs | **C** | No handlers → 404 (reject). Prefer explicit 501 stubs if product names matter |
+| note9 / peer allowlist | **F** | Unregistered here; tunnel design only until live |
+
+## Findings (file:line → fix)
+
+| ID | Sev | Title | Evidence | Attacker | Fix |
+|----|-----|-------|----------|----------|-----|
+| BND-01 | **high** | Loose `/route` suffix + client path proxy | `session/.../gateway.mjs:144-145`, `:303-308`, `:376-377` (same pattern in grz-src) | HTTP client | Exact `EXPLICIT_ROUTES` only; upstream path = fixed allowlist (`/v1/chat/completions`, `/v1/embeddings`, `/v1/rerank`) |
+| BND-02 | **high** | Untrusted model output → nexus notes / headers (session lag) | `handoff.mjs:6-27`; `gateway.mjs:213-221`, `:365-389`; `nexus.mjs` USER/HANDOFF lines. grz-src has `stripControls`/`headerSafe`/`safeSuggest` | Specialist / junk completion | Port grz-src sanitizers; allowlist `suggest` via `isRoutableAlias`; fence USER text |
+| BND-03 | **high** | Slash first-hop skips modality/capability gate (grz-src) | `grz-src/routing.mjs` slash map; `grz-src/gateway.mjs` first hop `hard.effectiveAlias` | HTTP client (`/vision` no image, `/embed` on chat) | Reject vision/audio slash without parts; map embed/rerank off chat path; require modalities ⊆ `gateway_accepted_capabilities` |
+| BND-04 | **med** | Capability bits advertise-only | `config.mjs:38-39` shape; `registry.mjs:56-57` list; no gateway gate. `handleDirectAlias` skips `hardRuleRoute` | HTTP client | Gate `ensure`/proxy on modality ∩ accepted caps (direct + chat) |
+| BND-05 | **med** | System-policy marker bypass | `gateway.mjs:69-72` (both trees): first 24 chars of policy in client system msg skips inject | HTTP client | Always prepend gateway policy; ignore/strip client `role:system` |
+| BND-06 | **med** | Session nexus weaker than grz-src | session `nexus.mjs` greedy parse / no enum allowlist / raw USER | Nexus model | Merge grz-src `parseRouteJson` first-object, `allowlistedPlan`, `routeIsBad(…, body)`, fenced user |
+| BND-07 | **med** | Manifest `${}` + path resolve no jail | `util.mjs:32-46`; `config.mjs:60-63` | Local process w/ manifest or env write | Fail closed on missing env; resolve under `GRZ_ROOT`; reject `..` after normalize |
+| BND-08 | **low** | Shared `loopback-dev` identity | `gateway.mjs:24-31`; `sessions.mjs:20-24` | Local process | Document; optional API key on loopback; stronger session bind when keyed |
+| BND-09 | **low** | Error `details` leak paths | `gateway.mjs:174-179` + `UnavailableError.missing` | HTTP client | Redact paths in client JSON; full detail logs only |
+| BND-10 | **med** | Raw SSE / header forward (known-bugs, still open on patched hosts) | `proxy.mjs` hop denylist small; stream path unsanitized; `sanitizeCompletionJson` strips reasoning only | Upstream / model | Strip C0/C1/ESC in streamed content; tighten upstream header allowlist |
+
+## Monitor stubs
+
+No `lockdown`/`reboot` modules. Unknown paths → **404** (reject, not 200 no-op). If product surface names them: register `POST /lockdown` + `POST /reboot` → **501/403** `{error:{type:'not_implemented'}}`, never empty success.
+
+## CORS
+
+Allowlist via `cors_origins` (`gateway.mjs:52-60`). Manifest uses `http://localhost` / `http://127.0.0.1` without ports → browsers with `:port` Origin usually get no ACAO (safe). Keep exact; no `*`.
+
+## Looks fine
+
+Public bind needs API key + `GREEN_ROOMZ_ALLOW_PUBLIC=1`. Body size limit. `secureEquals` auth. Mixed image+audio `ValidationError`. Session identity check when keyed.
+
+## Priority patch order (for Release Driver)
+
+1. Session handoff/notes + `headerSafe` (absorb grz-src)  
+2. Modality/capability gates on slash + direct alias  
+3. Exact `/route` allowlist + fixed upstream paths  
+4. Policy injection harden  
+5. Merge nexus allowlist into session  
+6. Optional explicit lockdown/reboot 501 stubs  
+7. SSE/content ESC strip + upstream header allowlist
+
+## Cross-refs
+
+- Release: `/workspace/reviews/release/RELEASE-READINESS.md` (gate: Trust boundary)  
+- Platform: `/workspace/reviews/platform/BOARD.md` (PATH-02/07 overlap with BND-07)  
+- Bugs: `/workspace/session/known-bugs.md` · Handoff: `/workspace/session/session-handoff-2026-08-28.md`  
+- Forensic: session tree authoritative; grz-src = patch drop only
+
+## Hold
+
+Fix packs ready to draft on operator cut pick. No integrate until Brian picks. note9 peer/tunnel design stays design-only until machine registered.
+
+
+## Goal pivot (2026-09-12)
+
+Ship artifact = **offline Linux/BSD security workstation image** (not note9-as-cut). note9 = client/UAT only.
+Authority: `/workspace/reviews/release/GOAL-PIVOT-2026-09-12.md` · `DISPATCH-BUGS-2026-09-12.md` · `RELEASE-READINESS.md`.
+
+### Boundary ownership on dispatch P0s
+
+| Dispatch P0 | Boundary ID | Action when unfrozen |
+|-------------|-------------|----------------------|
+| Silent wrong/unknown `model` → tool-router 200 | BND-04 (+ alias gate) | Reject/503 unknown pins; never absorb as nexus |
+| Vision-first / `|after:vision…` | BND-03 overlap | Land grz-src enum filter; modality gate |
+| Null-body hang | (Race primary) | Fast 400 validation at gateway edge — Boundary reviews reject shape |
+| Slash first-hop skips modality | **BND-03** | Reject `/vision`/`/audio` without parts; off-chat slash → correct endpoint or 400 |
+| Unicode → 500 (tracked major) | BND-10 / content sanitize | 400 or sanitized, never 500 on tool-router |
+
+Hold: council merges; platform packs behind dispatch freeze. Fix packs draft only until Brian picks P0 order.
+
+## Source correction (2026-09-12 room)
+
+- Senior Developer: `381491c` on `main` already has slash/`/auto` unlock + header/HANDOFF sanitizers.
+- Vision/audio enum filter (prettify) remains only in `/workspace/grz-src` (+ qodesh copy); never bounced on shalom live — still the real cut-2 gate (`after:vision without image part`).
+- Box session tree ≠ `main@381491c`; BND-02 High still applies to the box session copy until integrate copies from `main`/grz-src.
+
+## Live gate: DISPATCH-FIX-01 / BND-04 (2026-09-12)
+
+**Verdict:** **CLOSED** (qodesh bounce by Senior Developer) for silent unknown/unavailable → tool-router 200.
+
+| Gate | Result |
+|------|--------|
+| `code-agent` | **400** Unknown agent alias |
+| `general-text-agent` | **400** |
+| `image-generation-agent` | **503** agent_unavailable |
+| `auto` | **200** `eff=tool-router-agent` (not 400) |
+| `speech-synthesis-agent` | **200** `eff=tool-router` — `availability=cold` (callable) → sticky→nexus per policy; **not** unavailable |
+
+**Residual:** FUZZ-FALLTHROUGH-model_tts was written when TTS looked unavailable; on this host cold≠unavailable so 200 nexus is policy-correct. Re-fuzz when TTS is truly `unavailable` to confirm 503. Capability-bits advertise-only (rest of BND-04 / modality ∩ accepted) still open.
+
+**Next Boundary P0:** BND-03 slash modality / vision-first.

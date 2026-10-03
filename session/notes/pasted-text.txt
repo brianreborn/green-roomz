@@ -1,0 +1,58 @@
+## 1. Functional System Architecture Registry
+The system must establish an internal immutable definition matrix mapped to four functional, abstract agent aliases. High-level client applications must only address the platform via these generic functional handles:
+
+* vision-layout-agent
+* Core Task: Multimodal Document Visual Extraction, Structural Layout Analysis, and OCR.
+   * Model Specification: qwen2-vl-7b-instruct-q4_k_m.gguf paired with its matching qwen2-vl-7b-mmproj-f16.bin vision projection matrix.
+   * Hardware Alignment Parameters: Context window (n_ctx) locked at 8192. Acceleration parameters must force N-Gram Multi-Token Self-Speculation (--spec-type ngram-mod, --spec-ngram-mod-n-match 24, --spec-draft-n-max 15).
+* audio-transcription-agent
+* Core Task: Multimodal Audio Ingestion and Verbatim Voice Transcription.
+   * Model Specification: qwen2-audio-7b-instruct-q4_k_m.gguf paired with its matching qwen2-audio-7b-mmproj-f16.bin cross-attention audio projector.
+   * Hardware Alignment Parameters: Context window (n_ctx) locked at 8192. Acceleration parameters must force N-Gram Multi-Token Self-Speculation (--spec-type ngram-mod, --spec-ngram-mod-n-match 12, --spec-draft-n-max 15).
+* qwenstral-code-speculator
+* Core Task: High-throughput source code syntax compilation, structured JSON formatting, and structural layout evaluation.
+   * Model Specification (True In-Process Speculative Decoding): Base engine set to qwen2.5-coder-7b-instruct-q4_k_m.gguf natively drafting against qwen2.5-coder-1.5b-instruct-q4_k_m.gguf.
+   * Hardware Alignment Parameters: Context window (n_ctx) locked at 4048. No visual projector allowed.
+* mistral-text-speculator
+* Core Task: Deep narrative reasoning, natural language writing, context verification, and logical schema extraction.
+   * Model Specification (True In-Process Speculative Decoding): Base engine set to mistral-7b-instruct-v0.3.Q4_K_M.gguf natively drafting against a vocabulary-transplanted Qwenstral-Small-3.1-0.5B.Q4_K_M.gguf speculator.
+   * Hardware Alignment Parameters: Context window (n_ctx) locked at 16384. No visual projector allowed.
+
+------------------------------
+## 2. Hardware Resource Constraints & Global Execution Tuning
+The runtime orchestrator must enforce global constraints to protect host stability and maintain low processing latency:
+
+* Thread Allocation Safety: Every single backend process initialization vector must rigidly enforce --n_threads 3 and --n_threads_batch 4 to match your host system's hyper-threaded performance baseline without causing core contention.
+* VRAM Boundary Budget: Every engine instance must pin exactly --n_gpu_layers 12 to the GPU, leaving adequate high-bandwidth physical memory overhead for dynamic visual token projection arrays or concurrent audio hidden-state embeddings.
+* Operating System Isolation: Sub-processes must be initialized under a lowered priority tier (BELOW_NORMAL_PRIORITY_CLASS on Windows, nice -n 10 on Unix) to throttle memory-mapping loops, preventing system UI locks during swapping phases.
+* Vulkan Acceleration & Device Allocation Enforcement: The execution environment block must explicitly inject system variables (GGML_VULKAN=1 and VK_LOADER_DEBUG=all) into all child runtimes to guarantee parallel text searches and tensor evaluations map natively onto the Vulkan Compute driver layer. Every execution string must enforce --split-mode none to clamp the compute graph execution parameters strictly onto a single device runtime block, avoiding host memory leaks.
+
+------------------------------
+## 3. Smart VRAM Lifecycle & Mutex Swapping Mechanics
+Because the host environment is physically bounded by VRAM and system swap space boundaries, the core manager must operate as a strict Stateful Mutual Exclusion Lock:
+
+* Process Tree Erasure: Prior to launching any new engine instance, the runtime must perform an exhaustive, recursive search of the active child PID handle tree. It must forcefully terminate all lingering background computing loops to guarantee the graphics driver completely flushes physical memory allocations back to the OS.
+* Cooldown Isolation Delay: The orchestrator must execute a blocking delay of exactly 8 to 10 seconds immediately following a model process creation call, allowing file-system layers and driver runtime threads to stabilize before accepting traffic.
+* Asynchronous Serialization: The routing gateway must encapsulate backend engine instantiations behind an active thread-safe synchronization lock (asyncio.Lock), ensuring incoming execution requests wait in line instead of creating VRAM allocation collisions.
+
+------------------------------
+## 4. API Gateway, Route Routing, Interface Spoofing, & Fault-Tolerant Proxying
+To allow seamless plug-and-play consumption by third-party tools, IDE extensions, or agentic frameworks, the platform must expose a standardized proxy facade on a public network port (e.g., 8080 forwarding to an internal backend running on 8081):
+
+* FastAPI Order of Precedence: Explicit metadata/probing routes must be registered at the very top of the routing table, guaranteeing that general wildcard proxy catches do not steal or pass validation traffic to the internal server.
+* Universal Interface Capability Spoofing: The /v1/models and /props endpoints must intercept probing requests and return a customized schema declaration proving that every single model option supports vision, audio, text, and file uploads. The meta.capabilities list matrix must explicitly declare vision: true and audio: true on every model row to bypass frontend extension file-dropping locks.
+* State-Aware Session Tracking: The router must implement an internal lookup memory ledger caching session states (e.g., conv_id tracking parameters). If an incoming request uses a GET request or an un-inspectable body context containing an active session ID previously designated as a multimedia stream, the gateway must dynamically routing-lock that execution to its matching multimodal model.
+* Payload Inspection Routing: The /v1/chat/completions route (and any streaming variant) must decode and scan the incoming message array bytes. If an image_url, data:image, input_audio, or data:audio footprint is found, it must automatically override the requested model field, trigger a hardware hot-swap to the matching visual or voice agent, and forward the request to the backend.
+* Circuit-Breaking Retrying Wildcard Proxy: A global catch-all routing expression (/{path:path}) wrapping all standard methods (GET, POST, OPTIONS) must catch stateful conversation pipes, media chunk uploads, and stream session checkpoints (/v1/stream?conv_id=...). The forwarding routine must introduce a circuit-breaking retrying backoff that catches connection-refused exceptions on port 8081, maintaining the client connection loop cleanly without dropping sockets while the backend completes an active cold boot.
+
+------------------------------
+## 5. Deterministic Agent Prompt Isolation
+To prevent token wasting and maximize token-per-second output throughput on localized hardware layers, the runtime roles must be bound to immutable, highly restricted default system prompts that enforce structural constraints and omit conversational filler:
+
+* Vision Extraction Prompt Requirements: Restrict behavior to an exhaustive Markdown OCR compiler. Mandate data-row isolation into valid Markdown tables. Ban textual assumptions, spelling corrections, and greeting filler.
+* Schema Validation Prompt Requirements: Enforce un-pretty-printed, minified JSON object mapping. Mandate bracket, brace, and quotation validation. Set unresolvable or corrupt fields to a strict null data type, banning all string hallucinations.
+* Audio Transcription Prompt Requirements: Mandate exact, verbatim text conversion. Force transcription of verbal programming extensions into technical layouts (e.g., "dot p y" translated directly to .py). Obligate the engine to silently ignore line hums, ambient audio drops, and absolute silences.
+
+------------------------------
+If you choose to implement this using a different codebase or application language in the future, let me know if you would like me to map out local file ingestion directories or design automated mock benchmark scripts to test compliance against these criteria!
+

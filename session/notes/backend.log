@@ -1,0 +1,9 @@
+18:42:32Z (waiting for llama-bench / llama-server)
+[2026-08-28T18:44:11Z] serve :18080 listening — POST general-text-speculator max_tokens=24
+[2026-08-28T18:44:38Z] 4B POST HTTP500 fetch-failed; llama-server up vulkan-all ngl=all ctx=8192 — retry once
+[2026-08-28T18:47:11Z] patched waitForReady consume health body + Connection: close; stopping serve/llama then retry 4B POST
+[2026-08-28T18:47:38Z] serve restarted; POST general-text-speculator max_tokens=24
+[2026-08-28T18:49:04Z] proxy content-length skip; stop serve/llama then retry 4B POST
+[2026-08-28T18:49:38Z] serve :18080 up; POST general-text-speculator after content-length fix
+[2026-08-28T18:50:04Z] 4B POST HTTP200 vulkan-all; stopping serve and llama-server
+[2026-08-28T18:52:14Z] finished; llama-server/llama-bench not running

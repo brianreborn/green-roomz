@@ -1,0 +1,31 @@
+﻿{
+    "live_inference":  true,
+    "leftover_gateway_pid_27044_stopped":  true,
+    "model":  "C:\\LocalAI\\qwen2.5-coder-7b-instruct-q4_k_m.gguf",
+    "n_gpu_layers":  99,
+    "profile":  "vulkan-all",
+    "working_set_mb_while_up":  2578.8,
+    "generation_tps":  2.12,
+    "prompt_n":  42,
+    "stopped":  true,
+    "draft":  "CPU (spec-draft-device none, ngl-draft 0)",
+    "device":  "Vulkan0",
+    "backend":  "llama-server",
+    "vram_mib":  8058,
+    "pid":  34988,
+    "predicted_n":  11,
+    "load_s":  33.3,
+    "draft_accepted":  "9/9",
+    "draft_model":  "C:\\LocalAI\\qwen2.5-coder-1.5b-instruct-q4_k_m.gguf",
+    "prompt_tps":  14.64,
+    "device_name":  "AMD Radeon(TM) Graphics",
+    "wall_ms":  7707,
+    "notes":  "Direct llama-server (not gateway). vulkan-all chosen because 5.69GB free RAM could not hold 4.36+1.04GB CPU-resident. 7520U iGPU is shared-memory APU. No Qwen3-4B fetch. No grok login.",
+    "when_utc":  "2026-08-28T16:11:17.2916489Z",
+    "errors":  [
+
+               ],
+    "ctx_size":  1024,
+    "gate":  "B",
+    "free_ram_kb_after":  7532420
+}

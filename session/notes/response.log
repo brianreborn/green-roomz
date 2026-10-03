@@ -1,0 +1,2 @@
+[2026-08-28T21:25:39Z]
+DONE C:\LocalAI\Qwen3-4B-eagle3-BF16.gguf 442,700,800 bytes magic=GGUF sha256=8fa28bedf2a7ea83a57c6ae4b7e2017f4f65db65946735b9d684c646ad266299. Convert used full local Qwen3-4B snapshot (13/13) + AngelSlim draft. llama-server not killed; serve not restarted. Green-Roomz will attach draft on next general-text spawn.

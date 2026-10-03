@@ -1,0 +1,155 @@
+[
+  {
+    "alias": "qwenstral-code-speculator",
+    "winner": {
+      "key": "e4a43e47e079607352a1eace04594b4afc07138609a9e1c182254375ac8c406f",
+      "alias": "qwenstral-code-speculator",
+      "profile": {
+        "id": "vulkan-all",
+        "args": [
+          "--load-mode",
+          "mmap",
+          "--fit",
+          "off",
+          "--device",
+          "Vulkan0",
+          "--op-offload",
+          "--threads",
+          "4",
+          "--threads-batch",
+          "4",
+          "--n-gpu-layers",
+          "all",
+          "--batch-size",
+          "512",
+          "--ubatch-size",
+          "128",
+          "--cache-type-k",
+          "q8_0",
+          "--cache-type-v",
+          "q8_0"
+        ]
+      },
+      "metrics": {
+        "promptTps": 27.22,
+        "generationTps": 2.55,
+        "coldStartMs": 122162
+      },
+      "measured_at": "2026-08-28T17:25:47.246Z",
+      "score": 17.84719
+    },
+    "ranked": [
+      {
+        "key": "e4a43e47e079607352a1eace04594b4afc07138609a9e1c182254375ac8c406f",
+        "alias": "qwenstral-code-speculator",
+        "profile": {
+          "id": "vulkan-all",
+          "args": [
+            "--load-mode",
+            "mmap",
+            "--fit",
+            "off",
+            "--device",
+            "Vulkan0",
+            "--op-offload",
+            "--threads",
+            "4",
+            "--threads-batch",
+            "4",
+            "--n-gpu-layers",
+            "all",
+            "--batch-size",
+            "512",
+            "--ubatch-size",
+            "128",
+            "--cache-type-k",
+            "q8_0",
+            "--cache-type-v",
+            "q8_0"
+          ]
+        },
+        "metrics": {
+          "promptTps": 27.22,
+          "generationTps": 2.55,
+          "coldStartMs": 122162
+        },
+        "measured_at": "2026-08-28T17:25:47.246Z",
+        "score": 17.84719
+      },
+      {
+        "key": "2583b4a651aa7b5e9a65f57efcc84e63dd4e697478ec30053c16c7f615a375a9",
+        "alias": "qwenstral-code-speculator",
+        "profile": {
+          "id": "hybrid-12",
+          "args": [
+            "--load-mode",
+            "mmap",
+            "--fit",
+            "off",
+            "--device",
+            "Vulkan0",
+            "--op-offload",
+            "--threads",
+            "4",
+            "--threads-batch",
+            "4",
+            "--n-gpu-layers",
+            "12",
+            "--batch-size",
+            "512",
+            "--ubatch-size",
+            "128",
+            "--cache-type-k",
+            "q8_0",
+            "--cache-type-v",
+            "q8_0"
+          ]
+        },
+        "metrics": {
+          "promptTps": 22.93,
+          "generationTps": 3.56,
+          "coldStartMs": 106207
+        },
+        "measured_at": "2026-08-28T17:27:33.943Z",
+        "score": 15.441465
+      },
+      {
+        "key": "7a3d60421340e02dbe039b210cb732f9629730fba03c659836ce6fc5912ba8f3",
+        "alias": "qwenstral-code-speculator",
+        "profile": {
+          "id": "cpu-4",
+          "args": [
+            "--load-mode",
+            "mmap",
+            "--fit",
+            "off",
+            "--device",
+            "none",
+            "--no-op-offload",
+            "--threads",
+            "4",
+            "--threads-batch",
+            "4",
+            "--n-gpu-layers",
+            "0",
+            "--batch-size",
+            "512",
+            "--ubatch-size",
+            "128",
+            "--cache-type-k",
+            "q8_0",
+            "--cache-type-v",
+            "q8_0"
+          ]
+        },
+        "metrics": {
+          "promptTps": 13.57,
+          "generationTps": 4.55,
+          "coldStartMs": 125690
+        },
+        "measured_at": "2026-08-28T17:29:40.130Z",
+        "score": 9.55705
+      }
+    ]
+  }
+]
