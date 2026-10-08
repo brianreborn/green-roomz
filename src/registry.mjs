@@ -73,7 +73,17 @@ export class AgentRegistry {
   }
 
   listModels() {
-    return [...this.agents.values()].map((agent) => this.modelRecord(agent));
+    return [...this.agents.values()]
+      .filter((agent) => {
+        // Always list resident agents and the nexus/health set.
+        if (isResidentAgent(agent)) return true;
+        const healthAliases = this.manifest?.gateway?.health_aliases ?? [];
+        if (healthAliases.includes(agent.alias)) return true;
+        // Specialist aliases are only published when their artifacts exist on disk (#6).
+        const status = this.availability.get(agent.alias);
+        return !status || status.state !== 'unavailable';
+      })
+      .map((agent) => this.modelRecord(agent));
   }
 
   getModel(alias) {
