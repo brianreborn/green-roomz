@@ -1,3 +1,15 @@
+```
+FFFFFF   AAAAA   M   M  I   L      I   AAAAA
+F       A   A   MM MM  I   L      I   A   A
+FFFF    AAAAA   M M M  I   L      I   AAAAA
+F       A   A   M   M  I   L      I   A   A
+F       A   A   M   M  I   LLLLL  I   A   A
+```
+
+> **FAMILIA** — Federated Agents Mesh for Intelligent Local Interoperable Autonomy
+>
+> **FAMILIA** — Federación de Agentes Multi‑Inteligentes Locales Interoperables Autónomos
+
 # Green-Roomz
 
 Green-Roomz is a local, OpenAI-compatible agent gateway that maps stable functional aliases to host-qualified inference backends. It is llama.cpp-first, but runtime-agnostic: Whisper, Piper/Kokoro, stable-diffusion.cpp, native Android sidecars, and future engines use the same adapter contract.
