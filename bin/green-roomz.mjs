@@ -34,6 +34,7 @@ Commands:
   compile [--manifest path] [--check]   (write build/prompts/ stock system prompts)
   prime [--manifest path] [--only a,b]  (snapshot each agent's stock-prompt KV as "default")
   serve [--manifest path] [--host address] [--port number]
+  graph-proxy --manifest path   (graph-declared local aliases; loopback-only proxy)
   deploy [--manifest path] [--host address] [--port number] [--quick] [--prime]
   benchmark [alias|all] [--manifest path] [--quick] [--force]
   fingerprint [--manifest path]
@@ -524,6 +525,11 @@ async function main(argv) {
   const command = args[0];
   if (!command || command === 'help' || command === '--help' || command === '-h') {
     process.stdout.write(usage());
+    return;
+  }
+  if (command === 'graph-proxy') {
+    const { main: graphProxyMain } = await import('../src/graph-proxy.mjs');
+    await graphProxyMain(args);
     return;
   }
   if (command === 'agent') return cmdAgent(args);
