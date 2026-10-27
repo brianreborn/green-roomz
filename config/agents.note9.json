@@ -166,7 +166,7 @@
     },
     {
       "alias": "general-text-speculator",
-      "description": "General reasoning, writing, verification, and explicit translation",
+      "description": "General chat/writing on CPU - Qwen2.5-0.5B-Instruct Q4_K_M (Note9)",
       "runtime": "llama_server",
       "port": 8184,
       "native_capabilities": [
@@ -178,7 +178,7 @@
         "text",
         "file"
       ],
-      "model": "${HOME}/grz-runtime/missing/text.gguf",
+      "model": "${HOME}/grz-runtime/models/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf",
       "required_artifacts": [
         "model"
       ],
@@ -203,7 +203,16 @@
             "0"
           ]
         }
-      ]
+      ],
+      "artifact_sources": {
+        "model": {
+          "repository": "bartowski/Qwen2.5-0.5B-Instruct-GGUF",
+          "file": "Qwen2.5-0.5B-Instruct-Q4_K_M.gguf",
+          "url": "https://huggingface.co/bartowski/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf",
+          "approx_bytes": 397808192,
+          "notes": "CPU only. Place under ${HOME}/grz-runtime/models/ for Note9 termux runtime."
+        }
+      }
     },
     {
       "alias": "semantic-embedding-agent",

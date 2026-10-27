@@ -15,7 +15,24 @@
     "session_limit": 64,
     "cors_origins": [],
     "max_warm_specialists": 1,
-    "idle_evict_ms": 120000
+    "idle_evict_ms": 120000,
+    "memory_transcript_chars": 2048,
+    "memory_facts_limit": 8,
+    "timing_privacy": "off",
+    "upstream_timeout_ms": 600000,
+    "request_timeout_ms": 600000,
+    "headers_timeout_ms": 600000,
+    "agent_chat_timeout_ms": 600000,
+    "agent_max_tokens": 96,
+    "nexus_consult_timeout_ms": 600000,
+    "handoff_peek_timeout_ms": 600000,
+    "handoff_peek_chars": 48,
+    "admit_when_tight": "refuse",
+    "apply_store_winners": false,
+    "health_aliases": [
+      "tool-router-agent",
+      "general-text-speculator"
+    ]
   },
   "runtimes": {
     "llama_server": {
@@ -176,7 +193,7 @@
     },
     {
       "alias": "general-text-speculator",
-      "description": "General reasoning/writing (requires Qwen-tokenizer instruct GGUF; 0.5B Tekken is nexus-only)",
+      "description": "General chat/writing on CPU - Qwen2.5-0.5B-Instruct Q4_K_M (cursor Linux)",
       "runtime": "llama_server",
       "port": 8184,
       "native_capabilities": [
@@ -188,7 +205,7 @@
         "text",
         "file"
       ],
-      "model": "${GRZ_ROOT}/models/missing-qwen-instruct.gguf",
+      "model": "${GRZ_ROOT}/models/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf",
       "required_artifacts": [
         "model"
       ],
@@ -239,7 +256,16 @@
       "kv_cache": "f16",
       "languages": [
         "en"
-      ]
+      ],
+      "artifact_sources": {
+        "model": {
+          "repository": "bartowski/Qwen2.5-0.5B-Instruct-GGUF",
+          "file": "Qwen2.5-0.5B-Instruct-Q4_K_M.gguf",
+          "url": "https://huggingface.co/bartowski/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf",
+          "approx_bytes": 397808192,
+          "notes": "CPU only. Official alt: Qwen/Qwen2.5-0.5B-Instruct-GGUF qwen2.5-0.5b-instruct-q4_k_m.gguf."
+        }
+      }
     },
     {
       "alias": "semantic-embedding-agent",
