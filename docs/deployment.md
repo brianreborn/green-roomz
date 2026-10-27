@@ -3,6 +3,10 @@
 The one place that describes how Green-Roomz actually runs, how to tell it is
 healthy, and how to recover it.
 
+**Primary path (Linux x86_64):** [INSTALL.md](../INSTALL.md) — `./install.sh` then
+`./start.sh`. This page is ops detail (ports, health, recovery, peers). Windows is
+a sidecar at the end — not the default.
+
 ## One gateway, many backends
 
 There is exactly **one** thing you talk to — the gateway on **`127.0.0.1:8080`**.
@@ -29,38 +33,32 @@ Eleven aliases. Non-resident backends cold-start on first request and are
 `gateway.max_warm_specialists` (default 3) are warm — so the box is never asked
 to hold every model at once.
 
-## Where it runs
+## Start it (Linux)
 
-The canonical live tree is the **dev checkout**, not a separate copy:
+From a tip checkout or unzipped pack:
 
-```
-C:\Users\brian\Documents\green-roomz     <- run serve from here, on `main`
-C:\LocalAI                               <- model store only (*.gguf), NOT a source tree
-```
-
-`C:\LocalAI` holds the model files (`config/agents.windows.json` points at them)
-and nothing you edit. Any `green-roomz` checkout under `C:\LocalAI\...` is legacy
-— do not serve from it.
-
-## Start it
-
-```powershell
-# from C:\Users\brian\Documents\green-roomz
-powershell -ExecutionPolicy Bypass -File .\scripts\start-green-roomz.ps1
-#   … or plainly:  node .\bin\green-roomz.mjs serve
+```bash
+cd green-roomz
+./install.sh          # detect-only doctor (no serve, no fetch)
+./start.sh            # serves config/agents.cursor.json on 127.0.0.1:8080
 ```
 
-`start-green-roomz.ps1` bounces any existing listener on 8080 and opens a serve
-console window that survives the parent.
+`./start.sh` is enough to bring the gateway up. You do **not** need
+`green-roomz validate` (or `npm run validate` / `scripts/cursor-validate.sh`)
+before start — that CLI is optional / diagnostic. Serve loads the manifest
+itself; missing specialty artifacts report degraded, they do not block the
+gateway process.
+
+Stop: `./stop.sh` or Ctrl-C in the serve terminal.
 
 Expose to one other host on the LAN — see [Peer access](#peer-access).
 
 ## Is it healthy?
 
-```powershell
-curl http://127.0.0.1:8080/health        # {"status":"ok"|"degraded", ...}
-curl http://127.0.0.1:8080/v1/models      # the 11 aliases + availability
-node .\e2e\verify-models.mjs               # cold-starts every backend, one real call each
+```bash
+curl -s http://127.0.0.1:8080/health        # {"status":"ok"|"degraded", ...}
+curl -s http://127.0.0.1:8080/v1/models     # the 11 aliases + availability
+node ./e2e/verify-models.mjs                # cold-starts every backend, one real call each
 ```
 
 `verify-models` is the real check — a green `/health` only means the gateway
@@ -73,11 +71,18 @@ on a hard failure.
   selected specialist's backend is not answering. Check `/v1/models` for that
   alias, or just run `verify-models`. Switch the client's model picker to `auto`.
 
+Optional diagnostic (not a start gate):
+
+```bash
+node bin/green-roomz.mjs validate --manifest config/agents.cursor.json
+# or: scripts/cursor-validate.sh
+```
+
 ## Recover it
 
-```powershell
+```bash
 # 1. backend wedged / gone — restart the whole thing
-powershell -File .\scripts\start-green-roomz.ps1
+./stop.sh; ./start.sh
 
 # 2. one backend stuck — let it be evicted (idle) or bounce serve
 
@@ -85,9 +90,9 @@ powershell -File .\scripts\start-green-roomz.ps1
 #    restart; unhandled promise rejections are logged and survived.
 ```
 
-The gateway bounds every upstream call (`gateway.upstream_timeout_ms`, default
-180 s) and caps buffered responses (8 MiB) so a stalled or broken backend
-returns 502/504 instead of hanging the whole gateway.
+The gateway bounds every upstream call (`gateway.upstream_timeout_ms`) and caps
+buffered responses (8 MiB) so a stalled or broken backend returns 502/504 instead
+of hanging the whole gateway.
 
 ## Memory
 
@@ -108,10 +113,10 @@ manifest (e.g. `qwen2.5-coder-1.5b` instead of the 7B).
 
 The gateway answers loopback by default. To let **one** other host reach it:
 
-```powershell
+```bash
 # manifest: "gateway": { "host": "192.168.1.251", "allow_peers": ["192.168.1.88"] }
 #   or at launch:
-node .\bin\green-roomz.mjs serve --host 192.168.1.251 --allow-peer 192.168.1.88
+node bin/green-roomz.mjs serve --host 192.168.1.251 --allow-peer 192.168.1.88
 ```
 
 Every request from a non-loopback address not on `allow_peers` gets **403**.
@@ -126,7 +131,23 @@ authorizer: the Android device must be adb-attached and in the `device` state,
 and only the device IP on a subnet this host and the device **share** is
 trusted. Feed it in at launch:
 
-```powershell
-node .\bin\green-roomz.mjs serve --host <lan-ip> --allow-peer $(node .\deploy\adb-peer.mjs)
-node .\deploy\adb-peer.mjs --describe   # what adb sees and why
+```bash
+node bin/green-roomz.mjs serve --host <lan-ip> --allow-peer "$(node ./deploy/adb-peer.mjs)"
+node ./deploy/adb-peer.mjs --describe   # what adb sees and why
 ```
+
+## Windows sidecar (not step 1)
+
+On a Windows host use [INSTALL-WINDOWS.md](../INSTALL-WINDOWS.md) —
+`install-windows.cmd` / `start.cmd`, or:
+
+```powershell
+# from your green-roomz checkout
+powershell -ExecutionPolicy Bypass -File .\scripts\start-green-roomz.ps1
+#   … or:  node .\bin\green-roomz.mjs serve
+```
+
+`start-green-roomz.ps1` bounces any existing listener on 8080 and opens a serve
+console window that survives the parent. Model store layouts such as
+`C:\LocalAI` are a Windows/shalom concern — see INSTALL-WINDOWS; they are not
+part of the Linux happy path.

@@ -20,6 +20,8 @@ curl -s http://127.0.0.1:8080/health
 
 `./install.sh` runs `scripts/grz-doctor.sh`, chmods launchers, and prints the next action. It never starts the gateway and never downloads GGUFs.
 
+`green-roomz validate` / `npm run validate` / `scripts/cursor-validate.sh` is **optional diagnostic** — not a gate before `./start.sh`. Start loads the manifest itself.
+
 ### Models
 
 - **Full pack / this tip:** nexus `models/Qwenstral-Small-3.1-0.5B.Q4_K_M.gguf` should already be present; doctor reports `models_missing: (none)` when ready.

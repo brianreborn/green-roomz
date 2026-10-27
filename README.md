@@ -49,7 +49,7 @@ Gateway default: `127.0.0.1:8080`. Set `GREEN_ROOMZ_API_KEY` for bearer auth. Pu
 ## Commands
 
 ```text
-green-roomz validate [--manifest path]
+green-roomz validate [--manifest path]   # optional diagnostic — not required before ./start.sh
 green-roomz compile [--manifest path] [--check]
 green-roomz serve [--manifest path] [--host address] [--port number]
 green-roomz benchmark [alias|all] [--manifest path] [--quick] [--force]

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Optional diagnostic only — not a gate before ./start.sh / cursor-serve.sh.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
