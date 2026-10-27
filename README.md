@@ -27,30 +27,24 @@ Bearer token: `try-local`. GitHub Actions builds the image on `main`.
 
 **VM kit** (Debian qcow2 + seed ISO): release tag [`try-vm`](https://github.com/brianreborn/green-roomz/releases/tag/try-vm) — [packaging/vm/README.md](packaging/vm/README.md). ([#19](https://github.com/brianreborn/green-roomz/issues/19))
 
-## Quick start on this host
+## Quick start (Linux)
 
-Use the bundled Node executable discovered by Codex:
+**One local path** — full detail in [INSTALL.md](INSTALL.md):
 
-Models stay on disk under `C:\LocalAI` (not in this repo). Node 24+ is enough.
-
-```powershell
+```bash
 git clone https://github.com/brianreborn/green-roomz.git
 cd green-roomz
-node --test .\test\*.test.mjs
-node .\bin\green-roomz.mjs validate
-node .\bin\green-roomz.mjs serve
-# or: .\scripts\start-green-roomz.cmd
+chmod +x install.sh start.sh stop.sh smoke.sh runtime/llama-server
+./install.sh          # detect-only doctor (no serve, no fetch)
+./start.sh            # http://127.0.0.1:8080  (config/agents.cursor.json)
 ```
 
-The default manifest is `config/agents.windows.json`. It points at the llama.cpp Vulkan build and existing Qwen/Mistral GGUF files under `C:\LocalAI`. Missing model/runtime artifacts are reported as unavailable; they do not make the registry invalid.
+Need Node on PATH (`>=22`; Node 20 works). Tip trees may already have the nexus GGUF under `models/`; slim packs do not — drop `Qwenstral-Small-3.1-0.5B.Q4_K_M.gguf` before start. Missing specialty artifacts report as unavailable; they do not block the gateway.
 
-The gateway listens on `127.0.0.1:8080` by default. Set `GREEN_ROOMZ_API_KEY` to require bearer authentication. Public binding is rejected unless an API key is configured and `GREEN_ROOMZ_ALLOW_PUBLIC=1` is explicitly set.
+Gateway default: `127.0.0.1:8080`. Set `GREEN_ROOMZ_API_KEY` for bearer auth. Public bind needs the key and `GREEN_ROOMZ_ALLOW_PUBLIC=1`.
 
-Easy local clients (all at once is fine):
-
-- Web / file-drop: `scripts\unicorn.cmd` → http://127.0.0.1:8080/unicorn
-- Console: `scripts\chat-mvp.cmd`
-- Desktop GUI: llama.app pointed at the same origin
+**Windows:** [INSTALL-WINDOWS.md](INSTALL-WINDOWS.md) (`install-windows.cmd` / `start.cmd`) — not the first step on Linux.
+**Android / FreeBSD:** [docs/diagrams/install-platforms.md](docs/diagrams/install-platforms.md).
 
 ## Commands
 

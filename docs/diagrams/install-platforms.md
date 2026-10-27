@@ -7,8 +7,8 @@ Do not stop a live cursor serve on those ports from another pack's `stop`.
 ```mermaid
 flowchart TB
   subgraph linux ["Linux x86_64"]
-    L1["unzip pack; chmod +x start.sh stop.sh console.sh runtime/llama-server"]
-    L2["./start.sh"]
+    L1["unzip/clone; chmod +x install.sh start.sh … runtime/llama-server"]
+    L2["./install.sh then ./start.sh"]
     L3["vendored runtime/llama-server + .so<br/>LD_LIBRARY_PATH=runtime/"]
     L1 --> L2 --> L3
   end
@@ -38,14 +38,17 @@ flowchart TB
   end
 ```
 
-## Linux
+## Linux (happy path)
 
 ```bash
-unzip green-roomz-beta-0.1-full.zip   # slim zip: drop the 0.5B GGUF into models/
+unzip green-roomz-beta-*-full.zip   # or git clone tip; slim zip: drop the 0.5B GGUF into models/
 cd green-roomz
-chmod +x start.sh stop.sh console.sh runtime/llama-server
+chmod +x install.sh start.sh stop.sh smoke.sh console.sh runtime/llama-server
+./install.sh    # doctor; no serve
 ./start.sh
 ```
+
+See root [INSTALL.md](../../INSTALL.md).
 
 Stop: `./stop.sh` or Ctrl-C. Console: `./console.sh` (every 2s;
 `CONSOLE_ONCE=1 ./console.sh` once). A one-shot board may also be written to
