@@ -43,8 +43,25 @@ is_linux_elf() {
 
 pick_llama() {
   local bundled="$GRZ_ROOT/runtime/llama-server"
+  local arch
+  arch="$(uname -m 2>/dev/null || echo unknown)"
   case "$os" in
     linux)
+      # G2 AVF Terminal / linux aarch64: prefer runtime/linux-aarch64/ (glibc), never android-arm64
+      if [[ "$arch" == "aarch64" || "$arch" == "arm64" ]]; then
+        local aarch_bundled="$GRZ_ROOT/runtime/linux-aarch64/llama-server"
+        if [[ -f "$aarch_bundled" ]]; then
+          chmod +x "$aarch_bundled" 2>/dev/null || true
+          if [[ -x "$aarch_bundled" ]]; then
+            export GRZ_LLAMA="$aarch_bundled"
+            export LD_LIBRARY_PATH="$GRZ_ROOT/runtime/linux-aarch64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+            return 0
+          fi
+        fi
+        echo "Missing $aarch_bundled (G2 linux-aarch64). Run: scripts/fetch-linux-aarch64.sh" >&2
+        echo "Do not reuse runtime/android-arm64 or flat x86_64 ELF inside AVF guest." >&2
+        return 1
+      fi
       if [[ -f "$bundled" ]]; then
         chmod +x "$bundled" 2>/dev/null || true
         if [[ -x "$bundled" ]]; then
@@ -95,9 +112,14 @@ pick_llama() {
   esac
 }
 
+arch_m="$(uname -m 2>/dev/null || echo unknown)"
 case "$os" in
   linux)
-    export LD_LIBRARY_PATH="$GRZ_ROOT/runtime${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    if [[ "$arch_m" == "aarch64" || "$arch_m" == "arm64" ]]; then
+      export LD_LIBRARY_PATH="$GRZ_ROOT/runtime/linux-aarch64:$GRZ_ROOT/runtime${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    else
+      export LD_LIBRARY_PATH="$GRZ_ROOT/runtime${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    fi
     ;;
   freebsd|openbsd|netbsd)
     # PF4: merge, do not clobber /usr/local/lib

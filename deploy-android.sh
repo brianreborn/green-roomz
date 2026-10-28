@@ -2,8 +2,8 @@
 # One-shot ADB drop of Android arm64 runtime + all pack models + Termux start snippet.
 # No root. No su. No Knox/Magisk. Target /data/local/tmp/grz only.
 # Keep android-arm64 tar for G3 Owner Termux only (G1 = isolation harness, not Termux-in-Private-Space).
-# Linux aarch64 llama for G2 AVF Terminal is MISSING
-# (do not reuse this android tar inside the VM; no fake binary).
+# Linux aarch64 llama for G2 AVF Terminal: scripts/fetch-linux-aarch64.sh → runtime/linux-aarch64/
+# (do not reuse this android tar inside the VM).
 # Android pack excludes agents.windows.json / LocalAI paths (PF-M3 / pack recipe).
 set -euo pipefail
 export GRZ_ROOT="$(cd "$(dirname "$0")" && pwd)"

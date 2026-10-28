@@ -9,13 +9,16 @@ if ! command -v node >/dev/null 2>&1; then
   exit 1
 fi
 
-for f in install.sh start.sh stop.sh smoke.sh console.sh deploy-android.sh termux-start.sh scripts/grz-doctor.sh; do
+for f in install.sh start.sh stop.sh smoke.sh console.sh deploy-android.sh termux-start.sh scripts/grz-doctor.sh scripts/fetch-linux-aarch64.sh; do
   if [[ -f "$ROOT/$f" ]]; then
     chmod +x "$ROOT/$f" 2>/dev/null || true
   fi
 done
 if [[ -f "$ROOT/runtime/llama-server" ]]; then
   chmod +x "$ROOT/runtime/llama-server" 2>/dev/null || true
+fi
+if [[ -f "$ROOT/runtime/linux-aarch64/llama-server" ]]; then
+  chmod +x "$ROOT/runtime/linux-aarch64/llama-server" 2>/dev/null || true
 fi
 
 echo "Green-Roomz install prep (detect-only)"

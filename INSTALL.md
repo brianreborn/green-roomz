@@ -38,6 +38,7 @@ Stop: `./stop.sh` or Ctrl-C in the serve terminal. Optional board: `./console.sh
 | Android | adb device + Termux | `./deploy-android.sh` then `termux-start.sh` — [docs/note9-termux.md](docs/note9-termux.md) |
 | Docker try | no local models / no pack | [packaging/README.md](packaging/README.md) — `docker pull …:try` |
 | FreeBSD / macOS | pack ELF is Linux-only | install system `llama-server`, then `./start.sh` |
+| GrapheneOS G2 (AVF) | Debian aarch64 guest | `scripts/fetch-linux-aarch64.sh` then `./start.sh` — [docs/grapheneos.md](docs/grapheneos.md) |
 
 Platform diagram: [docs/diagrams/install-platforms.md](docs/diagrams/install-platforms.md). In-pack HTML help: `docs/help/index.html`.
 

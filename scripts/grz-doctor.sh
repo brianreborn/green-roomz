@@ -41,15 +41,27 @@ else
   GRZ_EXE="${GRZ_EXE-}"
 fi
 
+# --- arch (G2 linux-aarch64) ---
+ARCH="$(uname -m 2>/dev/null || echo unknown)"
+
 # --- llama ---
 LLAMA_STATUS=MISSING
 LLAMA_PATH=""
 if [[ -n "${GRZ_LLAMA:-}" && -f "$GRZ_LLAMA" ]]; then
   LLAMA_PATH="$GRZ_LLAMA"
   LLAMA_STATUS="OK"
-elif [[ -f "$GRZ_ROOT/runtime/llama-server${GRZ_EXE}" ]]; then
-  LLAMA_PATH="$GRZ_ROOT/runtime/llama-server${GRZ_EXE}"
+elif [[ "$OS" == "linux" && ( "$ARCH" == "aarch64" || "$ARCH" == "arm64" ) && -f "$GRZ_ROOT/runtime/linux-aarch64/llama-server" ]]; then
+  # G2 AVF: prefer glibc aarch64 subdir over flat x86_64 ELF
+  LLAMA_PATH="$GRZ_ROOT/runtime/linux-aarch64/llama-server"
   LLAMA_STATUS="OK"
+elif [[ -f "$GRZ_ROOT/runtime/llama-server${GRZ_EXE}" ]]; then
+  # On aarch64 Linux, flat ELF is usually x86_64 — only accept if linux-aarch64 absent (already checked)
+  if [[ "$OS" == "linux" && ( "$ARCH" == "aarch64" || "$ARCH" == "arm64" ) ]]; then
+    : # leave MISSING; NEXT will point at fetch-linux-aarch64.sh
+  else
+    LLAMA_PATH="$GRZ_ROOT/runtime/llama-server${GRZ_EXE}"
+    LLAMA_STATUS="OK"
+  fi
 elif command -v llama-server >/dev/null 2>&1; then
   LLAMA_PATH="$(command -v llama-server)"
   LLAMA_STATUS="OK"
@@ -99,6 +111,7 @@ rt_ok() {
 WHISPER_RT="$(rt_ok whisper-dist whisper-server)"
 SD_RT="$(rt_ok sd-dist sd-server)"
 PIPER_RT="$(rt_ok piper-dist piper)"
+LINUX_AARCH64_RT="$(rt_ok linux-aarch64 llama-server)"
 
 # --- models from manifest ---
 NEXUS_BASENAME="Qwenstral-Small-3.1-0.5B.Q4_K_M.gguf"
@@ -179,6 +192,8 @@ if [[ "$LLAMA_STATUS" != "OK" ]]; then
     NEXT="place llama-server.exe under runtime/ (Win CPU llama zip)"
   elif [[ "$OS" == "darwin" ]]; then
     NEXT="install native llama-server (brew/build); refuse Linux ELF"
+  elif [[ "$OS" == "linux" && ( "$ARCH" == "aarch64" || "$ARCH" == "arm64" ) ]]; then
+    NEXT="scripts/fetch-linux-aarch64.sh  # G2 glibc aarch64 (not android-arm64)"
   else
     NEXT="place llama-server under runtime/ (CPU only; never GGUF on 8600)"
   fi
@@ -220,14 +235,15 @@ const o={
   GRZ_EXE: process.argv[3],
   llama: process.argv[4]==="OK" ? {status:"OK", path: process.argv[5]} : {status:"MISSING"},
   manifest: process.argv[6],
-  runtimes: { "whisper-dist": process.argv[7], "sd-dist": process.argv[8], "piper-dist": process.argv[9] },
+  runtimes: { "whisper-dist": process.argv[7], "sd-dist": process.argv[8], "piper-dist": process.argv[9], "linux-aarch64": process.argv[13] },
+  arch: process.argv[14],
   models_missing: process.argv[10] ? process.argv[10].split(",") : [],
   nexus: process.argv[11]==="1" ? "OK" : "MISSING",
   next: process.argv[12],
 };
 process.stdout.write(JSON.stringify(o,null,2)+"\n");
 ' "$OS" "$GRZ_ROOT" "$GRZ_EXE" "$LLAMA_STATUS" "${LLAMA_PATH:-}" "$MANIFEST_REL" \
-  "$WHISPER_RT" "$SD_RT" "$PIPER_RT" "$_mm" "$NEXUS_PRESENT" "$NEXT"
+  "$WHISPER_RT" "$SD_RT" "$PIPER_RT" "$_mm" "$NEXUS_PRESENT" "$NEXT" "$LINUX_AARCH64_RT" "$ARCH"
   else
     python3 -c '
 import json,sys
@@ -238,14 +254,15 @@ o={
   "GRZ_EXE": sys.argv[3],
   "llama": {"status":"OK","path":sys.argv[5]} if sys.argv[4]=="OK" else {"status":"MISSING"},
   "manifest": sys.argv[6],
-  "runtimes": {"whisper-dist":sys.argv[7],"sd-dist":sys.argv[8],"piper-dist":sys.argv[9]},
+  "runtimes": {"whisper-dist":sys.argv[7],"sd-dist":sys.argv[8],"piper-dist":sys.argv[9],"linux-aarch64":sys.argv[13]},
+  "arch": sys.argv[14],
   "models_missing": mm,
   "nexus": "OK" if sys.argv[11]=="1" else "MISSING",
   "next": sys.argv[12],
 }
 print(json.dumps(o,indent=2))
 ' "$OS" "$GRZ_ROOT" "$GRZ_EXE" "$LLAMA_STATUS" "${LLAMA_PATH:-}" "$MANIFEST_REL" \
-  "$WHISPER_RT" "$SD_RT" "$PIPER_RT" "$_mm" "$NEXUS_PRESENT" "$NEXT"
+  "$WHISPER_RT" "$SD_RT" "$PIPER_RT" "$_mm" "$NEXUS_PRESENT" "$NEXT" "$LINUX_AARCH64_RT" "$ARCH"
   fi
 else
   echo "OS:           $OS"
@@ -257,10 +274,12 @@ else
     echo "llama:        MISSING"
   fi
   echo "manifest:     $MANIFEST_REL"
+  echo "arch:         $ARCH"
   echo "runtimes:"
   echo "  whisper-dist:  $WHISPER_RT"
   echo "  sd-dist:       $SD_RT"
   echo "  piper-dist:    $PIPER_RT"
+  echo "  linux-aarch64: $LINUX_AARCH64_RT"
   if [[ ${#MODELS_MISSING[@]} -eq 0 ]]; then
     echo "models_missing: (none)"
   else
