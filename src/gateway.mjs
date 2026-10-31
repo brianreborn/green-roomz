@@ -823,7 +823,7 @@ export class Gateway {
     const { mkdtemp, readFile, rm } = await import('node:fs/promises');
     const os = await import('node:os');
     const path = await import('node:path');
-    const dir = await mkdtemp(path.join(os.tmpdir(), 'grz-tts-'));
+    const dir = await mkdtemp(path.join(os.tmpdir(), `grz-tts.${process.pid}.`));
     const out = path.join(dir, 'speech.wav');
     try {
       const timeout = this.manifest.gateway.agent_chat_timeout_ms ?? 600_000;
