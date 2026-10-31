@@ -1733,3 +1733,42 @@ test('routing slice: a model reply naming another agent never changes routing', 
     assert.match(result.body.choices[0].message.content, /qwenstral-code-speculator/);
   }
 });
+
+// ---- DISPATCH-FIX-01 port: explicit pin to an unavailable agent fails loudly ----
+for (const [label, body, alias] of [
+  ['model pin', { model: 'qwenstral-code-speculator', messages: [{ role: 'user', content: 'write hello' }] }, 'qwenstral-code-speculator'],
+  ['lock_alias pin', { model: 'qwenstral-code-speculator', lock_alias: true, messages: [{ role: 'user', content: 'write hello' }] }, 'qwenstral-code-speculator'],
+  ['locked nexus pin', { model: 'tool-router-agent', lock_alias: true, messages: [{ role: 'user', content: 'ping' }] }, 'tool-router-agent'],
+]) {
+  test(`DISPATCH-FIX-01: ${label} to an unavailable agent is 503 with a clear reason and no upstream call`, async (t) => {
+    const urls = [];
+    const { server, registry } = await withServer(t, {}, {
+      ready: ['tool-router-agent', 'general-text-speculator', 'qwenstral-code-speculator'],
+      stubEnsure: true,
+      fetchImpl: async (url) => { urls.push(String(url)); return jsonFetch({ choices: [{ message: { role: 'assistant', content: 'should-not-happen' } }] }); },
+    });
+    registry.setStatus(alias, 'unavailable', { missing: ['model:missing'] });
+    const result = await request(server, { path: '/v1/chat/completions', method: 'POST', headers: { 'content-type': 'application/json' }, body });
+    assert.equal(result.status, 503);
+    assert.equal(result.headers['x-green-roomz-pin-status'], 'unavailable');
+    assert.equal(result.headers['x-green-roomz-effective-alias'], alias);
+    assert.equal(result.body.error.type, 'agent_unavailable');
+    assert.match(result.body.error.message, new RegExp(`pinned agent ${alias} is unavailable`));
+    assert.deepEqual(urls, []);
+  });
+}
+
+test('DISPATCH-FIX-01: auto request with an unavailable specialist still falls back (200, no pin status)', async (t) => {
+  const { server, registry } = await withServer(t, {}, {
+    ready: ['tool-router-agent', 'general-text-speculator'],
+    stubEnsure: true,
+    fetchImpl: async () => jsonFetch({ choices: [{ message: { role: 'assistant', content: 'auto-ok' } }] }),
+  });
+  registry.setStatus('qwenstral-code-speculator', 'unavailable', { missing: ['model:missing'] });
+  for (const model of ['auto', undefined, 'gpt-4o']) {
+    const result = await request(server, { path: '/v1/chat/completions', method: 'POST', headers: { 'content-type': 'application/json' }, body: { model, messages: [{ role: 'user', content: 'write a python function named hello' }] } });
+    assert.equal(result.status, 200, `model=${model}`);
+    assert.equal(result.headers['x-green-roomz-pin-status'], undefined);
+    assert.notEqual(result.headers['x-green-roomz-effective-alias'], 'qwenstral-code-speculator');
+  }
+});
