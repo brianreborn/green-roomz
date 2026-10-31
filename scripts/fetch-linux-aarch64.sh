@@ -11,9 +11,27 @@ PIN="${GRZ_LLAMA_PIN:-b10702}"
 URL="${GRZ_LINUX_AARCH64_URL:-https://github.com/ggml-org/llama.cpp/releases/download/${PIN}/llama-${PIN}-bin-ubuntu-arm64.tar.gz}"
 
 mkdir -p "$OUT"
-stage="$(mktemp -d /tmp/grz-linux-aarch64.XXXXXX)"
-cleanup() { rm -rf "$stage"; }
+# Termux-aware temp base: TMPDIR, then $PREFIX/tmp (Termux), then /tmp.
+tmp_base="${TMPDIR:-}"
+if [[ -z "$tmp_base" && -n "${PREFIX:-}" && -d "$PREFIX/tmp" ]]; then tmp_base="$PREFIX/tmp"; fi
+tmp_base="${tmp_base:-/tmp}"
+umask 077
+# Sweep stale grz.<pid>.* stage dirs left by SIGKILL (owner's own, PID no longer alive).
+for old in "$tmp_base"/grz.[0-9]*.*; do
+  [[ -d "$old" && -O "$old" ]] || continue
+  opid="${old##*/grz.}"; opid="${opid%%.*}"
+  [[ "$opid" =~ ^[0-9]+$ ]] && ! kill -0 "$opid" 2>/dev/null && rm -rf -- "$old" 2>/dev/null
+done
+stage="$(mktemp -d "$tmp_base/grz.$$.XXXXXX")"
+cleanup() {
+  local kids; kids="$(jobs -p)"; [[ -n "$kids" ]] && kill $kids 2>/dev/null; wait 2>/dev/null
+  [[ -n "${stage:-}" ]] && rm -rf -- "$stage" 2>/dev/null
+  return 0
+}
 trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 echo "fetching $URL → $OUT"
 curl -fL --retry 3 -o "$stage/ubuntu-arm64.tar.gz" "$URL"
@@ -29,7 +47,9 @@ d="$(dirname "$srv")"
 cp -a "$srv" "$OUT/"
 find "$d" -maxdepth 1 \( -type f -o -type l \) \( -name '*.so' -o -name '*.so.*' \) \
   -exec cp -a {} "$OUT/" \;
-chmod +x "$OUT/llama-server"
+# umask 077 left extracted files 0600/0700; set explicit modes for the guest user.
+find "$OUT" -maxdepth 1 -type f -exec chmod 0644 {} +
+chmod 0755 "$OUT" "$OUT/llama-server"
 
 # Verify glibc aarch64 interpreter (refuse Android linker)
 interp=""

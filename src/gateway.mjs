@@ -823,7 +823,7 @@ export class Gateway {
     const { mkdtemp, readFile, rm } = await import('node:fs/promises');
     const os = await import('node:os');
     const path = await import('node:path');
-    const dir = await mkdtemp(path.join(os.tmpdir(), 'grz-tts-'));
+    const dir = await mkdtemp(path.join(os.tmpdir(), `grz-tts.${process.pid}.`));
     const out = path.join(dir, 'speech.wav');
     try {
       const timeout = this.manifest.gateway.agent_chat_timeout_ms ?? 600_000;
@@ -1029,6 +1029,7 @@ export class Gateway {
       'x-green-roomz-effective-alias': headerSafe(routed.effectiveAlias ?? ''),
       'x-green-roomz-route-reason': headerSafe(routed.reason ?? ''),
       'x-green-roomz-hops': headerSafe(extra.hops ?? ''),
+      ...(extra.fallback ? { 'x-green-roomz-route-fallback': headerSafe(extra.fallback) } : {}),
       'x-green-roomz-memory': headerSafe(formatMemoryHeader(this.sessions.workingSet(issuedSession))),
       'x-green-roomz-nexus': NEXUS_ALIAS,
       'x-green-roomz-agency': AGENCY_ROLE,
@@ -1217,6 +1218,7 @@ export class Gateway {
     const visited = new Set();
     const hops = [];
     const notes = [];
+    let routeFallback = null;   // set when the live router was unreachable
     const preferResident = preferResidentChat(this.manifest?.gateway ?? this.processes?.manifest?.gateway);
     const hard = hardRuleRoute(body, this.registry);
     const issuedSession = session?.id ?? this.sessions.create({
@@ -1231,12 +1233,25 @@ export class Gateway {
       issuedSession,
       { requestedAlias: body.model ?? null, effectiveAlias: alias ?? '', reason: reason ?? 'nexus' },
       cors,
-      { hops: hops.join(',') },
+      { hops: hops.join(','), fallback: routeFallback },
     );
 
     const startedAt = Date.now();
     const release = await this.policy.acquire(request.abortSignal);
     try {
+      // DISPATCH-FIX-01: an explicit pin (model / lock_alias) to an unavailable agent fails loudly
+      // with 503 instead of quietly rerouting; nothing is sent upstream.
+      if (hard.effectiveAlias && (hard.reason === 'requested_alias' || hard.reason === 'lock_alias')
+        && this.registry.agents.has(hard.effectiveAlias)
+        && this.registry.status(hard.effectiveAlias).state === 'unavailable') {
+        const alias = hard.effectiveAlias;
+        this.observeHop('agent_unavailable', alias, { ticket: issuedSession, payload: { reason: 'pinned_unavailable' } });
+        // Details (missing artifacts, local paths) stay server-side; the client gets a generic reason.
+        try { console.warn(`pinned agent ${alias} unavailable: ${JSON.stringify(this.registry.status(alias).missing ?? [])}`); } catch {}
+        const err = new UnavailableError(`pinned agent ${alias} is unavailable`, { reason: 'pinned_agent_unavailable' });
+        err.headers = { ...hopHeaders(alias, hard.reason), 'x-green-roomz-pin-status': 'unavailable' };
+        throw err;
+      }
       if (hard.effectiveAlias === NEXUS_ALIAS) {
         return await this.completeOnResident(request, response, body, issuedSession, cors, hops, hard.reason ?? 'lock_alias');
       }
@@ -1293,6 +1308,7 @@ export class Gateway {
             });
             alias = picked.route;
             reason = picked.reason ?? 'nexus';
+            if (picked.fallback) routeFallback = picked.fallback;
           }
         }
 

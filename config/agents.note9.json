@@ -311,6 +311,9 @@
             "128"
           ]
         }
+      ],
+      "languages": [
+        "en"
       ]
     },
     {
@@ -377,6 +380,7 @@
       "alias": "security-monitor-agent",
       "description": "Async mailbox security monitor (PQ-style ring). Producers push and return immediately; not a GGUF.",
       "runtime": "logical",
+      "internal": true,
       "native_capabilities": [
         "text",
         "json"

@@ -92,15 +92,15 @@ test('unavailable native model is still pinned so completions can 503', () => {
   assert.equal(routed.reason, 'requested_alias');
 });
 
-test('unavailable qwenstral-code-speculator is not pinned as requested_alias', () => {
+test('unavailable qwenstral-code-speculator is pinned as requested_alias (gateway 503, DISPATCH-FIX-01)', () => {
   const reg = registry();
   reg.setStatus('qwenstral-code-speculator', 'unavailable', { missing: ['impractical:RAM'] });
   const routed = hardRuleRoute({
     model: 'qwenstral-code-speculator',
     messages: [{ role: 'user', content: 'write hello' }],
   }, reg);
-  assert.equal(routed.effectiveAlias, null);
-  assert.equal(routed.reason, 'nexus');
+  assert.equal(routed.effectiveAlias, 'qwenstral-code-speculator');
+  assert.equal(routed.reason, 'requested_alias');
 });
 
 test('text-only turns do not regex C++ or image intent; nexus decides', () => {
@@ -327,3 +327,38 @@ test('security slash dispatches route to their corresponding specialists', () =>
   assert.equal(mon.reason, 'slash_monitor');
 });
 
+
+// green-roomz #34 regression (routing slice): the nexus pin must survive lock_alias,
+// and must not leak into un-locked requests or unavailable routers.
+test('#34: lock_alias nexus pin is honored even for a prompt that would hard-route elsewhere', () => {
+  const reg = registry();
+  reg.setStatus('tool-router-agent', 'ready');
+  const routed = hardRuleRoute({
+    lock_alias: true,
+    model: 'tool-router-agent',
+    messages: [{ role: 'user', content: 'write a python function named hello' }],
+  }, reg);
+  assert.equal(routed.effectiveAlias, 'tool-router-agent');
+  assert.equal(routed.reason, 'lock_alias');
+  assert.equal(routeRequest({
+    lock_alias: true,
+    model: 'tool-router-agent',
+    messages: [{ role: 'user', content: 'ping' }],
+  }, reg).effectiveAlias, 'tool-router-agent');
+});
+
+test('#34: nexus id without lock_alias still means auto (no pin)', () => {
+  const reg = registry();
+  reg.setStatus('tool-router-agent', 'ready');
+  const routed = hardRuleRoute({ model: 'tool-router-agent', messages: [{ role: 'user', content: 'ping' }] }, reg);
+  assert.equal(routed.effectiveAlias, null);
+  assert.equal(routed.reason, 'nexus');
+});
+
+test('#34: lock_alias on an unavailable nexus is pinned (gateway 503, DISPATCH-FIX-01)', () => {
+  const reg = registry();
+  reg.setStatus('tool-router-agent', 'unavailable', { missing: ['model:missing'] });
+  const routed = hardRuleRoute({ lock_alias: true, model: 'tool-router-agent', messages: [{ role: 'user', content: 'ping' }] }, reg);
+  assert.equal(routed.effectiveAlias, 'tool-router-agent');
+  assert.equal(routed.reason, 'lock_alias');
+});

@@ -10,6 +10,7 @@ import { ProcessManager } from '../src/process-manager.mjs';
 import { PolicyGate } from '../src/scheduler.mjs';
 import { SessionLedger } from '../src/sessions.mjs';
 import { Gateway, prepareInferenceBody } from '../src/gateway.mjs';
+import { hardRuleRoute, resolveExplicitModelPin, isPinnableAlias, isAutoModelFamily } from '../src/routing.mjs';
 import { sampleManifest } from './helpers.mjs';
 import { NEXUS_CHAT_SYSTEM, REQUIRED_ALIASES } from '../src/constants.mjs';
 
@@ -1128,7 +1129,7 @@ test('/tts on chat completions is 503 when piper is missing', async (t) => {
     stubEnsure: true,
     fetchImpl: async () => jsonFetch({ choices: [{ message: { role: 'assistant', content: 'resident-ok' } }] }),
   });
-  registry.setStatus('speech-synthesis-agent', 'unavailable', { missing: ['model:/tmp/missing-voice.onnx'] });
+  registry.setStatus('speech-synthesis-agent', 'unavailable', { missing: ['model:/nonexistent/grz/missing-voice.onnx'] });
   const result = await request(server, {
     path: '/v1/chat/completions',
     method: 'POST',
@@ -1146,7 +1147,7 @@ test('/draw and /imagine on unavailable image-generation-agent are 503', async (
     stubEnsure: true,
     fetchImpl: async () => jsonFetch({ choices: [{ message: { role: 'assistant', content: 'resident-ok' } }] }),
   });
-  registry.setStatus('image-generation-agent', 'unavailable', { missing: ['model:/tmp/missing-sd.gguf'] });
+  registry.setStatus('image-generation-agent', 'unavailable', { missing: ['model:/nonexistent/grz/missing-sd.gguf'] });
   for (const content of ['/draw a red apple', '/imagine a sunset']) {
     const result = await request(server, {
       path: '/v1/chat/completions',
@@ -1166,7 +1167,7 @@ test('model image-generation-agent unavailable is 503 not resident 200', async (
     stubEnsure: true,
     fetchImpl: async () => jsonFetch({ choices: [{ message: { role: 'assistant', content: 'resident-ok' } }] }),
   });
-  registry.setStatus('image-generation-agent', 'unavailable', { missing: ['model:/tmp/missing-sd.gguf'] });
+  registry.setStatus('image-generation-agent', 'unavailable', { missing: ['model:/nonexistent/grz/missing-sd.gguf'] });
   const result = await request(server, {
     path: '/v1/chat/completions',
     method: 'POST',
@@ -1342,7 +1343,7 @@ test('peerAllowed gates non-loopback clients against the allowlist', async () =>
 test('council: /council on sets a session default that fans out later turns', async (t) => {
   const manifest = sampleManifest();
   const vl = manifest.agents.find((a) => a.alias === 'vision-layout-agent');
-  manifest.agents.push({ ...vl, alias: 'vision-layout-agent@b', variant_of: 'vision-layout-agent', port: 18281, model: '/tmp/b.gguf' });
+  manifest.agents.push({ ...vl, alias: 'vision-layout-agent@b', variant_of: 'vision-layout-agent', port: 18281, model: '/nonexistent/grz/b.gguf' });
   const registry = await new AgentRegistry(manifest).inspect();
   for (const a of ['vision-layout-agent', 'vision-layout-agent@b', 'tool-router-agent']) registry.setStatus(a, 'ready');
   const processes = new ProcessManager({ manifest, registry, spawnImpl() { throw new Error('no'); } });
@@ -1386,7 +1387,7 @@ test('council: /council on sets a session default that fans out later turns', as
 test('council: a /council slash message triggers the fan-out (same as the JSON form)', async (t) => {
   const manifest = sampleManifest();
   const vl = manifest.agents.find((a) => a.alias === 'vision-layout-agent');
-  manifest.agents.push({ ...vl, alias: 'vision-layout-agent@b', variant_of: 'vision-layout-agent', port: 18281, model: '/tmp/b.gguf' });
+  manifest.agents.push({ ...vl, alias: 'vision-layout-agent@b', variant_of: 'vision-layout-agent', port: 18281, model: '/nonexistent/grz/b.gguf' });
 
   const registry = await new AgentRegistry(manifest).inspect();
   for (const a of ['vision-layout-agent', 'vision-layout-agent@b', 'tool-router-agent']) registry.setStatus(a, 'ready');
@@ -1423,8 +1424,8 @@ test('council: a split turn (agreement < 0.6) is logged to disagreements.jsonl',
   const manifest = sampleManifest();
   manifest.gateway.council_dir = dir;
   const vl = manifest.agents.find((a) => a.alias === 'vision-layout-agent');
-  manifest.agents.push({ ...vl, alias: 'vision-layout-agent@b', variant_of: 'vision-layout-agent', port: 18281, model: '/tmp/b.gguf' });
-  manifest.agents.push({ ...vl, alias: 'vision-layout-agent@c', variant_of: 'vision-layout-agent', port: 18282, model: '/tmp/c.gguf' });
+  manifest.agents.push({ ...vl, alias: 'vision-layout-agent@b', variant_of: 'vision-layout-agent', port: 18281, model: '/nonexistent/grz/b.gguf' });
+  manifest.agents.push({ ...vl, alias: 'vision-layout-agent@c', variant_of: 'vision-layout-agent', port: 18282, model: '/nonexistent/grz/c.gguf' });
   const registry = await new AgentRegistry(manifest).inspect();
   for (const a of ['vision-layout-agent', 'vision-layout-agent@b', 'vision-layout-agent@c', 'tool-router-agent']) registry.setStatus(a, 'ready');
   const processes = new ProcessManager({ manifest, registry, spawnImpl() { throw new Error('no'); } });
@@ -1489,8 +1490,8 @@ test('council: fan out to variants, field-vote the JSON, flag the outlier, write
   const manifest = sampleManifest();
   manifest.gateway.council_dir = dir;
   const vl = manifest.agents.find((a) => a.alias === 'vision-layout-agent');
-  manifest.agents.push({ ...vl, alias: 'vision-layout-agent@b', variant_of: 'vision-layout-agent', port: 18281, model: '/tmp/b.gguf' });
-  manifest.agents.push({ ...vl, alias: 'vision-layout-agent@c', variant_of: 'vision-layout-agent', port: 18282, model: '/tmp/c.gguf' });
+  manifest.agents.push({ ...vl, alias: 'vision-layout-agent@b', variant_of: 'vision-layout-agent', port: 18281, model: '/nonexistent/grz/b.gguf' });
+  manifest.agents.push({ ...vl, alias: 'vision-layout-agent@c', variant_of: 'vision-layout-agent', port: 18282, model: '/nonexistent/grz/c.gguf' });
 
   const registry = await new AgentRegistry(manifest).inspect();
   for (const a of ['vision-layout-agent', 'vision-layout-agent@b', 'vision-layout-agent@c', 'tool-router-agent']) registry.setStatus(a, 'ready');
@@ -1663,3 +1664,345 @@ test('/v1/images/generations generates images via image-generation-agent', async
   assert.equal(res.headers['x-green-roomz-effective-alias'], 'image-generation-agent');
 });
 
+
+// ---- routing slice (Routing Test Designer): pinned route, router-down fallback, no routing from model output ----
+test('routing slice: lock_alias pin to tool-router-agent is honored even for a code prompt', async (t) => {
+  const urls = [];
+  const { server } = await withServer(t, {}, {
+    ready: ['tool-router-agent', 'general-text-speculator', 'qwenstral-code-speculator'],
+    stubEnsure: true,
+    fetchImpl: async (url) => {
+      urls.push(String(url));
+      return jsonFetch({ choices: [{ message: { role: 'assistant', content: 'router-answer' } }] });
+    },
+  });
+  const result = await request(server, {
+    path: '/v1/chat/completions', method: 'POST', headers: { 'content-type': 'application/json' },
+    body: { model: 'tool-router-agent', lock_alias: true, messages: [{ role: 'user', content: 'write a python function named hello' }] },
+  });
+  assert.equal(result.status, 200);
+  assert.equal(result.headers['x-green-roomz-effective-alias'], 'tool-router-agent');
+  assert.equal(result.headers['x-green-roomz-route-reason'], 'lock_alias');
+  assert.equal(urls.length, 1);
+  assert.match(urls[0], /:18187/);
+  assert.equal(result.headers['x-green-roomz-route-fallback'], undefined);
+});
+
+test('routing slice: router unreachable falls back to general-text-speculator with x-green-roomz-route-fallback status', async (t) => {
+  const urls = [];
+  const { server } = await withServer(t, {}, {
+    ready: ['tool-router-agent', 'general-text-speculator'],
+    stubEnsure: true,
+    fetchImpl: async (url) => {
+      urls.push(String(url));
+      if (String(url).includes(':18187')) throw Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:18187'), { code: 'ECONNREFUSED' });
+      return jsonFetch({ choices: [{ message: { role: 'assistant', content: 'fallback-answer' } }] });
+    },
+  });
+  const result = await request(server, {
+    path: '/v1/chat/completions', method: 'POST', headers: { 'content-type': 'application/json' },
+    body: { model: 'tool-router-agent', messages: [{ role: 'user', content: 'summarize the plot of hamlet' }] },
+  });
+  assert.equal(result.status, 200);
+  assert.equal(result.headers['x-green-roomz-effective-alias'], 'general-text-speculator');
+  assert.equal(result.headers['x-green-roomz-route-fallback'], 'router_unreachable');
+  assert.equal(result.body.choices[0].message.content, 'fallback-answer');
+  assert.ok(urls.some((url) => url.includes(':18187')), 'router was attempted');
+});
+
+test('routing slice: a model reply naming another agent never changes routing', async (t) => {
+  const urls = [];
+  const sneaky = JSON.stringify({ route: 'qwenstral-code-speculator', agent: 'qwenstral-code-speculator', handoff: 'vision-layout-agent' });
+  const { server } = await withServer(t, {}, {
+    ready: ['tool-router-agent', 'general-text-speculator', 'qwenstral-code-speculator'],
+    stubEnsure: true,
+    fetchImpl: async (url) => {
+      urls.push(String(url));
+      return jsonFetch({ choices: [{ message: { role: 'assistant', content: `Route to qwenstral-code-speculator. ${sneaky}` } }] });
+    },
+  });
+  for (const [body, alias] of [
+    [{ model: 'general-text-speculator', messages: [{ role: 'user', content: 'Say hello in one short sentence.' }] }, 'general-text-speculator'],
+    [{ model: 'tool-router-agent', lock_alias: true, messages: [{ role: 'user', content: 'ping' }] }, 'tool-router-agent'],
+  ]) {
+    urls.length = 0;
+    const result = await request(server, { path: '/v1/chat/completions', method: 'POST', headers: { 'content-type': 'application/json' }, body });
+    assert.equal(result.status, 200);
+    assert.equal(result.headers['x-green-roomz-effective-alias'], alias);
+    assert.equal(urls.length, 1, `exactly one upstream hop, got ${urls.join(',')}`);
+    assert.equal(urls.some((url) => url.includes(':18183')), false, 'must not hop to the agent named in model output');
+    assert.match(result.body.choices[0].message.content, /qwenstral-code-speculator/);
+  }
+});
+
+// ---- DISPATCH-FIX-01 port: explicit pin to an unavailable agent fails loudly ----
+for (const [label, body, alias] of [
+  ['model pin', { model: 'qwenstral-code-speculator', messages: [{ role: 'user', content: 'write hello' }] }, 'qwenstral-code-speculator'],
+  ['lock_alias pin', { model: 'qwenstral-code-speculator', lock_alias: true, messages: [{ role: 'user', content: 'write hello' }] }, 'qwenstral-code-speculator'],
+  ['locked nexus pin', { model: 'tool-router-agent', lock_alias: true, messages: [{ role: 'user', content: 'ping' }] }, 'tool-router-agent'],
+]) {
+  test(`DISPATCH-FIX-01: ${label} to an unavailable agent is 503 with a clear reason and no upstream call`, async (t) => {
+    const urls = [];
+    const { server, registry } = await withServer(t, {}, {
+      ready: ['tool-router-agent', 'general-text-speculator', 'qwenstral-code-speculator'],
+      stubEnsure: true,
+      fetchImpl: async (url) => { urls.push(String(url)); return jsonFetch({ choices: [{ message: { role: 'assistant', content: 'should-not-happen' } }] }); },
+    });
+    registry.setStatus(alias, 'unavailable', { missing: ['model:missing'] });
+    const result = await request(server, { path: '/v1/chat/completions', method: 'POST', headers: { 'content-type': 'application/json' }, body });
+    assert.equal(result.status, 503);
+    assert.equal(result.headers['x-green-roomz-pin-status'], 'unavailable');
+    assert.equal(result.headers['x-green-roomz-effective-alias'], alias);
+    assert.equal(result.body.error.type, 'agent_unavailable');
+    assert.match(result.body.error.message, new RegExp(`pinned agent ${alias} is unavailable`));
+    assert.deepEqual(urls, []);
+  });
+}
+
+test('DISPATCH-FIX-01: auto request with an unavailable specialist still falls back (200, no pin status)', async (t) => {
+  const { server, registry } = await withServer(t, {}, {
+    ready: ['tool-router-agent', 'general-text-speculator'],
+    stubEnsure: true,
+    fetchImpl: async () => jsonFetch({ choices: [{ message: { role: 'assistant', content: 'auto-ok' } }] }),
+  });
+  registry.setStatus('qwenstral-code-speculator', 'unavailable', { missing: ['model:missing'] });
+  for (const model of ['auto', undefined, 'gpt-4o']) {
+    const result = await request(server, { path: '/v1/chat/completions', method: 'POST', headers: { 'content-type': 'application/json' }, body: { model, messages: [{ role: 'user', content: 'write a python function named hello' }] } });
+    assert.equal(result.status, 200, `model=${model}`);
+    assert.equal(result.headers['x-green-roomz-pin-status'], undefined);
+    assert.notEqual(result.headers['x-green-roomz-effective-alias'], 'qwenstral-code-speculator');
+  }
+});
+
+// ---- DISPATCH-FIX-01 port: unknown model names are 400, auto ids still auto-route ----
+test('DISPATCH-FIX-01: unknown non-auto model name is 400 validation_error with nothing sent upstream', async (t) => {
+  const urls = [];
+  const { server } = await withServer(t, {}, {
+    ready: ['tool-router-agent', 'general-text-speculator'],
+    stubEnsure: true,
+    fetchImpl: async (url) => { urls.push(String(url)); return jsonFetch({ choices: [{ message: { role: 'assistant', content: 'nope' } }] }); },
+  });
+  for (const model of ['no-such-agent', 'foo-bar', 'llama3', 'my-gpt-4o', 'o5-mini', 'xclaude-3']) {
+    const result = await request(server, { path: '/v1/chat/completions', method: 'POST', headers: { 'content-type': 'application/json' }, body: { model, messages: [{ role: 'user', content: 'hi' }] } });
+    assert.equal(result.status, 400, model);
+    assert.equal(result.body.error.type, 'validation_error');
+    assert.equal(result.body.error.message, `Unknown agent alias: ${model}`);
+    assert.ok(result.body.error.details.allowed.includes('general-text-speculator'));
+    assert.ok(!result.body.error.details.allowed.includes('tool-router-agent'));
+  }
+  assert.deepEqual(urls, []);
+});
+
+test('DISPATCH-FIX-01: every auto id still auto-routes with 200', async (t) => {
+  const { server } = await withServer(t, {}, {
+    ready: ['tool-router-agent', 'general-text-speculator'],
+    stubEnsure: true,
+    fetchImpl: async () => jsonFetch({ choices: [{ message: { role: 'assistant', content: 'auto-ok' } }] }),
+  });
+  for (const model of [undefined, '', 'auto', 'AUTO', 'green-roomz', 'green-roomz-auto', 'default', 'gpt-4', 'gpt-4o', 'GPT-4o', 'gpt-3.5-turbo', 'tool-router-agent']) {
+    const result = await request(server, { path: '/v1/chat/completions', method: 'POST', headers: { 'content-type': 'application/json' }, body: { model, messages: [{ role: 'user', content: 'Say hello in one short sentence.' }] } });
+    assert.equal(result.status, 200, `model=${JSON.stringify(model)}`);
+    assert.notEqual(result.headers['x-green-roomz-route-reason'], 'requested_alias');
+    assert.notEqual(result.headers['x-green-roomz-route-reason'], 'lock_alias');
+  }
+});
+
+test('DISPATCH-FIX-01: a known agent alias with lock_alias is still honored', async (t) => {
+  const urls = [];
+  const { server } = await withServer(t, {}, {
+    ready: ['tool-router-agent', 'general-text-speculator', 'qwenstral-code-speculator'],
+    stubEnsure: true,
+    fetchImpl: async (url) => { urls.push(String(url)); return jsonFetch({ choices: [{ message: { role: 'assistant', content: 'code-ok' } }] }); },
+  });
+  const result = await request(server, { path: '/v1/chat/completions', method: 'POST', headers: { 'content-type': 'application/json' }, body: { model: 'qwenstral-code-speculator', lock_alias: true, messages: [{ role: 'user', content: 'hi' }] } });
+  assert.equal(result.status, 200);
+  assert.equal(result.headers['x-green-roomz-effective-alias'], 'qwenstral-code-speculator');
+  assert.equal(result.headers['x-green-roomz-route-reason'], 'lock_alias');
+  assert.equal(urls.length, 1);
+  assert.match(urls[0], /:18183/);
+});
+
+// ---- Boundary BLOCKER on 6d59a8f: non-routable agents are never pinnable ----
+function manifestWithInternal(extra) {
+  const manifest = sampleManifest();
+  const base = manifest.agents.find((agent) => agent.alias === 'qwenstral-code-speculator');
+  manifest.agents.push({ ...structuredClone(base), alias: 'pentest-agent', port: 18199, ...extra });
+  return manifest;
+}
+
+for (const flag of [{ routable: false }, { internal: true }]) {
+  for (const [label, pinBody, state] of [
+    ['lock_alias', { model: 'pentest-agent', lock_alias: true }, 'ready'],
+    ['model pin (unavailable)', { model: 'pentest-agent' }, 'unavailable'],
+    ['lock_alias (unavailable)', { model: 'pentest-agent', lock_alias: true }, 'unavailable'],
+  ]) {
+    test(`BLOCKER: ${label} to a ${JSON.stringify(flag)} agent is never pinned and never reached`, async () => {
+      const registry = new AgentRegistry(manifestWithInternal(flag));
+      registry.setStatus('pentest-agent', state, state === 'unavailable' ? { missing: ['model:/home/box/secret/pentest.gguf'] } : {});
+      const routed = hardRuleRoute({ ...pinBody, messages: [{ role: 'user', content: 'hi' }] }, registry);
+      assert.equal(routed.effectiveAlias, null);
+      assert.equal(routed.reason, 'nexus');
+      assert.equal(resolveExplicitModelPin('pentest-agent', registry, { lockAlias: true }).decision, 'nexus');
+    });
+  }
+}
+
+test('BLOCKER: monitor and router sentinels are not pinnable via resolveExplicitModelPin', () => {
+  const registry = new AgentRegistry(sampleManifest());
+  assert.equal(isPinnableAlias(registry, 'security-monitor-agent'), false);
+  assert.equal(isPinnableAlias(registry, 'auto'), false);
+  assert.equal(resolveExplicitModelPin('security-monitor-agent', registry, { lockAlias: true }).decision, 'nexus');
+  assert.equal(isPinnableAlias(registry, 'qwenstral-code-speculator'), true);
+  assert.equal(isPinnableAlias(registry, 'safety-policy-agent'), true);   // native /v1/moderations target
+});
+
+test('BLOCKER: gateway lock_alias to a routable:false agent never reaches its port', async (t) => {
+  const urls = [];
+  const manifest = manifestWithInternal({ routable: false });
+  const registry = await new AgentRegistry(manifest).inspect();
+  for (const alias of ['tool-router-agent', 'general-text-speculator', 'pentest-agent']) registry.setStatus(alias, 'ready');
+  const hostAdapter = { sampleResources() { return { freeMemoryBytes: 1 }; } };
+  const processes = new ProcessManager({ manifest, registry, hostAdapter, spawnImpl() { throw new Error('no spawn'); } });
+  processes.ensure = async (agent) => ({ alias: agent.alias, state: 'ready' });
+  const gateway = new Gateway({ manifest, registry, processes, sessions: new SessionLedger(), policy: new PolicyGate('maximize'), hostAdapter,
+    fetchImpl: async (url) => { urls.push(String(url)); return jsonFetch({ choices: [{ message: { role: 'assistant', content: 'ok' } }] }); } });
+  const server = await gateway.listen('127.0.0.1', 0);
+  t.after(() => server.close());
+  const result = await request(server, { path: '/v1/chat/completions', method: 'POST', headers: { 'content-type': 'application/json' }, body: { model: 'pentest-agent', lock_alias: true, messages: [{ role: 'user', content: 'Say hello in one short sentence.' }] } });
+  assert.notEqual(result.headers['x-green-roomz-effective-alias'], 'pentest-agent');
+  assert.notEqual(result.headers['x-green-roomz-route-reason'], 'lock_alias');
+  assert.equal(urls.some((url) => url.includes(':18199')), false);
+});
+
+test('pin-503 body carries a generic reason and no local paths', async (t) => {
+  const { server, registry } = await withServer(t, {}, {
+    ready: ['tool-router-agent', 'general-text-speculator'],
+    stubEnsure: true,
+    fetchImpl: async () => { throw new Error('must not go upstream'); },
+  });
+  registry.setStatus('qwenstral-code-speculator', 'unavailable', { missing: ['model:/home/box/models/secret-qwenstral.gguf', 'impractical:RAM C:\\Users\\brian\\x.gguf'] });
+  const result = await request(server, { path: '/v1/chat/completions', method: 'POST', headers: { 'content-type': 'application/json' }, body: { model: 'qwenstral-code-speculator', messages: [{ role: 'user', content: 'hi' }] } });
+  assert.equal(result.status, 503);
+  assert.deepEqual(result.body.error.details, { reason: 'pinned_agent_unavailable' });
+  const raw = JSON.stringify(result.body) + JSON.stringify(result.headers);
+  assert.doesNotMatch(raw, /\/home\/|\.gguf|[A-Za-z]:\\\\|secret/);
+});
+
+// ---- pass 4: client model families are auto ----
+test('auto families: gpt-4o-mini, gpt-4-turbo, o3-mini, o4-mini, claude-3-5-sonnet auto-route with 200', async (t) => {
+  const urls = [];
+  const { server } = await withServer(t, {}, {
+    ready: ['tool-router-agent', 'general-text-speculator'],
+    stubEnsure: true,
+    fetchImpl: async (url) => { urls.push(String(url)); return jsonFetch({ choices: [{ message: { role: 'assistant', content: 'auto-ok' } }] }); },
+  });
+  for (const model of ['gpt-4o-mini', 'gpt-4-turbo', 'o3-mini', 'o4-mini', 'O1', 'o3', 'claude-3-5-sonnet', 'Claude-3-5-Sonnet-20241022']) {
+    const result = await request(server, { path: '/v1/chat/completions', method: 'POST', headers: { 'content-type': 'application/json' }, body: { model, messages: [{ role: 'user', content: 'Say hello in one short sentence.' }] } });
+    assert.equal(result.status, 200, model);
+    assert.notEqual(result.headers['x-green-roomz-route-reason'], 'requested_alias', model);
+    assert.notEqual(result.headers['x-green-roomz-route-reason'], 'lock_alias', model);
+  }
+});
+
+test('auto families: anchored patterns, and a known agent alias that looks like a family still pins', () => {
+  for (const id of ['gpt-4o-mini', 'GPT-4-TURBO', 'o1', 'o1-preview', 'o3-mini', 'o4-mini', 'claude-3-5-sonnet']) assert.equal(isAutoModelFamily(id), true, id);
+  for (const id of ['foo-bar', 'my-gpt-4o', 'gpt', 'gpt-', 'o2', 'o5-mini', 'o10', 'xclaude-3', 'claude', 'qwenstral-code-speculator']) assert.equal(isAutoModelFamily(id), false, id);
+  const manifest = sampleManifest();
+  const base = manifest.agents.find((agent) => agent.alias === 'qwenstral-code-speculator');
+  manifest.agents.push({ ...structuredClone(base), alias: 'gpt-local-coder', port: 18198 });
+  const registry = new AgentRegistry(manifest);
+  registry.setStatus('gpt-local-coder', 'ready');
+  const pin = resolveExplicitModelPin('gpt-local-coder', registry, { lockAlias: true });
+  assert.deepEqual(pin, { decision: 'pin', alias: 'gpt-local-coder', reason: 'lock_alias' });
+  assert.throws(() => resolveExplicitModelPin('foo-bar', registry), /Unknown agent alias: foo-bar/);
+});
+
+// ---- pass 4: deny pins by agent type/role/category ----
+for (const kind of ['guardian', 'pentest', 'defender', 'monitor']) {
+  for (const field of ['type', 'role', 'category']) {
+    test(`deny-by-type: ${field}=${kind} agent without flags is never pinned (lock_alias / model pin, ready / unavailable)`, () => {
+      for (const state of ['ready', 'unavailable']) {
+        const registry = new AgentRegistry(manifestWithInternal({ [field]: kind === 'guardian' ? 'Guardian' : kind }));
+        registry.setStatus('pentest-agent', state, state === 'unavailable' ? { missing: ['model:missing'] } : {});
+        assert.equal(isPinnableAlias(registry, 'pentest-agent'), false);
+        for (const body of [{ model: 'pentest-agent', lock_alias: true }, { model: 'pentest-agent' }]) {
+          const routed = hardRuleRoute({ ...body, messages: [{ role: 'user', content: 'hi' }] }, registry);
+          assert.equal(routed.effectiveAlias, null, `${state} ${JSON.stringify(body)}`);
+          assert.equal(routed.reason, 'nexus');
+        }
+      }
+    });
+  }
+}
+
+for (const kind of ['guardian', 'pentest', 'defender', 'monitor']) {
+  test(`deny-by-type: gateway never reaches a type=${kind} agent's port (lock_alias and model pin, ready and unavailable)`, async (t) => {
+    for (const state of ['ready', 'unavailable']) {
+      for (const pin of [{ lock_alias: true }, {}]) {
+        const urls = [];
+        const manifest = manifestWithInternal({ type: kind });
+        const registry = await new AgentRegistry(manifest).inspect();
+        for (const alias of ['tool-router-agent', 'general-text-speculator']) registry.setStatus(alias, 'ready');
+        registry.setStatus('pentest-agent', state, state === 'unavailable' ? { missing: ['model:missing'] } : {});
+        const hostAdapter = { sampleResources() { return { freeMemoryBytes: 1 }; } };
+        const processes = new ProcessManager({ manifest, registry, hostAdapter, spawnImpl() { throw new Error('no spawn'); } });
+        processes.ensure = async (agent) => ({ alias: agent.alias, state: 'ready' });
+        const gateway = new Gateway({ manifest, registry, processes, sessions: new SessionLedger(), policy: new PolicyGate('maximize'), hostAdapter,
+          fetchImpl: async (url) => { urls.push(String(url)); return jsonFetch({ choices: [{ message: { role: 'assistant', content: 'ok' } }] }); } });
+        const server = await gateway.listen('127.0.0.1', 0);
+        try {
+          const result = await request(server, { path: '/v1/chat/completions', method: 'POST', headers: { 'content-type': 'application/json' }, body: { model: 'pentest-agent', ...pin, messages: [{ role: 'user', content: 'Say hello in one short sentence.' }] } });
+          assert.notEqual(result.headers['x-green-roomz-effective-alias'], 'pentest-agent');
+          assert.notEqual(result.status, 503, 'non-pinnable agent must not produce a pin-503');
+          assert.equal(urls.some((url) => url.includes(':18199')), false);
+        } finally {
+          server.close();
+        }
+      }
+    }
+  });
+}
+
+test('shipped manifests mark security-monitor-agent internal and it is never pinnable', async () => {
+  const { loadManifest } = await import('../src/config.mjs');
+  for (const name of ['android', 'cursor', 'linux-try', 'note9', 'windows-mvp', 'windows']) {
+    const manifest = await loadManifest(new URL(`../config/agents.${name}.json`, import.meta.url));
+    const monitor = manifest.agents.find((agent) => agent.alias === 'security-monitor-agent');
+    assert.equal(monitor.internal, true, name);
+    assert.equal(isPinnableAlias(new AgentRegistry(manifest), 'security-monitor-agent'), false, name);
+  }
+});
+
+// ---- pass 5 nits ----
+test('unknown-alias 400 allowed list omits internal, monitor and deny-by-type agents', () => {
+  const manifest = manifestWithInternal({ type: 'guardian' });
+  const base = manifest.agents.find((agent) => agent.alias === 'qwenstral-code-speculator');
+  manifest.agents.push({ ...structuredClone(base), alias: 'hidden-agent', port: 18197, internal: true });
+  const registry = new AgentRegistry(manifest);
+  let caught;
+  try { resolveExplicitModelPin('foo-bar', registry); } catch (error) { caught = error; }
+  assert.ok(caught, 'expected a 400');
+  const allowed = caught.details.allowed;
+  for (const hidden of ['pentest-agent', 'hidden-agent', 'security-monitor-agent', 'tool-router-agent', 'auto']) {
+    assert.equal(allowed.includes(hidden), false, hidden);
+  }
+  assert.ok(allowed.includes('general-text-speculator'));
+  assert.ok(allowed.includes('safety-policy-agent'));
+  assert.deepEqual(allowed, [...allowed].sort());
+});
+
+test('shipped manifests: guardian/pentest/defender agents (alias or role) are internal or typed', async () => {
+  const { readdirSync } = await import('node:fs');
+  const { loadManifest } = await import('../src/config.mjs');
+  const dir = new URL('../config/', import.meta.url);
+  const files = readdirSync(dir).filter((name) => name.endsWith('.json'));
+  assert.ok(files.length >= 6);
+  const risky = /guardian|pentest|defender/i;
+  for (const file of files) {
+    const manifest = await loadManifest(new URL(file, dir));
+    for (const agent of manifest.agents ?? []) {
+      if (!risky.test(String(agent.alias ?? '')) && !risky.test(String(agent.role ?? ''))) continue;
+      assert.ok(agent.internal === true || (agent.type != null && agent.type !== ''), `${file}: ${agent.alias} must set internal:true or type`);
+    }
+  }
+});

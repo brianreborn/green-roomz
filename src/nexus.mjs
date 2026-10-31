@@ -273,7 +273,9 @@ export async function consultNexus({ processes, registry, fetchImpl = fetch, bod
   const admitOk = (alias) => alias && aliasCanAdmit(registry, alias, processes);
 
   const offlineNexus = offlineNexusEnabled(processes?.manifest?.gateway);
+  let routerDown = false;   // live router consult threw (down/unreachable/timeout)
   const ask = async (constraint) => {
+    routerDown = false;   // per attempt: a later successful consult clears an earlier failure
     if (!candidates.length) return { route: null, confidence: 0, reason: 'no_admittable_specialist' };
     if (!live || offlineNexus) return offlinePlan(stripped, registry, visited);
     try {
@@ -282,9 +284,11 @@ export async function consultNexus({ processes, registry, fetchImpl = fetch, bod
         consultTimeoutMs: processes?.manifest?.gateway?.nexus_consult_timeout_ms ?? NEXUS_CONSULT_TIMEOUT_MS,
       });
     } catch {
+      routerDown = true;
       return offlinePlan(stripped, registry, visited);
     }
   };
+  const tag = (result) => (routerDown ? { ...result, fallback: 'router_unreachable' } : result);
 
   let plan = await ask();
   let bad = routeIsBad(plan, registry, visited, stripped);
@@ -304,12 +308,12 @@ export async function consultNexus({ processes, registry, fetchImpl = fetch, bod
   const offline = offlinePlan(stripped, registry, visited);
   if (bad) {
     if (!routeIsBad(offline, registry, visited, stripped) && admitOk(offline.route)) {
-      return { ...offline, reason: String(offline.reason ?? 'offline_plan') };
+      return tag({ ...offline, reason: String(offline.reason ?? 'offline_plan') });
     }
     if (isRoutableAlias(registry, FALLBACK_ALIAS) && !visited.has(FALLBACK_ALIAS) && admitOk(FALLBACK_ALIAS)) {
-      return { route: FALLBACK_ALIAS, confidence: 0.4, reason: 'fallback_text' };
+      return tag({ route: FALLBACK_ALIAS, confidence: 0.4, reason: 'fallback_text' });
     }
-    return { route: null, confidence: 0, reason: 'no_route' };
+    return tag({ route: null, confidence: 0, reason: 'no_route' });
   }
   const liveReason = String(plan.reason ?? plan.reason_code ?? '');
   const nexusDefaulted = plan.route === FALLBACK_ALIAS
@@ -318,11 +322,11 @@ export async function consultNexus({ processes, registry, fetchImpl = fetch, bod
     && (offline.confidence ?? 0) >= 0.7;
   const junkReason = liveReason === 'short' || liveReason === 'hello' || liveReason === 'short-token';
   if ((nexusDefaulted || (junkReason && offline.route && offline.route !== plan.route && (offline.confidence ?? 0) >= 0.7)) && admitOk(offline.route)) {
-    return { ...offline, reason: String(offline.reason ?? 'offline_plan') };
+    return tag({ ...offline, reason: String(offline.reason ?? 'offline_plan') });
   }
-  return {
+  return tag({
     route: plan.route,
     confidence: plan.confidence ?? 0.5,
     reason: plan.reason ?? plan.reason_code ?? 'nexus',
-  };
+  });
 }

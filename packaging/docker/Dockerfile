@@ -14,16 +14,17 @@ WORKDIR /opt/green-roomz
 COPY . .
 
 RUN mkdir -p /opt/green-roomz/runtime /opt/green-roomz/models /opt/green-roomz/data \
-  && curl -fsSL --retry 3 --retry-all-errors -o /tmp/llama.tar.gz \
+  && LLAMA_STAGE="$(umask 077 && mktemp -d "${TMPDIR:-/tmp}/grz.$$.XXXXXX")" \
+  && curl -fsSL --retry 3 --retry-all-errors -o "$LLAMA_STAGE/llama.tar.gz" \
       "https://github.com/ggml-org/llama.cpp/releases/download/${LLAMA_TAG}/llama-${LLAMA_TAG}-bin-ubuntu-x64.tar.gz" \
-  && mkdir -p /tmp/llama \
-  && tar -xzf /tmp/llama.tar.gz -C /tmp/llama \
-  && LLAMA_BIN="$(find /tmp/llama -type f -name llama-server | head -n 1)" \
+  && mkdir -p "$LLAMA_STAGE/llama" \
+  && tar -xzf "$LLAMA_STAGE/llama.tar.gz" -C "$LLAMA_STAGE/llama" \
+  && LLAMA_BIN="$(find "$LLAMA_STAGE/llama" -type f -name llama-server | head -n 1)" \
   && test -n "$LLAMA_BIN" \
   && find "$(dirname "$LLAMA_BIN")" -maxdepth 1 -type f \( -name 'llama-server' -o -name '*.so*' \) \
        -exec cp -a {} /opt/green-roomz/runtime/ \; \
   && chmod +x /opt/green-roomz/runtime/llama-server \
-  && rm -rf /tmp/llama /tmp/llama.tar.gz \
+  && rm -rf "$LLAMA_STAGE" \
   && curl -fL --http1.1 --retry 5 --retry-delay 2 --retry-all-errors \
       -A "Mozilla/5.0 (compatible; green-roomz-docker)" \
       -o /opt/green-roomz/models/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf \

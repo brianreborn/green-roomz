@@ -21,15 +21,23 @@ goto :have_exe
 :fetch_cpu
 echo Fetching official llama.cpp Windows CPU zip b10702 (not vulkan/cuda^)...
 if not exist "%GRZ_ROOT%\runtime" mkdir "%GRZ_ROOT%\runtime"
-curl.exe -L --fail "https://github.com/ggml-org/llama.cpp/releases/download/b10702/llama-b10702-bin-win-cpu-x64.zip" -o "%TEMP%\llama-win-cpu.zip"
+set "GRZ_TMP_TRIES=0"
+call :mk_grz_tmp
+if not defined GRZ_TMP (
+  echo FATAL: cannot create a private temp dir under %TEMP%
+  exit /b 1
+)
+curl.exe -L --fail "https://github.com/ggml-org/llama.cpp/releases/download/b10702/llama-b10702-bin-win-cpu-x64.zip" -o "%GRZ_TMP%\llama-win-cpu.zip"
 if errorlevel 1 (
+  rmdir /s /q "%GRZ_TMP%" 2>nul
   echo curl failed fetching the official CPU zip
   echo Missing llama-server.exe. Fetch:
   echo   https://github.com/ggml-org/llama.cpp/releases/download/b10702/llama-b10702-bin-win-cpu-x64.zip
   echo and expand llama-server.exe + dlls into runtime\
   exit /b 1
 )
-tar -xf "%TEMP%\llama-win-cpu.zip" -C "%GRZ_ROOT%\runtime"
+tar -xf "%GRZ_TMP%\llama-win-cpu.zip" -C "%GRZ_ROOT%\runtime"
+rmdir /s /q "%GRZ_TMP%" 2>nul
 if exist "%GRZ_ROOT%\runtime\llama-server.exe" goto :have_exe
 rem Nested folder fallback
 for /d %%D in ("%GRZ_ROOT%\runtime\*") do (
@@ -87,3 +95,15 @@ echo See WINDOWS-MVP.md
 echo.
 node bin\green-roomz.mjs serve --manifest "%GRZ_MANIFEST%" --host 127.0.0.1 --port 8080
 endlocal
+goto :eof
+
+:mk_grz_tmp
+rem Random per-run temp dir; mkdir fails atomically if the name already exists.
+set /a GRZ_TMP_TRIES+=1
+if %GRZ_TMP_TRIES% GTR 20 (
+  set "GRZ_TMP="
+  goto :eof
+)
+set "GRZ_TMP=%TEMP%\grz.%RANDOM%%RANDOM%%RANDOM%"
+mkdir "%GRZ_TMP%" 2>nul || goto :mk_grz_tmp
+goto :eof

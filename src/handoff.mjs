@@ -170,7 +170,13 @@ export async function peekSpecialist({ fetchImpl = fetch, request, target, body,
   signal?.addEventListener?.('abort', onParent, { once: true });
   // A specialist that accepts the stream but never emits the peek tokens must not
   // pin this hop: bound the peek phase, combined with parent + manual abort.
-  const peekDeadline = peekTimeoutMs > 0 ? AbortSignal.timeout(peekTimeoutMs) : null;
+  // Ref'd timer (AbortSignal.timeout is unref'd and lets the loop drain mid-peek).
+  let peekTimer = null;
+  const peekDeadline = peekTimeoutMs > 0 ? (() => {
+    const ac = new AbortController();
+    peekTimer = setTimeout(() => ac.abort(new DOMException('peek timeout', 'TimeoutError')), peekTimeoutMs);
+    return ac.signal;
+  })() : null;
   const fetchSignal = peekDeadline ? AbortSignal.any([hopAbort.signal, peekDeadline]) : hopAbort.signal;
   let upstream;
   try {
@@ -181,12 +187,14 @@ export async function peekSpecialist({ fetchImpl = fetch, request, target, body,
       signal: fetchSignal,
     });
   } catch (error) {
+    if (peekTimer) clearTimeout(peekTimer);
     signal?.removeEventListener?.('abort', onParent);
     throw error;
   }
   // Headers received: do not RST this generation if the client hangs up.
   signal?.removeEventListener?.('abort', onParent);
 
+  if (upstream.status >= 400 || !upstream.body) { if (peekTimer) clearTimeout(peekTimer); }
   if (upstream.status >= 400) {
     signal?.removeEventListener?.('abort', onParent);
     const raw = await readJsonBody(upstream);
@@ -258,6 +266,7 @@ export async function peekSpecialist({ fetchImpl = fetch, request, target, body,
     if (signal?.aborted) throw error;
     if (peekDeadline?.aborted) peekTimedOut = true;
   }
+  if (peekTimer) clearTimeout(peekTimer);
 
   const handoff = parseHandoffContent(content);
   if (handoff || peekTimedOut) {

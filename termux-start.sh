@@ -8,7 +8,7 @@ if [[ -z "${HOME:-}" ]]; then
   exit 1
 fi
 SD=/sdcard/Download/grz
-SRC=/data/local/tmp/grz
+SRC=/data/local/tmp/grz  # replaced by the verified copy below
 LOG=$HOME/grz-setup.log
 mkdir -p "$SD" "$HOME"
 exec > >(tee -a "$LOG" | tee -a "$SD/setup.log") 2>&1
@@ -20,6 +20,30 @@ if ! command -v node >/dev/null 2>&1; then
   pkg install -y nodejs
 fi
 command -v node >/dev/null || { echo "ERROR: nodejs missing"; exit 1; }
+
+DROP=/data/local/tmp/grz
+# Verify the adb drop before using any of it: copy SHA256SUMS-listed files into a private
+# dir under $HOME, refuse symlinks and path escapes, then sha256sum -c. Fail closed.
+VER="$HOME/.cache/green-roomz/drop"
+if [[ -d $DROP ]]; then
+  [[ -f $DROP/SHA256SUMS && ! -L $DROP/SHA256SUMS ]] || { echo "ERROR: $DROP/SHA256SUMS missing; refusing unverified drop"; exit 1; }
+  rm -rf -- "$HOME/.cache/green-roomz/drop"
+  (umask 077 && mkdir -p "$VER")
+  cp -P "$DROP/SHA256SUMS" "$VER/SHA256SUMS"
+  while read -r _sum rel; do
+    [[ -n $rel ]] || continue
+    case "$rel" in /*|*..*) echo "ERROR: unsafe path in SHA256SUMS: $rel"; exit 1 ;; esac
+    if [[ -L $DROP/$rel || ! -f $DROP/$rel ]]; then echo "ERROR: missing or symlinked drop file: $rel"; exit 1; fi
+    mkdir -p "$VER/$(dirname "$rel")"
+    cp -P "$DROP/$rel" "$VER/$rel"
+  done <"$VER/SHA256SUMS"
+  if [[ -n "$(find "$VER" -type l -print -quit)" ]]; then echo "ERROR: symlink in verified copy"; exit 1; fi
+  (cd "$VER" && sha256sum -c --quiet SHA256SUMS) || { echo "ERROR: SHA256SUMS verification failed; refusing to run"; exit 1; }
+  echo "drop verified: $(wc -l <"$VER/SHA256SUMS") file(s)"
+  SRC="$VER"
+elif [[ ${GRZ_ALLOW_UNVERIFIED:-0} != 1 ]]; then
+  echo "ERROR: no adb drop at $DROP; set GRZ_ALLOW_UNVERIFIED=1 to use the unverified $SD tree"; exit 1
+fi
 
 HOME_GRZ="$HOME/green-roomz"
 RT="$HOME/grz-runtime"
@@ -43,7 +67,7 @@ cp -a "$SRC/lib/"*.so "$RT/lib/" 2>/dev/null || true
 # PF-M3: copy ALL staged models (not nexus-only)
 echo "=== copy models into \$HOME/grz-runtime/models (all files present) ==="
 copied=0
-for src_models in "$SRC/models" "$SD/models"; do
+for src_models in "$DROP/models" "$SD/models"; do
   [[ -d $src_models ]] || continue
   for f in "$src_models"/*; do
     [[ -f $f ]] || continue

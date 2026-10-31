@@ -64,7 +64,10 @@ if ($DownloadImageRuntime) {
     throw 'Set GRZ_IMAGE_RUNTIME_URL to a compatible stable-diffusion.cpp Windows archive before using -DownloadImageRuntime.'
   }
   $target = Join-Path $localAi 'stable-diffusion.cpp'
-  $archive = Join-Path $env:TEMP 'green-roomz-stable-diffusion-runtime.zip'
+  $grzTmp = Join-Path ([IO.Path]::GetTempPath()) ('grz.' + [guid]::NewGuid().ToString('N'))
+  New-Item -ItemType Directory -Path $grzTmp | Out-Null
+  try {
+  $archive = Join-Path $grzTmp 'green-roomz-stable-diffusion-runtime.zip'
   New-Item -ItemType Directory -Force -Path $target | Out-Null
   Write-Host "Downloading image runtime from $ImageRuntimeUrl"
   & curl.exe -L --fail --retry 8 --retry-all-errors --retry-delay 3 -C - -o "$archive.partial" $ImageRuntimeUrl
@@ -72,6 +75,9 @@ if ($DownloadImageRuntime) {
   Move-Item -Force "$archive.partial" $archive
   Expand-Archive -Force -Path $archive -DestinationPath $target
   Remove-Item -Force $archive
+  } finally {
+    Remove-Item -Recurse -Force -LiteralPath $grzTmp -ErrorAction SilentlyContinue
+  }
   $server = Get-ChildItem $target -Filter 'sd-server.exe' -Recurse -File | Select-Object -First 1
   if (-not $server) { throw "Image runtime archive extracted, but sd-server.exe was not found under $target." }
   Write-Host "Image runtime installed: $($server.FullName)"

@@ -19,7 +19,7 @@ export const POLICIES = Object.freeze({
 });
 
 export const TRANSLATION_ALIAS = 'translation-agent';
-export const DEFAULT_MANIFEST = new URL('../config/agents.windows-mvp.json', import.meta.url);
+export const DEFAULT_MANIFEST = new URL('../config/agents.cursor.json', import.meta.url);
 
 export const NEXUS_ALIAS = 'tool-router-agent';
 /** User-facing resident completions only. Not the routing kernel (tool-router.md). */

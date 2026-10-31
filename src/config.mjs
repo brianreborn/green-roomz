@@ -151,7 +151,7 @@ export function withDefaultGrzEnv(env = process.env, root = packageRoot()) {
   if (!out.GRZ_LLAMA) {
     out.GRZ_LLAMA = path.join(out.GRZ_ROOT, 'runtime', `llama-server${out.GRZ_EXE || ''}`);
   }
-  if (!out.HOME && process.env.HOME) out.HOME = process.env.HOME;
+  if (out.HOME === undefined && process.env.HOME) out.HOME = process.env.HOME;
   return out;
 }
 
@@ -169,6 +169,9 @@ function assertRuntimeCommands(manifest) {
     // Collapsed empty GRZ_ROOT historically produced "/runtime/llama-server"
     if (String(cmd) === '/runtime/llama-server' || String(cmd).startsWith('/runtime/llama-server')) {
       issues.push(`runtime ${name}: command collapsed to ${cmd} (unset GRZ_ROOT); fail closed`);
+    }
+    if (String(cmd).startsWith('/grz-runtime')) {
+      issues.push(`runtime ${name}: command collapsed to ${cmd} (empty/unset HOME); fail closed`);
     }
   }
   if (issues.length) throw new ValidationError('Invalid Green-Roomz manifest runtime commands', issues);

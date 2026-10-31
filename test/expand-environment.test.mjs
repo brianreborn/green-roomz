@@ -97,7 +97,7 @@ test('loadManifest strips UTF-8 BOM', async () => {
 });
 
 test('nfcPath no-op on linux', () => {
-  assert.equal(nfcPath('/tmp/café'), '/tmp/café');
+  assert.equal(nfcPath('/nonexistent/café'), '/nonexistent/café');
 });
 
 test('headerSafe caps by utf8 bytes', () => {
@@ -121,9 +121,9 @@ test('PF-M8 empty HOME must not collapse note9 command to /grz-runtime (fail clo
   await assert.rejects(
     () => loadManifest(new URL('../config/agents.note9.json', import.meta.url), {
       HOME: '',
-      GRZ_ROOT: '/tmp/grz-root',
+      GRZ_ROOT: '/nonexistent/grz-root',
       GRZ_EXE: '',
-      GRZ_LLAMA: '/tmp/grz-root/runtime/llama-server',
+      GRZ_LLAMA: '/nonexistent/grz-root/runtime/llama-server',
     }),
     (err) => {
       assert.equal(err.name, 'ValidationError');
@@ -140,7 +140,7 @@ test('PF-M8 unset HOME key inherits process.env; explicit empty still fail-close
   assert.equal(out, '/grz-runtime/run-llama-server.sh');
   // withDefaultGrzEnv copies process HOME only when key absent — note9 with real HOME still loads
   if (process.env.HOME) {
-    const env = withDefaultGrzEnv({ GRZ_ROOT: '/tmp/grz-root' });
+    const env = withDefaultGrzEnv({ GRZ_ROOT: '/nonexistent/grz-root' });
     assert.equal(env.HOME, process.env.HOME);
     assert.notEqual(env.HOME, '');
   }

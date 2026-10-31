@@ -40,14 +40,14 @@ test('readBlockCount parses qwen2.block_count UINT32', () => {
 });
 
 test('readBlockCount returns null when unreadable', () => {
-  assert.equal(readBlockCount('/tmp/grz-missing-model.gguf'), null);
+  assert.equal(readBlockCount('/nonexistent/grz/grz-missing-model.gguf'), null);
   assert.equal(readBlockCount(''), null);
   assert.equal(readBlockCount(undefined), null);
 });
 
 test('expandLayerProfiles 28 replaces hybrid-12 with 7/14/21 cloned from vulkan', () => {
   const expanded = expandLayerProfiles({
-    model: '/tmp/missing.gguf',
+    model: '/nonexistent/grz/missing.gguf',
     profiles: [vulkan, hybrid12, cpu4],
   }, 28);
   assert.deepEqual(expanded.map((profile) => profile.id), ['vulkan-all', 'hybrid-7', 'hybrid-14', 'hybrid-21', 'cpu-4']);
@@ -61,7 +61,7 @@ test('expandLayerProfiles 28 replaces hybrid-12 with 7/14/21 cloned from vulkan'
 
 test('expandLayerProfiles keeps hybrid-12 when layer count is unknown', () => {
   const expanded = expandLayerProfiles({
-    model: '/tmp/missing.gguf',
+    model: '/nonexistent/grz/missing.gguf',
     profiles: [vulkan, hybrid12, cpu4],
   });
   assert.deepEqual(expanded.map((profile) => profile.id), ['vulkan-all', 'hybrid-12', 'cpu-4']);
