@@ -144,11 +144,28 @@ export function isPinnableAlias(registry, alias) {
   return true;
 }
 
-export function isAutoModelId(alias) {
+/**
+ * Common client model families (OpenAI / Anthropic SDK defaults) that mean "route this for me".
+ * Anchored at the start, case-insensitive. A registered agent alias always wins over a family match.
+ */
+const AUTO_MODEL_FAMILIES = Object.freeze([
+  /^gpt-[a-z0-9][a-z0-9._:-]*$/i,
+  /^o[134](?:-[a-z0-9][a-z0-9._:-]*)?$/i,
+  /^claude-[a-z0-9][a-z0-9._:-]*$/i,
+]);
+
+export function isAutoModelFamily(alias) {
+  const id = String(alias ?? '');
+  return AUTO_MODEL_FAMILIES.some((re) => re.test(id));
+}
+
+export function isAutoModelId(alias, registry) {
   if (alias == null || alias === '') return true;
   const id = String(alias);
   if (ROUTER_SENTINELS.has(id)) return true;
-  return AUTO_MODEL_IDS.has(id.toLowerCase());
+  if (AUTO_MODEL_IDS.has(id.toLowerCase())) return true;
+  if (registry?.agents?.has(id)) return false;   // a known agent alias wins over a family match
+  return isAutoModelFamily(id);
 }
 
 /**
@@ -160,7 +177,7 @@ export function resolveExplicitModelPin(model, registry, { lockAlias = false } =
   if (lockAlias && model === NEXUS_ALIAS && registry?.agents?.has(NEXUS_ALIAS)) {
     return { decision: 'pin', alias: NEXUS_ALIAS, reason: 'lock_alias' };
   }
-  if (isAutoModelId(model)) return { decision: 'nexus' };
+  if (isAutoModelId(model, registry)) return { decision: 'nexus' };
   const alias = String(model);
   if (!registry?.agents?.has(alias)) {
     // DISPATCH-FIX-01 (675b794): a truly unknown, non-auto alias is a client error, not a silent reroute.
@@ -186,7 +203,7 @@ export function isGenericChatRequest(body) {
   const requested = body?.model;
   if (requested == null || requested === '') return true;
   const id = String(requested).toLowerCase();
-  if (AUTO_MODEL_IDS.has(id)) return true;
+  if (AUTO_MODEL_IDS.has(id) || isAutoModelFamily(id)) return true;
   if (id === 'general-text-speculator') return true;
   return false;
 }
