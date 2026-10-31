@@ -190,7 +190,7 @@ export function resolveExplicitModelPin(model, registry, { lockAlias = false } =
     const allowed = [];
     if (registry?.agents?.keys) {
       for (const name of registry.agents.keys()) {
-        if (!ROUTER_SENTINELS.has(name)) allowed.push(name);
+        if (isPinnableAlias(registry, name)) allowed.push(name);   // never advertise internal/monitor/deny-by-type agents
       }
       allowed.sort();
     }
