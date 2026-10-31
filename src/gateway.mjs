@@ -1239,6 +1239,17 @@ export class Gateway {
     const startedAt = Date.now();
     const release = await this.policy.acquire(request.abortSignal);
     try {
+      // DISPATCH-FIX-01: an explicit pin (model / lock_alias) to an unavailable agent fails loudly
+      // with 503 instead of quietly rerouting; nothing is sent upstream.
+      if (hard.effectiveAlias && (hard.reason === 'requested_alias' || hard.reason === 'lock_alias')
+        && this.registry.agents.has(hard.effectiveAlias)
+        && this.registry.status(hard.effectiveAlias).state === 'unavailable') {
+        const alias = hard.effectiveAlias;
+        this.observeHop('agent_unavailable', alias, { ticket: issuedSession, payload: { reason: 'pinned_unavailable' } });
+        const err = new UnavailableError(`pinned agent ${alias} is unavailable`, this.registry.status(alias).missing);
+        err.headers = { ...hopHeaders(alias, hard.reason), 'x-green-roomz-pin-status': 'unavailable' };
+        throw err;
+      }
       if (hard.effectiveAlias === NEXUS_ALIAS) {
         return await this.completeOnResident(request, response, body, issuedSession, cors, hops, hard.reason ?? 'lock_alias');
       }
