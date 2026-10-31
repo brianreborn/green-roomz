@@ -14,7 +14,7 @@ WORKDIR /opt/green-roomz
 COPY . .
 
 RUN mkdir -p /opt/green-roomz/runtime /opt/green-roomz/models /opt/green-roomz/data \
-  && LLAMA_STAGE="$(umask 077 && mktemp -d "${TMPDIR:-/tmp}/grz.XXXXXX")" \
+  && LLAMA_STAGE="$(umask 077 && mktemp -d "${TMPDIR:-/tmp}/grz.$$.XXXXXX")" \
   && curl -fsSL --retry 3 --retry-all-errors -o "$LLAMA_STAGE/llama.tar.gz" \
       "https://github.com/ggml-org/llama.cpp/releases/download/${LLAMA_TAG}/llama-${LLAMA_TAG}-bin-ubuntu-x64.tar.gz" \
   && mkdir -p "$LLAMA_STAGE/llama" \

@@ -16,9 +16,22 @@ tmp_base="${TMPDIR:-}"
 if [[ -z "$tmp_base" && -n "${PREFIX:-}" && -d "$PREFIX/tmp" ]]; then tmp_base="$PREFIX/tmp"; fi
 tmp_base="${tmp_base:-/tmp}"
 umask 077
-stage="$(mktemp -d "$tmp_base/grz.XXXXXX")"
-cleanup() { rm -rf "$stage"; }
+# Sweep stale grz.<pid>.* stage dirs left by SIGKILL (owner's own, PID no longer alive).
+for old in "$tmp_base"/grz.[0-9]*.*; do
+  [[ -d "$old" && -O "$old" ]] || continue
+  opid="${old##*/grz.}"; opid="${opid%%.*}"
+  [[ "$opid" =~ ^[0-9]+$ ]] && ! kill -0 "$opid" 2>/dev/null && rm -rf -- "$old" 2>/dev/null
+done
+stage="$(mktemp -d "$tmp_base/grz.$$.XXXXXX")"
+cleanup() {
+  local kids; kids="$(jobs -p)"; [[ -n "$kids" ]] && kill $kids 2>/dev/null; wait 2>/dev/null
+  [[ -n "${stage:-}" ]] && rm -rf -- "$stage" 2>/dev/null
+  return 0
+}
 trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 echo "fetching $URL → $OUT"
 curl -fL --retry 3 -o "$stage/ubuntu-arm64.tar.gz" "$URL"
