@@ -221,6 +221,17 @@ const SLASH_ALIASES = Object.freeze({
   auto: 'auto',
 });
 
+// Security slashes keep the wrong-tool HANDOFF peek (9889493) even though other slash/lock turns
+// skip it (669338e): a /sast on a threat model must still be able to hand off (green-roomz #33).
+export const SECURITY_SLASH_TOKENS = Object.freeze(new Set([
+  'sast', 'audit', 'cwe', 'threatmodel', 'stride', 'osint', 'recon', 'threatintel', 'ioc', 'forensics',
+  'dfir', 'siem', 'rules', 'sigma', 'yara', 'harden', 'sysprep', 'sbom', 'deps',
+]));
+
+export function isSecuritySlashReason(reason) {
+  return typeof reason === 'string' && reason.startsWith('slash_') && SECURITY_SLASH_TOKENS.has(reason.slice(6));
+}
+
 const FAITH_ALIASES = Object.freeze({ low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh' });
 const FEAR_ALIASES = Object.freeze({ low: 'low', medium: 'medium', high: 'high' });
 const CONFIDENCE_ALIASES = Object.freeze({

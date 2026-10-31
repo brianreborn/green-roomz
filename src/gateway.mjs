@@ -16,7 +16,7 @@ import { consultNexus, preferResidentChat } from './nexus.mjs';
 import { planRoute } from './logical-router.mjs';
 import { isIntrospectionProbe, introspectionFacts } from './introspect.mjs';
 import { proxyJson } from './proxy.mjs';
-import { aliasCanAdmit, audioDataFromBody, detectModalities, hardRuleRoute, isGenericChatRequest, isRoutableAlias, latestUserMessageText, NATIVE_CHAT, parseSlashCommand, stripSlashCommand } from './routing.mjs';
+import { aliasCanAdmit, audioDataFromBody, detectModalities, hardRuleRoute, isGenericChatRequest, isRoutableAlias, isSecuritySlashReason, latestUserMessageText, NATIVE_CHAT, parseSlashCommand, stripSlashCommand } from './routing.mjs';
 import { contentChars, contextCharBudget, formatMemoryHeader, injectWorkingSet, memoryBounds } from './session-memory.mjs';
 import { deadlineSignal, headerSafe, isTimeoutAbort, jsonResponse, readCappedText, redact, secureEquals, sleep, stripControls } from './util.mjs';
 import { holdMs, resolveTimingPrivacy } from './timing-quant.mjs';
@@ -1515,7 +1515,8 @@ export class Gateway {
         const target = `http://127.0.0.1:${agent.port}${path}`;
         // A slash or lock_alias already chose the model. Peeking for HANDOFF
         // would throw that choice away and hold the policy until the peek ends.
-        if (slashOrLock) {
+        // Security slashes are the exception: wrong-tool handoffs are their contract (#33).
+        if (slashOrLock && !isSecuritySlashReason(reason)) {
           const unpinLocked = this.processes.pin(alias);
           try {
             this.sessions.setAgentAlias(issuedSession, alias);
