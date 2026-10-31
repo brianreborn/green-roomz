@@ -1972,3 +1972,37 @@ test('shipped manifests mark security-monitor-agent internal and it is never pin
     assert.equal(isPinnableAlias(new AgentRegistry(manifest), 'security-monitor-agent'), false, name);
   }
 });
+
+// ---- pass 5 nits ----
+test('unknown-alias 400 allowed list omits internal, monitor and deny-by-type agents', () => {
+  const manifest = manifestWithInternal({ type: 'guardian' });
+  const base = manifest.agents.find((agent) => agent.alias === 'qwenstral-code-speculator');
+  manifest.agents.push({ ...structuredClone(base), alias: 'hidden-agent', port: 18197, internal: true });
+  const registry = new AgentRegistry(manifest);
+  let caught;
+  try { resolveExplicitModelPin('foo-bar', registry); } catch (error) { caught = error; }
+  assert.ok(caught, 'expected a 400');
+  const allowed = caught.details.allowed;
+  for (const hidden of ['pentest-agent', 'hidden-agent', 'security-monitor-agent', 'tool-router-agent', 'auto']) {
+    assert.equal(allowed.includes(hidden), false, hidden);
+  }
+  assert.ok(allowed.includes('general-text-speculator'));
+  assert.ok(allowed.includes('safety-policy-agent'));
+  assert.deepEqual(allowed, [...allowed].sort());
+});
+
+test('shipped manifests: guardian/pentest/defender agents (alias or role) are internal or typed', async () => {
+  const { readdirSync } = await import('node:fs');
+  const { loadManifest } = await import('../src/config.mjs');
+  const dir = new URL('../config/', import.meta.url);
+  const files = readdirSync(dir).filter((name) => name.endsWith('.json'));
+  assert.ok(files.length >= 6);
+  const risky = /guardian|pentest|defender/i;
+  for (const file of files) {
+    const manifest = await loadManifest(new URL(file, dir));
+    for (const agent of manifest.agents ?? []) {
+      if (!risky.test(String(agent.alias ?? '')) && !risky.test(String(agent.role ?? ''))) continue;
+      assert.ok(agent.internal === true || (agent.type != null && agent.type !== ''), `${file}: ${agent.alias} must set internal:true or type`);
+    }
+  }
+});
