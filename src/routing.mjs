@@ -70,10 +70,11 @@ export function isExplicitTranslationRequest(body) {
 
 const ROUTER_SENTINELS = new Set(['auto', NEXUS_ALIAS]);
 
-export function isRouterSentinel(alias, registry) {
+export function isRouterSentinel(alias, _registry) {
   if (!alias) return true;
   if (ROUTER_SENTINELS.has(alias)) return true;
-  return Boolean(registry) && !registry.agents.has(alias);
+  // Unknown aliases are NOT sentinels - they must 400, not fall through to nexus (675b794).
+  return false;
 }
 
 export function isRoutableAlias(registry, alias) {
@@ -139,7 +140,7 @@ export function isAutoModelId(alias) {
 /**
  * Pin policy for explicit client `model` values (DISPATCH-FIX-01, ported from 675b794 + #34 6afa3b7).
  * known unavailable -> pin (gateway 503); lock_alias -> pin; auto/compat/sticky -> nexus.
- * Unknown aliases keep the baseline behavior (nexus) here; 675b794's unknown->400 is not ported.
+ * Unknown non-auto aliases -> ValidationError 400 (675b794).
  */
 export function resolveExplicitModelPin(model, registry, { lockAlias = false } = {}) {
   if (lockAlias && model === NEXUS_ALIAS && registry?.agents?.has(NEXUS_ALIAS)) {
@@ -147,7 +148,17 @@ export function resolveExplicitModelPin(model, registry, { lockAlias = false } =
   }
   if (isAutoModelId(model)) return { decision: 'nexus' };
   const alias = String(model);
-  if (!registry?.agents?.has(alias)) return { decision: 'nexus' };
+  if (!registry?.agents?.has(alias)) {
+    // DISPATCH-FIX-01 (675b794): a truly unknown, non-auto alias is a client error, not a silent reroute.
+    const allowed = [];
+    if (registry?.agents?.keys) {
+      for (const name of registry.agents.keys()) {
+        if (!ROUTER_SENTINELS.has(name)) allowed.push(name);
+      }
+      allowed.sort();
+    }
+    throw new ValidationError(`Unknown agent alias: ${alias}`, { allowed });
+  }
   const reason = lockAlias ? 'lock_alias' : 'requested_alias';
   if (registry.status(alias)?.state === 'unavailable') return { decision: 'pin', alias, reason };
   if (lockAlias) return { decision: 'pin', alias, reason };
