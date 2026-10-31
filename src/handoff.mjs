@@ -164,7 +164,23 @@ async function readJsonBody(upstream, maxBytes = UPSTREAM_MAX_BUFFER_BYTES) {
   return Buffer.concat(chunks.map((chunk) => Buffer.from(chunk))).toString('utf8');
 }
 
-export async function peekSpecialist({ fetchImpl = fetch, request, target, body, signal, peekChars = HANDOFF_PEEK_CHARS, peekTimeoutMs = HANDOFF_PEEK_TIMEOUT_MS } = {}) {
+export async function peekSpecialist(options = {}) {
+  // Ref'd deadline timer (#35): AbortSignal.timeout() is unref'd, so with nothing else holding the
+  // event loop the deadline never fired, and it kept running after the peek, able to abort the
+  // stream already handed downstream. Clear it as soon as the peek phase ends.
+  const peekTimeoutMs = options.peekTimeoutMs ?? HANDOFF_PEEK_TIMEOUT_MS;
+  const deadline = peekTimeoutMs > 0 ? new AbortController() : null;
+  const timer = deadline
+    ? setTimeout(() => deadline.abort(new DOMException('peek timeout', 'TimeoutError')), peekTimeoutMs)
+    : null;
+  try {
+    return await peekSpecialistPhase({ ...options, peekTimeoutMs, peekDeadline: deadline?.signal ?? null });
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function peekSpecialistPhase({ fetchImpl = fetch, request, target, body, signal, peekChars = HANDOFF_PEEK_CHARS, peekDeadline = null } = {}) {
   const keepReasoning = clientAskedForReasoning(body);
   const payload = { ...body, stream: true };
   const headers = new Headers();
@@ -179,7 +195,6 @@ export async function peekSpecialist({ fetchImpl = fetch, request, target, body,
   signal?.addEventListener?.('abort', onParent, { once: true });
   // A specialist that accepts the stream but never emits the peek tokens must not
   // pin this hop: bound the peek phase, combined with parent + manual abort.
-  const peekDeadline = peekTimeoutMs > 0 ? AbortSignal.timeout(peekTimeoutMs) : null;
   const fetchSignal = peekDeadline ? AbortSignal.any([hopAbort.signal, peekDeadline]) : hopAbort.signal;
   let upstream;
   try {
