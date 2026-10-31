@@ -9,6 +9,9 @@ set -euo pipefail
 export GRZ_ROOT="$(cd "$(dirname "$0")" && pwd)"
 DEST=/data/local/tmp/grz
 ANDROID_URL="https://github.com/ggml-org/llama.cpp/releases/download/b10702/llama-b10702-bin-android-arm64.tar.gz"
+# Pin: sha256 of the official tarball. No default is baked in (not verified from this box);
+# set GRZ_ANDROID_SHA256 from the ggml-org release page. Unset => fetch path fails closed.
+ANDROID_SHA256="${GRZ_ANDROID_SHA256:-}"
 
 if ! command -v adb >/dev/null 2>&1; then
   echo "no device"
@@ -21,6 +24,8 @@ if [[ "$state" != "device" ]]; then
 fi
 
 echo "adb device: $(adb get-serialno 2>/dev/null || echo unknown)"
+# Clear runtime + JS dirs by fixed literal path (no globs, no variables) so stale files never linger.
+adb shell "rm -rf /data/local/tmp/grz/bin /data/local/tmp/grz/lib /data/local/tmp/grz/green-roomz" >/dev/null
 adb shell "mkdir -p $DEST/bin $DEST/lib $DEST/models $DEST/green-roomz" >/dev/null
 
 # Termux-aware temp base: TMPDIR, then $PREFIX/tmp (Termux), then /tmp.
@@ -37,7 +42,15 @@ if [[ -d "$GRZ_ROOT/runtime/android-arm64" ]]; then
   adb push "$GRZ_ROOT/runtime/android-arm64/." "$DEST/"
 else
   echo "fetching official android-arm64 tarball b10702 (not vendored; ~70MB)"
+  if [[ ! "$ANDROID_SHA256" =~ ^[0-9a-f]{64}$ ]]; then
+    echo "ERROR: GRZ_ANDROID_SHA256 unset/invalid; refusing unverified android-arm64 fetch (fail closed)" >&2
+    exit 1
+  fi
   curl -fL --retry 3 -o "$stage/android-arm64.tar.gz" "$ANDROID_URL"
+  echo "$ANDROID_SHA256  $stage/android-arm64.tar.gz" | sha256sum -c --quiet - || {
+    echo "ERROR: android-arm64 tarball sha256 mismatch" >&2
+    exit 1
+  }
   mkdir -p "$stage/extract"
   tar -xzf "$stage/android-arm64.tar.gz" -C "$stage/extract"
   # flatten: find llama-server and .so
