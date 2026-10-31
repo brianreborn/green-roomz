@@ -20,9 +20,14 @@ if ((Test-Path -LiteralPath $NdkRoot) -and (Test-Path -LiteralPath $CmakeRoot)) 
     exit 0
 }
 
-$yes = Join-Path $env:TEMP 'sdk-yes.txt'
-1..200 | ForEach-Object { 'y' } | Set-Content -Path $yes -Encoding ASCII
-cmd /c "type `"$yes`" | `"$SdkManager`" --sdk_root=`"$Sdk`" --licenses" | Out-Host
+$yesFile = New-TemporaryFile
+try {
+    $yes = $yesFile.FullName
+    1..200 | ForEach-Object { 'y' } | Set-Content -Path $yes -Encoding ASCII
+    cmd /c "type `"$yes`" | `"$SdkManager`" --sdk_root=`"$Sdk`" --licenses" | Out-Host
+} finally {
+    Remove-Item -Force -LiteralPath $yesFile.FullName -ErrorAction SilentlyContinue
+}
 cmd /c "`"$SdkManager`" --sdk_root=`"$Sdk`" `"ndk;$NdkVer`" `"cmake;$CmakeVer`"" | Out-Host
 
 if (-not (Test-Path -LiteralPath $NdkRoot)) { throw "NDK install failed: $NdkRoot" }
