@@ -136,11 +136,17 @@ const AUTO_MODEL_IDS = new Set(['auto', 'green-roomz', 'green-roomz-auto', 'defa
  * are never pinnable: a pin to them is ignored and the request goes to nexus/auto (baseline hard-rule behavior).
  * Availability is not checked here; unavailable pinnable agents still pin so the gateway answers 503.
  */
+const NON_PINNABLE_TYPES = new Set(['guardian', 'pentest', 'defender', 'monitor']);
+
 export function isPinnableAlias(registry, alias) {
   if (!alias || !registry?.agents?.has(alias)) return false;
   if (ROUTER_SENTINELS.has(alias) || alias === MONITOR_ALIAS) return false;
   const agent = registry.agents.get(alias);
   if (agent?.runtime === 'logical' || agent?.routable === false || agent?.internal === true) return false;
+  // Deny by type regardless of flags: guardian / pentest / defender / monitor agents are never pinnable.
+  for (const field of ['type', 'role', 'category']) {
+    if (NON_PINNABLE_TYPES.has(String(agent?.[field] ?? '').toLowerCase())) return false;
+  }
   return true;
 }
 
