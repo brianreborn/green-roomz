@@ -1246,7 +1246,9 @@ export class Gateway {
         && this.registry.status(hard.effectiveAlias).state === 'unavailable') {
         const alias = hard.effectiveAlias;
         this.observeHop('agent_unavailable', alias, { ticket: issuedSession, payload: { reason: 'pinned_unavailable' } });
-        const err = new UnavailableError(`pinned agent ${alias} is unavailable`, this.registry.status(alias).missing);
+        // Details (missing artifacts, local paths) stay server-side; the client gets a generic reason.
+        try { console.warn(`pinned agent ${alias} unavailable: ${JSON.stringify(this.registry.status(alias).missing ?? [])}`); } catch {}
+        const err = new UnavailableError(`pinned agent ${alias} is unavailable`, { reason: 'pinned_agent_unavailable' });
         err.headers = { ...hopHeaders(alias, hard.reason), 'x-green-roomz-pin-status': 'unavailable' };
         throw err;
       }

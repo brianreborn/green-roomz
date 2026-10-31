@@ -130,6 +130,20 @@ function finish(body, registry, alias, reason, modality) {
 /** Model ids that mean "route this for me" rather than pinning a specific agent. */
 const AUTO_MODEL_IDS = new Set(['auto', 'green-roomz', 'green-roomz-auto', 'default', 'gpt-4', 'gpt-4o', 'gpt-3.5-turbo']);
 
+/**
+ * Agents a client may pin with `model` / `lock_alias`. Mailbox-only / logical agents (security monitor),
+ * router sentinels, and manifest agents flagged `routable: false` or `internal: true` (guardian, pentest...)
+ * are never pinnable: a pin to them is ignored and the request goes to nexus/auto (baseline hard-rule behavior).
+ * Availability is not checked here; unavailable pinnable agents still pin so the gateway answers 503.
+ */
+export function isPinnableAlias(registry, alias) {
+  if (!alias || !registry?.agents?.has(alias)) return false;
+  if (ROUTER_SENTINELS.has(alias) || alias === MONITOR_ALIAS) return false;
+  const agent = registry.agents.get(alias);
+  if (agent?.runtime === 'logical' || agent?.routable === false || agent?.internal === true) return false;
+  return true;
+}
+
 export function isAutoModelId(alias) {
   if (alias == null || alias === '') return true;
   const id = String(alias);
@@ -159,9 +173,11 @@ export function resolveExplicitModelPin(model, registry, { lockAlias = false } =
     }
     throw new ValidationError(`Unknown agent alias: ${alias}`, { allowed });
   }
+  // Boundary BLOCKER on 6d59a8f: never pin a non-routable agent (bypasses nexus + tool policy).
+  if (!isPinnableAlias(registry, alias)) return { decision: 'nexus' };
   const reason = lockAlias ? 'lock_alias' : 'requested_alias';
   if (registry.status(alias)?.state === 'unavailable') return { decision: 'pin', alias, reason };
-  if (lockAlias) return { decision: 'pin', alias, reason };
+  if (lockAlias && isRoutableAlias(registry, alias)) return { decision: 'pin', alias, reason };
   return { decision: 'nexus' };
 }
 
