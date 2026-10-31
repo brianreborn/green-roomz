@@ -1772,3 +1772,51 @@ test('DISPATCH-FIX-01: auto request with an unavailable specialist still falls b
     assert.notEqual(result.headers['x-green-roomz-effective-alias'], 'qwenstral-code-speculator');
   }
 });
+
+// ---- DISPATCH-FIX-01 port: unknown model names are 400, auto ids still auto-route ----
+test('DISPATCH-FIX-01: unknown non-auto model name is 400 validation_error with nothing sent upstream', async (t) => {
+  const urls = [];
+  const { server } = await withServer(t, {}, {
+    ready: ['tool-router-agent', 'general-text-speculator'],
+    stubEnsure: true,
+    fetchImpl: async (url) => { urls.push(String(url)); return jsonFetch({ choices: [{ message: { role: 'assistant', content: 'nope' } }] }); },
+  });
+  for (const model of ['no-such-agent', 'gpt-5-turbo-imaginary', 'llama3']) {
+    const result = await request(server, { path: '/v1/chat/completions', method: 'POST', headers: { 'content-type': 'application/json' }, body: { model, messages: [{ role: 'user', content: 'hi' }] } });
+    assert.equal(result.status, 400, model);
+    assert.equal(result.body.error.type, 'validation_error');
+    assert.equal(result.body.error.message, `Unknown agent alias: ${model}`);
+    assert.ok(result.body.error.details.allowed.includes('general-text-speculator'));
+    assert.ok(!result.body.error.details.allowed.includes('tool-router-agent'));
+  }
+  assert.deepEqual(urls, []);
+});
+
+test('DISPATCH-FIX-01: every auto id still auto-routes with 200', async (t) => {
+  const { server } = await withServer(t, {}, {
+    ready: ['tool-router-agent', 'general-text-speculator'],
+    stubEnsure: true,
+    fetchImpl: async () => jsonFetch({ choices: [{ message: { role: 'assistant', content: 'auto-ok' } }] }),
+  });
+  for (const model of [undefined, '', 'auto', 'AUTO', 'green-roomz', 'green-roomz-auto', 'default', 'gpt-4', 'gpt-4o', 'GPT-4o', 'gpt-3.5-turbo', 'tool-router-agent']) {
+    const result = await request(server, { path: '/v1/chat/completions', method: 'POST', headers: { 'content-type': 'application/json' }, body: { model, messages: [{ role: 'user', content: 'Say hello in one short sentence.' }] } });
+    assert.equal(result.status, 200, `model=${JSON.stringify(model)}`);
+    assert.notEqual(result.headers['x-green-roomz-route-reason'], 'requested_alias');
+    assert.notEqual(result.headers['x-green-roomz-route-reason'], 'lock_alias');
+  }
+});
+
+test('DISPATCH-FIX-01: a known agent alias with lock_alias is still honored', async (t) => {
+  const urls = [];
+  const { server } = await withServer(t, {}, {
+    ready: ['tool-router-agent', 'general-text-speculator', 'qwenstral-code-speculator'],
+    stubEnsure: true,
+    fetchImpl: async (url) => { urls.push(String(url)); return jsonFetch({ choices: [{ message: { role: 'assistant', content: 'code-ok' } }] }); },
+  });
+  const result = await request(server, { path: '/v1/chat/completions', method: 'POST', headers: { 'content-type': 'application/json' }, body: { model: 'qwenstral-code-speculator', lock_alias: true, messages: [{ role: 'user', content: 'hi' }] } });
+  assert.equal(result.status, 200);
+  assert.equal(result.headers['x-green-roomz-effective-alias'], 'qwenstral-code-speculator');
+  assert.equal(result.headers['x-green-roomz-route-reason'], 'lock_alias');
+  assert.equal(urls.length, 1);
+  assert.match(urls[0], /:18183/);
+});
