@@ -10,8 +10,8 @@ export GRZ_ROOT="$(cd "$(dirname "$0")" && pwd)"
 DEST=/data/local/tmp/grz
 ANDROID_URL="https://github.com/ggml-org/llama.cpp/releases/download/b10702/llama-b10702-bin-android-arm64.tar.gz"
 # Pin: sha256 of the official tarball. No default is baked in (not verified from this box);
-# set GRZ_ANDROID_SHA256 from the ggml-org release page. Unset => fetch path fails closed.
-ANDROID_SHA256="${GRZ_ANDROID_SHA256:-}"
+# Pinned from GitHub release asset digest (ggml-org/llama.cpp b10702). Override with GRZ_ANDROID_SHA256 when bumping ANDROID_URL.
+ANDROID_SHA256="${GRZ_ANDROID_SHA256:-afb8deb247271dd0b62301dbc7768a2d9eda2e2bb2966a57f81018c6e2aa3136}"
 
 if ! command -v adb >/dev/null 2>&1; then
   echo "no device"
