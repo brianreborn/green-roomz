@@ -275,6 +275,7 @@ export async function consultNexus({ processes, registry, fetchImpl = fetch, bod
   const offlineNexus = offlineNexusEnabled(processes?.manifest?.gateway);
   let routerDown = false;   // live router consult threw (down/unreachable/timeout)
   const ask = async (constraint) => {
+    routerDown = false;   // per attempt: a later successful consult clears an earlier failure
     if (!candidates.length) return { route: null, confidence: 0, reason: 'no_admittable_specialist' };
     if (!live || offlineNexus) return offlinePlan(stripped, registry, visited);
     try {

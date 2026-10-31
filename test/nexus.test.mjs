@@ -407,3 +407,29 @@ test('GRZ_OFFLINE_NEXUS consultNexus returns offlinePlan without calling fetchIm
 });
 
 
+
+test('consultNexus: first consult throws, retry succeeds -> no router_unreachable tag (b0d2521 nit)', async () => {
+  const manifest = sampleManifest();
+  const hostAdapter = { sampleResources() { return { freeMemoryBytes: 32 * 1024 * 1024 * 1024 }; } };
+  const registry = await new AgentRegistry(manifest).inspect({ hostAdapter });
+  for (const alias of ['tool-router-agent', 'general-text-speculator', 'qwenstral-code-speculator']) registry.setStatus(alias, 'ready', { missing: [] });
+  const processes = new ProcessManager({ manifest, registry, hostAdapter, spawnImpl() { throw new Error('no spawn'); } });
+  processes.ensure = async (agent) => ({ alias: agent.alias, state: 'ready' });
+  let fetches = 0;
+  const result = await consultNexus({
+    processes,
+    registry,
+    // general-text already visited: the offline plan after the first failure is 'no_route' (bad), forcing a retry.
+    visited: new Set(['general-text-speculator']),
+    body: { messages: [{ role: 'user', content: 'tell me something nice' }] },
+    fetchImpl: async () => {
+      fetches += 1;
+      if (fetches === 1) throw new Error('connect ECONNREFUSED');
+      const json = JSON.stringify({ choices: [{ message: { role: 'assistant', content: JSON.stringify({ route: 'qwenstral-code-speculator', confidence: 0.95, reason: 'retry_ok' }) } }] });
+      return { status: 200, headers: new Headers({ 'content-type': 'application/json' }), async text() { return json; }, async json() { return JSON.parse(json); } };
+    },
+  });
+  assert.equal(fetches, 2, 'first attempt failed, retry consulted the live router');
+  assert.equal(result.route, 'qwenstral-code-speculator');
+  assert.equal(result.fallback, undefined);
+});
