@@ -1128,7 +1128,7 @@ test('/tts on chat completions is 503 when piper is missing', async (t) => {
     stubEnsure: true,
     fetchImpl: async () => jsonFetch({ choices: [{ message: { role: 'assistant', content: 'resident-ok' } }] }),
   });
-  registry.setStatus('speech-synthesis-agent', 'unavailable', { missing: ['model:/tmp/missing-voice.onnx'] });
+  registry.setStatus('speech-synthesis-agent', 'unavailable', { missing: ['model:/nonexistent/grz/missing-voice.onnx'] });
   const result = await request(server, {
     path: '/v1/chat/completions',
     method: 'POST',
@@ -1146,7 +1146,7 @@ test('/draw and /imagine on unavailable image-generation-agent are 503', async (
     stubEnsure: true,
     fetchImpl: async () => jsonFetch({ choices: [{ message: { role: 'assistant', content: 'resident-ok' } }] }),
   });
-  registry.setStatus('image-generation-agent', 'unavailable', { missing: ['model:/tmp/missing-sd.gguf'] });
+  registry.setStatus('image-generation-agent', 'unavailable', { missing: ['model:/nonexistent/grz/missing-sd.gguf'] });
   for (const content of ['/draw a red apple', '/imagine a sunset']) {
     const result = await request(server, {
       path: '/v1/chat/completions',
@@ -1166,7 +1166,7 @@ test('model image-generation-agent unavailable is 503 not resident 200', async (
     stubEnsure: true,
     fetchImpl: async () => jsonFetch({ choices: [{ message: { role: 'assistant', content: 'resident-ok' } }] }),
   });
-  registry.setStatus('image-generation-agent', 'unavailable', { missing: ['model:/tmp/missing-sd.gguf'] });
+  registry.setStatus('image-generation-agent', 'unavailable', { missing: ['model:/nonexistent/grz/missing-sd.gguf'] });
   const result = await request(server, {
     path: '/v1/chat/completions',
     method: 'POST',
@@ -1342,7 +1342,7 @@ test('peerAllowed gates non-loopback clients against the allowlist', async () =>
 test('council: /council on sets a session default that fans out later turns', async (t) => {
   const manifest = sampleManifest();
   const vl = manifest.agents.find((a) => a.alias === 'vision-layout-agent');
-  manifest.agents.push({ ...vl, alias: 'vision-layout-agent@b', variant_of: 'vision-layout-agent', port: 18281, model: '/tmp/b.gguf' });
+  manifest.agents.push({ ...vl, alias: 'vision-layout-agent@b', variant_of: 'vision-layout-agent', port: 18281, model: '/nonexistent/grz/b.gguf' });
   const registry = await new AgentRegistry(manifest).inspect();
   for (const a of ['vision-layout-agent', 'vision-layout-agent@b', 'tool-router-agent']) registry.setStatus(a, 'ready');
   const processes = new ProcessManager({ manifest, registry, spawnImpl() { throw new Error('no'); } });
@@ -1386,7 +1386,7 @@ test('council: /council on sets a session default that fans out later turns', as
 test('council: a /council slash message triggers the fan-out (same as the JSON form)', async (t) => {
   const manifest = sampleManifest();
   const vl = manifest.agents.find((a) => a.alias === 'vision-layout-agent');
-  manifest.agents.push({ ...vl, alias: 'vision-layout-agent@b', variant_of: 'vision-layout-agent', port: 18281, model: '/tmp/b.gguf' });
+  manifest.agents.push({ ...vl, alias: 'vision-layout-agent@b', variant_of: 'vision-layout-agent', port: 18281, model: '/nonexistent/grz/b.gguf' });
 
   const registry = await new AgentRegistry(manifest).inspect();
   for (const a of ['vision-layout-agent', 'vision-layout-agent@b', 'tool-router-agent']) registry.setStatus(a, 'ready');
@@ -1423,8 +1423,8 @@ test('council: a split turn (agreement < 0.6) is logged to disagreements.jsonl',
   const manifest = sampleManifest();
   manifest.gateway.council_dir = dir;
   const vl = manifest.agents.find((a) => a.alias === 'vision-layout-agent');
-  manifest.agents.push({ ...vl, alias: 'vision-layout-agent@b', variant_of: 'vision-layout-agent', port: 18281, model: '/tmp/b.gguf' });
-  manifest.agents.push({ ...vl, alias: 'vision-layout-agent@c', variant_of: 'vision-layout-agent', port: 18282, model: '/tmp/c.gguf' });
+  manifest.agents.push({ ...vl, alias: 'vision-layout-agent@b', variant_of: 'vision-layout-agent', port: 18281, model: '/nonexistent/grz/b.gguf' });
+  manifest.agents.push({ ...vl, alias: 'vision-layout-agent@c', variant_of: 'vision-layout-agent', port: 18282, model: '/nonexistent/grz/c.gguf' });
   const registry = await new AgentRegistry(manifest).inspect();
   for (const a of ['vision-layout-agent', 'vision-layout-agent@b', 'vision-layout-agent@c', 'tool-router-agent']) registry.setStatus(a, 'ready');
   const processes = new ProcessManager({ manifest, registry, spawnImpl() { throw new Error('no'); } });
@@ -1489,8 +1489,8 @@ test('council: fan out to variants, field-vote the JSON, flag the outlier, write
   const manifest = sampleManifest();
   manifest.gateway.council_dir = dir;
   const vl = manifest.agents.find((a) => a.alias === 'vision-layout-agent');
-  manifest.agents.push({ ...vl, alias: 'vision-layout-agent@b', variant_of: 'vision-layout-agent', port: 18281, model: '/tmp/b.gguf' });
-  manifest.agents.push({ ...vl, alias: 'vision-layout-agent@c', variant_of: 'vision-layout-agent', port: 18282, model: '/tmp/c.gguf' });
+  manifest.agents.push({ ...vl, alias: 'vision-layout-agent@b', variant_of: 'vision-layout-agent', port: 18281, model: '/nonexistent/grz/b.gguf' });
+  manifest.agents.push({ ...vl, alias: 'vision-layout-agent@c', variant_of: 'vision-layout-agent', port: 18282, model: '/nonexistent/grz/c.gguf' });
 
   const registry = await new AgentRegistry(manifest).inspect();
   for (const a of ['vision-layout-agent', 'vision-layout-agent@b', 'vision-layout-agent@c', 'tool-router-agent']) registry.setStatus(a, 'ready');

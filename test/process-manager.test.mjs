@@ -133,7 +133,7 @@ test('cpu-resident profiles are ordered after vulkan-all when measured weights e
 test('manifest profile order is kept when weight size is unknown', () => {
   const agent = {
     alias: 'qwenstral-code-speculator',
-    model: '/tmp/missing-code.gguf',
+    model: '/nonexistent/grz/missing-code.gguf',
     profiles: [
       { id: 'cpu-4', args: ['--device', 'none', '--n-gpu-layers', '0'] },
       { id: 'vulkan-all', args: ['--device', 'Vulkan0', '--n-gpu-layers', 'all'] },
