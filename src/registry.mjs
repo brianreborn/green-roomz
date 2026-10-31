@@ -86,6 +86,11 @@ export class AgentRegistry {
       .map((agent) => this.modelRecord(agent));
   }
 
+  /** Every declared agent, unavailable ones included: diagnostics (/v1/health, /props), not routing (#32). */
+  listAllModels() {
+    return [...this.agents.values()].map((agent) => this.modelRecord(agent));
+  }
+
   getModel(alias) {
     if (!this.agents.has(alias)) return null;
     return this.modelRecord(this.agents.get(alias));

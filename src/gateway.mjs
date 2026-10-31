@@ -607,7 +607,7 @@ export class Gateway {
               callable_capabilities: 'runtime_checked',
               ready_capabilities: 'loaded_now',
             },
-            models: this.registry.listModels(),
+            models: this.registry.listAllModels(),
           });
         }
         if (url.pathname === '/metrics') {
@@ -731,7 +731,7 @@ export class Gateway {
   }
 
   health() {
-    const models = this.registry.listModels();
+    const models = this.registry.listAllModels();
     const need = Array.isArray(this.manifest.gateway.health_aliases)
       ? this.manifest.gateway.health_aliases
       : [];

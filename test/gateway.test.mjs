@@ -125,7 +125,10 @@ test('health is degraded when artifacts are missing and models stay truthful', a
   const vision = health.body.agents.find((agent) => agent.id === 'vision-layout-agent');
   assert.deepEqual(vision.native_capabilities, ['text', 'image']);
   const models = await request(server, { path: '/v1/models' });
-  assert.equal(models.body.data.length, REQUIRED_ALIASES.length);
+  // #6 (7716f14): /v1/models publishes only routable aliases; health still lists every agent (#32).
+  assert.equal(health.body.agents.length, REQUIRED_ALIASES.length);
+  assert.ok(!models.body.data.some((model) => model.id === 'vision-layout-agent'));
+  assert.ok(models.body.data.some((model) => model.id === 'tool-router-agent'));
 });
 
 test('GET /v1/models/:id and /v1/weights disclose GGUF identity when the file exists', async (t) => {
