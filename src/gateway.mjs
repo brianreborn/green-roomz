@@ -1029,6 +1029,7 @@ export class Gateway {
       'x-green-roomz-effective-alias': headerSafe(routed.effectiveAlias ?? ''),
       'x-green-roomz-route-reason': headerSafe(routed.reason ?? ''),
       'x-green-roomz-hops': headerSafe(extra.hops ?? ''),
+      ...(extra.fallback ? { 'x-green-roomz-route-fallback': headerSafe(extra.fallback) } : {}),
       'x-green-roomz-memory': headerSafe(formatMemoryHeader(this.sessions.workingSet(issuedSession))),
       'x-green-roomz-nexus': NEXUS_ALIAS,
       'x-green-roomz-agency': AGENCY_ROLE,
@@ -1217,6 +1218,7 @@ export class Gateway {
     const visited = new Set();
     const hops = [];
     const notes = [];
+    let routeFallback = null;   // set when the live router was unreachable
     const preferResident = preferResidentChat(this.manifest?.gateway ?? this.processes?.manifest?.gateway);
     const hard = hardRuleRoute(body, this.registry);
     const issuedSession = session?.id ?? this.sessions.create({
@@ -1231,7 +1233,7 @@ export class Gateway {
       issuedSession,
       { requestedAlias: body.model ?? null, effectiveAlias: alias ?? '', reason: reason ?? 'nexus' },
       cors,
-      { hops: hops.join(',') },
+      { hops: hops.join(','), fallback: routeFallback },
     );
 
     const startedAt = Date.now();
@@ -1293,6 +1295,7 @@ export class Gateway {
             });
             alias = picked.route;
             reason = picked.reason ?? 'nexus';
+            if (picked.fallback) routeFallback = picked.fallback;
           }
         }
 
