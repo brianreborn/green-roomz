@@ -1916,3 +1916,59 @@ test('auto families: anchored patterns, and a known agent alias that looks like 
   assert.deepEqual(pin, { decision: 'pin', alias: 'gpt-local-coder', reason: 'lock_alias' });
   assert.throws(() => resolveExplicitModelPin('foo-bar', registry), /Unknown agent alias: foo-bar/);
 });
+
+// ---- pass 4: deny pins by agent type/role/category ----
+for (const kind of ['guardian', 'pentest', 'defender', 'monitor']) {
+  for (const field of ['type', 'role', 'category']) {
+    test(`deny-by-type: ${field}=${kind} agent without flags is never pinned (lock_alias / model pin, ready / unavailable)`, () => {
+      for (const state of ['ready', 'unavailable']) {
+        const registry = new AgentRegistry(manifestWithInternal({ [field]: kind === 'guardian' ? 'Guardian' : kind }));
+        registry.setStatus('pentest-agent', state, state === 'unavailable' ? { missing: ['model:missing'] } : {});
+        assert.equal(isPinnableAlias(registry, 'pentest-agent'), false);
+        for (const body of [{ model: 'pentest-agent', lock_alias: true }, { model: 'pentest-agent' }]) {
+          const routed = hardRuleRoute({ ...body, messages: [{ role: 'user', content: 'hi' }] }, registry);
+          assert.equal(routed.effectiveAlias, null, `${state} ${JSON.stringify(body)}`);
+          assert.equal(routed.reason, 'nexus');
+        }
+      }
+    });
+  }
+}
+
+for (const kind of ['guardian', 'pentest', 'defender', 'monitor']) {
+  test(`deny-by-type: gateway never reaches a type=${kind} agent's port (lock_alias and model pin, ready and unavailable)`, async (t) => {
+    for (const state of ['ready', 'unavailable']) {
+      for (const pin of [{ lock_alias: true }, {}]) {
+        const urls = [];
+        const manifest = manifestWithInternal({ type: kind });
+        const registry = await new AgentRegistry(manifest).inspect();
+        for (const alias of ['tool-router-agent', 'general-text-speculator']) registry.setStatus(alias, 'ready');
+        registry.setStatus('pentest-agent', state, state === 'unavailable' ? { missing: ['model:missing'] } : {});
+        const hostAdapter = { sampleResources() { return { freeMemoryBytes: 1 }; } };
+        const processes = new ProcessManager({ manifest, registry, hostAdapter, spawnImpl() { throw new Error('no spawn'); } });
+        processes.ensure = async (agent) => ({ alias: agent.alias, state: 'ready' });
+        const gateway = new Gateway({ manifest, registry, processes, sessions: new SessionLedger(), policy: new PolicyGate('maximize'), hostAdapter,
+          fetchImpl: async (url) => { urls.push(String(url)); return jsonFetch({ choices: [{ message: { role: 'assistant', content: 'ok' } }] }); } });
+        const server = await gateway.listen('127.0.0.1', 0);
+        try {
+          const result = await request(server, { path: '/v1/chat/completions', method: 'POST', headers: { 'content-type': 'application/json' }, body: { model: 'pentest-agent', ...pin, messages: [{ role: 'user', content: 'Say hello in one short sentence.' }] } });
+          assert.notEqual(result.headers['x-green-roomz-effective-alias'], 'pentest-agent');
+          assert.notEqual(result.status, 503, 'non-pinnable agent must not produce a pin-503');
+          assert.equal(urls.some((url) => url.includes(':18199')), false);
+        } finally {
+          server.close();
+        }
+      }
+    }
+  });
+}
+
+test('shipped manifests mark security-monitor-agent internal and it is never pinnable', async () => {
+  const { loadManifest } = await import('../src/config.mjs');
+  for (const name of ['android', 'cursor', 'linux-try', 'note9', 'windows-mvp', 'windows']) {
+    const manifest = await loadManifest(new URL(`../config/agents.${name}.json`, import.meta.url));
+    const monitor = manifest.agents.find((agent) => agent.alias === 'security-monitor-agent');
+    assert.equal(monitor.internal, true, name);
+    assert.equal(isPinnableAlias(new AgentRegistry(manifest), 'security-monitor-agent'), false, name);
+  }
+});
