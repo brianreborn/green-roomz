@@ -11,10 +11,16 @@ set "DEST=%LOCALAPPDATA%\Green-Roomz"
 set "SM=%APPDATA%\Microsoft\Windows\Start Menu\Programs\Green-Roomz"
 set "LOG=%DEST%\data\install.log"
 set "LLAMA_URL=https://github.com/ggml-org/llama.cpp/releases/download/b10702/llama-b10702-bin-win-cpu-x64.zip"
-set "LLAMA_ZIP=%TEMP%\llama-b10702-bin-win-cpu-x64.zip"
 set "NODE_MSI=https://nodejs.org/dist/latest-v22.x/"
 set "NODE_DL=https://nodejs.org/en/download"
 set "RC=0"
+set "GRZ_TMP_TRIES=0"
+call :mk_grz_tmp
+if not defined GRZ_TMP (
+  echo FATAL: cannot create a private temp dir under %TEMP%
+  exit /b 1
+)
+set "LLAMA_ZIP=%GRZ_TMP%\llama-b10702-bin-win-cpu-x64.zip"
 
 if not exist "%DEST%" mkdir "%DEST%"
 if not exist "%DEST%\data" mkdir "%DEST%\data"
@@ -34,31 +40,29 @@ if exist "%SRC%\green-roomz\start.cmd" (
 )
 if exist "%SRC%\green-roomz.zip" (
   call :log extracting %SRC%\green-roomz.zip
-  if exist "%TEMP%\grz-unpack-beta02" rmdir /s /q "%TEMP%\grz-unpack-beta02"
-  mkdir "%TEMP%\grz-unpack-beta02"
-  tar -xf "%SRC%\green-roomz.zip" -C "%TEMP%\grz-unpack-beta02"
-  if exist "%TEMP%\grz-unpack-beta02\green-roomz\start.cmd" set "SRC=%TEMP%\grz-unpack-beta02\green-roomz"
-  if exist "%TEMP%\grz-unpack-beta02\start.cmd" set "SRC=%TEMP%\grz-unpack-beta02"
+  mkdir "%GRZ_TMP%\unpack"
+  tar -xf "%SRC%\green-roomz.zip" -C "%GRZ_TMP%\unpack"
+  if exist "%GRZ_TMP%\unpack\green-roomz\start.cmd" set "SRC=%GRZ_TMP%\unpack\green-roomz"
+  if exist "%GRZ_TMP%\unpack\start.cmd" set "SRC=%GRZ_TMP%\unpack"
   goto :have_src
 )
 if exist "%SRC%\green-roomz-slim.zip" (
   call :log extracting %SRC%\green-roomz-slim.zip
-  if exist "%TEMP%\grz-unpack-beta02" rmdir /s /q "%TEMP%\grz-unpack-beta02"
-  mkdir "%TEMP%\grz-unpack-beta02"
-  tar -xf "%SRC%\green-roomz-slim.zip" -C "%TEMP%\grz-unpack-beta02"
-  if exist "%TEMP%\grz-unpack-beta02\green-roomz\start.cmd" set "SRC=%TEMP%\grz-unpack-beta02\green-roomz"
-  if exist "%TEMP%\grz-unpack-beta02\start.cmd" set "SRC=%TEMP%\grz-unpack-beta02"
+  mkdir "%GRZ_TMP%\unpack"
+  tar -xf "%SRC%\green-roomz-slim.zip" -C "%GRZ_TMP%\unpack"
+  if exist "%GRZ_TMP%\unpack\green-roomz\start.cmd" set "SRC=%GRZ_TMP%\unpack\green-roomz"
+  if exist "%GRZ_TMP%\unpack\start.cmd" set "SRC=%GRZ_TMP%\unpack"
   goto :have_src
 )
 call :log FATAL: cannot find start.cmd or a pack zip next to the installer
 echo Put install-windows.cmd inside the extracted green-roomz pack and run it again.
-exit /b 1
+set "RC=1" & goto :grz_exit
 
 :have_src
 if not exist "%SRC%\start.cmd" (
   call :log FATAL: start.cmd missing at %SRC%
   echo Missing start.cmd. Extract the portable pack first.
-  exit /b 1
+  set "RC=1" & goto :grz_exit
 )
 call :log using pack SRC=%SRC%
 
@@ -74,20 +78,20 @@ robocopy "%SRC%" "%DEST%" /E /XD data .git /XF llama-server *.so /R:1 /W:1 /NFL 
 if errorlevel 8 (
   call :log FATAL robocopy errorlevel %ERRORLEVEL%
   echo Copy failed.
-  exit /b 1
+  set "RC=1" & goto :grz_exit
 )
 call :log robocopy finished
 goto :copied
 
 :xcopy_pack
-set "EXCL=%TEMP%\grz-xcopy-exclude.txt"
+set "EXCL=%GRZ_TMP%\xcopy-exclude.txt"
 > "%EXCL%" echo data\
 >> "%EXCL%" echo .git\
 xcopy /E /I /Y /Q /EXCLUDE:%EXCL% "%SRC%\*" "%DEST%\"
 if errorlevel 1 (
   call :log FATAL xcopy errorlevel %ERRORLEVEL%
   echo Copy failed.
-  exit /b 1
+  set "RC=1" & goto :grz_exit
 )
 call :log xcopy finished
 
@@ -97,7 +101,7 @@ if not exist "%DEST%\runtime" mkdir "%DEST%\runtime"
 if not exist "%DEST%\start.cmd" (
   call :log FATAL start.cmd not at DEST
   echo Install copy did not place start.cmd
-  exit /b 1
+  set "RC=1" & goto :grz_exit
 )
 
 rem --- write uninstall next to the install (template copy, then fallback emit) ---
@@ -121,6 +125,7 @@ if errorlevel 1 (
   echo curl failed fetching the official CPU zip
   echo   %LLAMA_URL%
   echo Install fails closed until CPU llama-server.exe is present.
+  if exist "%GRZ_TMP%" rmdir /s /q "%GRZ_TMP%" 2>nul
   exit /b 1
 )
 tar -xf "%LLAMA_ZIP%" -C "%DEST%\runtime"
@@ -139,7 +144,7 @@ call :log FATAL llama-server.exe still missing after CPU zip expand
 echo Missing llama-server.exe after expand. Fetch:
 echo   %LLAMA_URL%
 echo and expand llama-server.exe + dlls into runtime\
-exit /b 1
+set "RC=1" & goto :grz_exit
 
 :llama_ok
 rem no vulkan, no CUDA, no C:\LocalAI fallback from this installer
@@ -148,7 +153,7 @@ rem --- Start Menu shortcut: same .lnk path every run (idempotent, no elevation)
 rem .lnk via cscript/WScript.Shell so Firefox on qodesh does not hijack a .url.
 if exist "%SM%\Green-Roomz.url" del /q "%SM%\Green-Roomz.url"
 set "LNK=%SM%\Green-Roomz.lnk"
-set "VBS=%TEMP%\grz-shortcut.vbs"
+set "VBS=%GRZ_TMP%\shortcut.vbs"
 set "TARGET=%DEST%\start.cmd"
 > "%VBS%" echo Set o = CreateObject("WScript.Shell")
 >> "%VBS%" echo Set s = o.CreateShortcut("%LNK%")
@@ -197,12 +202,12 @@ if exist "%ProgramFiles%\nodejs\node.exe" (
   call :log FATAL node at Program Files but not on PATH
   echo Node.js is at "%ProgramFiles%\nodejs\node.exe" but not on PATH.
   echo Add it to PATH, open a new cmd window, then re-run install or start.cmd.
-  exit /b 1
+  set "RC=1" & goto :grz_exit
 )
 if exist "%LocalAppData%\Programs\node\node.exe" (
   call :log FATAL node at LocalAppData Programs but not on PATH
   echo Node.js found under LocalAppData\Programs but not on PATH. Open a new terminal after fixing PATH.
-  exit /b 1
+  set "RC=1" & goto :grz_exit
 )
 call :log FATAL Node.js missing
 echo Need Node.js on PATH (engines field says ^>=22; Node 20 has been used successfully^).
@@ -212,7 +217,7 @@ echo   %NODE_DL%
 echo   %NODE_MSI%
 echo Pick Windows x64 LTS MSI, install it, open a new cmd window, then run:
 echo   "%DEST%\start.cmd"
-exit /b 1
+set "RC=1" & goto :grz_exit
 
 :node_ok
 call :log ===== install-windows.cmd ok =====
@@ -223,7 +228,12 @@ if not exist "%DEST%\models\Qwen2.5-0.5B-Instruct-Q4_K_M.gguf" (
 )
 echo Done. Start via Start Menu "Green-Roomz" or:
 echo   "%DEST%\start.cmd"
-exit /b 0
+set "RC=0" & goto :grz_exit
+
+
+:grz_exit
+if defined GRZ_TMP if exist "%GRZ_TMP%" rmdir /s /q "%GRZ_TMP%" 2>nul
+exit /b %RC%
 
 :log
 >>"%LOG%" echo %DATE% %TIME% %*
@@ -242,4 +252,15 @@ call :log emitting uninstall-windows.cmd fallback
 >> "%DEST%\uninstall-windows.cmd" echo if exist "%%SM%%" rmdir /s /q "%%SM%%"
 >> "%DEST%\uninstall-windows.cmd" echo echo Uninstalled per-user Green-Roomz.
 >> "%DEST%\uninstall-windows.cmd" echo endlocal
+goto :eof
+
+:mk_grz_tmp
+rem Random per-run temp dir; mkdir fails atomically if the name already exists.
+set /a GRZ_TMP_TRIES+=1
+if %GRZ_TMP_TRIES% GTR 20 (
+  set "GRZ_TMP="
+  goto :eof
+)
+set "GRZ_TMP=%TEMP%\grz.%RANDOM%%RANDOM%%RANDOM%"
+mkdir "%GRZ_TMP%" 2>nul || goto :mk_grz_tmp
 goto :eof
