@@ -10,12 +10,16 @@ import { REQUIRED_ALIASES } from '../src/constants.mjs';
 test('missing artifacts degrade only the affected alias', async () => {
   const registry = await new AgentRegistry(sampleManifest()).inspect();
   const models = registry.listModels();
-  assert.equal(models.length, REQUIRED_ALIASES.length);
+  // #6 (7716f14): unavailable specialists are not published; resident + health_aliases always are.
+  const listed = new Set(models.map((model) => model.id));
+  assert.ok(listed.has('tool-router-agent') && listed.has('general-text-speculator'));
+  assert.ok(!listed.has('vision-layout-agent'));
+  assert.ok(models.length <= REQUIRED_ALIASES.length);
   const router = models.find((model) => model.id === 'tool-router-agent');
   assert.equal(router.availability, 'unavailable');
   assert.equal(router.routing_behavior, 'nexus');
   assert.equal(router.resident, true);
-  const vision = models.find((model) => model.id === 'vision-layout-agent');
+  const vision = registry.getModel('vision-layout-agent');  // still inspectable directly
   assert.equal(vision.availability, 'unavailable');
   assert.ok(vision.unavailable_reasons.some((reason) => reason.startsWith('model:')));
   assert.ok(vision.native_capabilities.includes('image'));

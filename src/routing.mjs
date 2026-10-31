@@ -142,6 +142,10 @@ export function isAutoModelId(alias) {
  * unknown → ValidationError 400; known unavailable → pin (gateway 503); auto/compat → nexus.
  */
 export function resolveExplicitModelPin(model, registry, { lockAlias = false } = {}) {
+  // lock_alias may pin the resident nexus itself (green-roomz #34); without it the nexus id means "auto".
+  if (lockAlias && model === NEXUS_ALIAS && registry?.agents?.has(NEXUS_ALIAS)) {
+    return { decision: 'pin', alias: NEXUS_ALIAS, reason: 'lock_alias' };
+  }
   if (isAutoModelId(model)) return { decision: 'nexus' };
   const alias = String(model);
   if (!registry?.agents?.has(alias)) {
