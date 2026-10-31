@@ -11,7 +11,8 @@ PIN="${GRZ_LLAMA_PIN:-b10702}"
 URL="${GRZ_LINUX_AARCH64_URL:-https://github.com/ggml-org/llama.cpp/releases/download/${PIN}/llama-${PIN}-bin-ubuntu-arm64.tar.gz}"
 
 mkdir -p "$OUT"
-stage="$(mktemp -d /tmp/grz-linux-aarch64.XXXXXX)"
+umask 077
+stage="$(mktemp -d "${TMPDIR:-/tmp}/grz.XXXXXX")"
 cleanup() { rm -rf "$stage"; }
 trap cleanup EXIT
 

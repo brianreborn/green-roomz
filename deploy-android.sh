@@ -23,7 +23,8 @@ fi
 echo "adb device: $(adb get-serialno 2>/dev/null || echo unknown)"
 adb shell "mkdir -p $DEST/bin $DEST/lib $DEST/models $DEST/green-roomz" >/dev/null
 
-stage="$(mktemp -d /tmp/grz-android.XXXXXX)"
+umask 077
+stage="$(mktemp -d "${TMPDIR:-/tmp}/grz.XXXXXX")"
 cleanup() { rm -rf "$stage"; }
 trap cleanup EXIT
 
