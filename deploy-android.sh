@@ -23,8 +23,12 @@ fi
 echo "adb device: $(adb get-serialno 2>/dev/null || echo unknown)"
 adb shell "mkdir -p $DEST/bin $DEST/lib $DEST/models $DEST/green-roomz" >/dev/null
 
+# Termux-aware temp base: TMPDIR, then $PREFIX/tmp (Termux), then /tmp.
+tmp_base="${TMPDIR:-}"
+if [[ -z "$tmp_base" && -n "${PREFIX:-}" && -d "$PREFIX/tmp" ]]; then tmp_base="$PREFIX/tmp"; fi
+tmp_base="${tmp_base:-/tmp}"
 umask 077
-stage="$(mktemp -d "${TMPDIR:-/tmp}/grz.XXXXXX")"
+stage="$(mktemp -d "$tmp_base/grz.XXXXXX")"
 cleanup() { rm -rf "$stage"; }
 trap cleanup EXIT
 
@@ -48,6 +52,10 @@ else
   # some builds colocate .so next to the binary
   d="$(dirname "$srv")"
   find "$d" -maxdepth 1 -type f -name '*.so' -exec cp -a {} "$stage/push/bin/" \;
+  # umask 077 staged everything 0600/0700; Termux user must be able to read it.
+  find "$stage/push" -type d -exec chmod 0755 {} +
+  find "$stage/push" -type f -exec chmod 0644 {} +
+  chmod 0755 "$stage/push/bin/llama-server"
   adb push "$stage/push/bin/." "$DEST/bin/"
   adb push "$stage/push/lib/." "$DEST/lib/"
 fi
@@ -132,6 +140,7 @@ if [[ -n "${SLIM_TORRENT:-}" && -f "$SLIM_TORRENT" ]]; then
     [[ -n "$slim_ih" ]] && echo "infohash $slim_ih"
     [[ -n "$slim_ih" ]] && echo "magnet:?xt=urn:btih:${slim_ih}&dn=${slim_zip}"
   } >"$note"
+  chmod 0644 "$note"
   adb push "$note" "$DEST/slim-torrent-note.txt"
 fi
 # 644 so Termux bash can *read* the snippet; SELinux blocks execute-from-tmp

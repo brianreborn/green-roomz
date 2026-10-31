@@ -11,8 +11,12 @@ PIN="${GRZ_LLAMA_PIN:-b10702}"
 URL="${GRZ_LINUX_AARCH64_URL:-https://github.com/ggml-org/llama.cpp/releases/download/${PIN}/llama-${PIN}-bin-ubuntu-arm64.tar.gz}"
 
 mkdir -p "$OUT"
+# Termux-aware temp base: TMPDIR, then $PREFIX/tmp (Termux), then /tmp.
+tmp_base="${TMPDIR:-}"
+if [[ -z "$tmp_base" && -n "${PREFIX:-}" && -d "$PREFIX/tmp" ]]; then tmp_base="$PREFIX/tmp"; fi
+tmp_base="${tmp_base:-/tmp}"
 umask 077
-stage="$(mktemp -d "${TMPDIR:-/tmp}/grz.XXXXXX")"
+stage="$(mktemp -d "$tmp_base/grz.XXXXXX")"
 cleanup() { rm -rf "$stage"; }
 trap cleanup EXIT
 
@@ -30,7 +34,9 @@ d="$(dirname "$srv")"
 cp -a "$srv" "$OUT/"
 find "$d" -maxdepth 1 \( -type f -o -type l \) \( -name '*.so' -o -name '*.so.*' \) \
   -exec cp -a {} "$OUT/" \;
-chmod +x "$OUT/llama-server"
+# umask 077 left extracted files 0600/0700; set explicit modes for the guest user.
+find "$OUT" -maxdepth 1 -type f -exec chmod 0644 {} +
+chmod 0755 "$OUT" "$OUT/llama-server"
 
 # Verify glibc aarch64 interpreter (refuse Android linker)
 interp=""
