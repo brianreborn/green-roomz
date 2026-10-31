@@ -10,6 +10,7 @@ import { ProcessManager } from '../src/process-manager.mjs';
 import { PolicyGate } from '../src/scheduler.mjs';
 import { SessionLedger } from '../src/sessions.mjs';
 import { Gateway, prepareInferenceBody } from '../src/gateway.mjs';
+import { hardRuleRoute, resolveExplicitModelPin, isPinnableAlias } from '../src/routing.mjs';
 import { sampleManifest } from './helpers.mjs';
 import { NEXUS_CHAT_SYSTEM, REQUIRED_ALIASES } from '../src/constants.mjs';
 
@@ -1819,4 +1820,70 @@ test('DISPATCH-FIX-01: a known agent alias with lock_alias is still honored', as
   assert.equal(result.headers['x-green-roomz-route-reason'], 'lock_alias');
   assert.equal(urls.length, 1);
   assert.match(urls[0], /:18183/);
+});
+
+// ---- Boundary BLOCKER on 6d59a8f: non-routable agents are never pinnable ----
+function manifestWithInternal(extra) {
+  const manifest = sampleManifest();
+  const base = manifest.agents.find((agent) => agent.alias === 'qwenstral-code-speculator');
+  manifest.agents.push({ ...structuredClone(base), alias: 'pentest-agent', port: 18199, ...extra });
+  return manifest;
+}
+
+for (const flag of [{ routable: false }, { internal: true }]) {
+  for (const [label, pinBody, state] of [
+    ['lock_alias', { model: 'pentest-agent', lock_alias: true }, 'ready'],
+    ['model pin (unavailable)', { model: 'pentest-agent' }, 'unavailable'],
+    ['lock_alias (unavailable)', { model: 'pentest-agent', lock_alias: true }, 'unavailable'],
+  ]) {
+    test(`BLOCKER: ${label} to a ${JSON.stringify(flag)} agent is never pinned and never reached`, async () => {
+      const registry = new AgentRegistry(manifestWithInternal(flag));
+      registry.setStatus('pentest-agent', state, state === 'unavailable' ? { missing: ['model:/home/box/secret/pentest.gguf'] } : {});
+      const routed = hardRuleRoute({ ...pinBody, messages: [{ role: 'user', content: 'hi' }] }, registry);
+      assert.equal(routed.effectiveAlias, null);
+      assert.equal(routed.reason, 'nexus');
+      assert.equal(resolveExplicitModelPin('pentest-agent', registry, { lockAlias: true }).decision, 'nexus');
+    });
+  }
+}
+
+test('BLOCKER: monitor and router sentinels are not pinnable via resolveExplicitModelPin', () => {
+  const registry = new AgentRegistry(sampleManifest());
+  assert.equal(isPinnableAlias(registry, 'security-monitor-agent'), false);
+  assert.equal(isPinnableAlias(registry, 'auto'), false);
+  assert.equal(resolveExplicitModelPin('security-monitor-agent', registry, { lockAlias: true }).decision, 'nexus');
+  assert.equal(isPinnableAlias(registry, 'qwenstral-code-speculator'), true);
+  assert.equal(isPinnableAlias(registry, 'safety-policy-agent'), true);   // native /v1/moderations target
+});
+
+test('BLOCKER: gateway lock_alias to a routable:false agent never reaches its port', async (t) => {
+  const urls = [];
+  const manifest = manifestWithInternal({ routable: false });
+  const registry = await new AgentRegistry(manifest).inspect();
+  for (const alias of ['tool-router-agent', 'general-text-speculator', 'pentest-agent']) registry.setStatus(alias, 'ready');
+  const hostAdapter = { sampleResources() { return { freeMemoryBytes: 1 }; } };
+  const processes = new ProcessManager({ manifest, registry, hostAdapter, spawnImpl() { throw new Error('no spawn'); } });
+  processes.ensure = async (agent) => ({ alias: agent.alias, state: 'ready' });
+  const gateway = new Gateway({ manifest, registry, processes, sessions: new SessionLedger(), policy: new PolicyGate('maximize'), hostAdapter,
+    fetchImpl: async (url) => { urls.push(String(url)); return jsonFetch({ choices: [{ message: { role: 'assistant', content: 'ok' } }] }); } });
+  const server = await gateway.listen('127.0.0.1', 0);
+  t.after(() => server.close());
+  const result = await request(server, { path: '/v1/chat/completions', method: 'POST', headers: { 'content-type': 'application/json' }, body: { model: 'pentest-agent', lock_alias: true, messages: [{ role: 'user', content: 'Say hello in one short sentence.' }] } });
+  assert.notEqual(result.headers['x-green-roomz-effective-alias'], 'pentest-agent');
+  assert.notEqual(result.headers['x-green-roomz-route-reason'], 'lock_alias');
+  assert.equal(urls.some((url) => url.includes(':18199')), false);
+});
+
+test('pin-503 body carries a generic reason and no local paths', async (t) => {
+  const { server, registry } = await withServer(t, {}, {
+    ready: ['tool-router-agent', 'general-text-speculator'],
+    stubEnsure: true,
+    fetchImpl: async () => { throw new Error('must not go upstream'); },
+  });
+  registry.setStatus('qwenstral-code-speculator', 'unavailable', { missing: ['model:/home/box/models/secret-qwenstral.gguf', 'impractical:RAM C:\\Users\\brian\\x.gguf'] });
+  const result = await request(server, { path: '/v1/chat/completions', method: 'POST', headers: { 'content-type': 'application/json' }, body: { model: 'qwenstral-code-speculator', messages: [{ role: 'user', content: 'hi' }] } });
+  assert.equal(result.status, 503);
+  assert.deepEqual(result.body.error.details, { reason: 'pinned_agent_unavailable' });
+  const raw = JSON.stringify(result.body) + JSON.stringify(result.headers);
+  assert.doesNotMatch(raw, /\/home\/|\.gguf|[A-Za-z]:\\\\|secret/);
 });
