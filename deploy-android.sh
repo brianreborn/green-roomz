@@ -37,8 +37,28 @@ stage="$(mktemp -d "$tmp_base/grz.XXXXXX")"
 cleanup() { rm -rf "$stage"; }
 trap cleanup EXIT
 
+
+# SHA256SUMS: host-side hashes of every runtime/JS file pushed, keyed by path relative to $DEST.
+# termux-start.sh verifies these after copying into $HOME and before running anything.
+sums="$stage/SHA256SUMS"
+: >"$sums"
+add_sums() { # add_sums <host dir> <dest-relative prefix>
+  local dir="$1" prefix="$2"
+  if [[ -n "$(find "$dir" -type l -print -quit)" ]]; then
+    echo "ERROR: symlink under $dir; refusing to stage" >&2
+    exit 1
+  fi
+  (cd "$dir" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 -r sha256sum) \
+    | sed "s#  \./#  ${prefix}#" >>"$sums"
+}
+add_file_sum() { # add_file_sum <host file> <dest-relative path>
+  [[ -L "$1" ]] && { echo "ERROR: symlink $1; refusing to stage" >&2; exit 1; }
+  printf '%s  %s\n' "$(sha256sum <"$1" | cut -d' ' -f1)" "$2" >>"$sums"
+}
+
 if [[ -d "$GRZ_ROOT/runtime/android-arm64" ]]; then
   echo "pushing vendored runtime/android-arm64"
+  add_sums "$GRZ_ROOT/runtime/android-arm64" ""
   adb push "$GRZ_ROOT/runtime/android-arm64/." "$DEST/"
 else
   echo "fetching official android-arm64 tarball b10702 (not vendored; ~70MB)"
@@ -69,6 +89,8 @@ else
   find "$stage/push" -type d -exec chmod 0755 {} +
   find "$stage/push" -type f -exec chmod 0644 {} +
   chmod 0755 "$stage/push/bin/llama-server"
+  add_sums "$stage/push/bin" "bin/"
+  add_sums "$stage/push/lib" "lib/"
   adb push "$stage/push/bin/." "$DEST/bin/"
   adb push "$stage/push/lib/." "$DEST/lib/"
 fi
@@ -91,6 +113,10 @@ fi
 # JS tree without linux runtime (Termux copies into $HOME)
 # Exclude agents.windows.json (LocalAI overlay) from Android drop
 echo "pushing JS tree + Termux snippet"
+add_sums "$GRZ_ROOT/bin" "green-roomz/bin/"
+add_sums "$GRZ_ROOT/src" "green-roomz/src/"
+add_sums "$GRZ_ROOT/policies" "green-roomz/policies/"
+add_file_sum "$GRZ_ROOT/package.json" "green-roomz/package.json"
 adb push "$GRZ_ROOT/bin" "$DEST/green-roomz/bin"
 adb push "$GRZ_ROOT/src" "$DEST/green-roomz/src"
 adb shell "mkdir -p $DEST/green-roomz/config" >/dev/null
@@ -102,6 +128,7 @@ for cfg in "$GRZ_ROOT/config"/*; do
     echo "skip $base (not for Android pack)"
     continue
   fi
+  add_file_sum "$cfg" "green-roomz/config/$base"
   adb push "$cfg" "$DEST/green-roomz/config/"
 done
 shopt -u nullglob
@@ -112,6 +139,9 @@ if [[ -f "$GRZ_ROOT/scripts/note9-termux-setup.sh" ]]; then
   adb push "$GRZ_ROOT/scripts/note9-termux-setup.sh" "$DEST/setup.sh"
 fi
 adb push "$GRZ_ROOT/docs" "$DEST/green-roomz/docs" 2>/dev/null || true
+# docs are not hashed: termux-start.sh copies only SHA256SUMS-listed files (docs stay in the drop zone).
+chmod 0644 "$sums"
+adb push "$sums" "$DEST/SHA256SUMS"
 
 # GOS-P7: push models lockfile (+ optional slim torrent note) beside models for Termux verify
 REVIEWS_DIR="${GRZ_REVIEWS:-}"
