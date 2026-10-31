@@ -10,7 +10,7 @@ import { ProcessManager } from '../src/process-manager.mjs';
 import { PolicyGate } from '../src/scheduler.mjs';
 import { SessionLedger } from '../src/sessions.mjs';
 import { Gateway, prepareInferenceBody } from '../src/gateway.mjs';
-import { hardRuleRoute, resolveExplicitModelPin, isPinnableAlias } from '../src/routing.mjs';
+import { hardRuleRoute, resolveExplicitModelPin, isPinnableAlias, isAutoModelFamily } from '../src/routing.mjs';
 import { sampleManifest } from './helpers.mjs';
 import { NEXUS_CHAT_SYSTEM, REQUIRED_ALIASES } from '../src/constants.mjs';
 
@@ -1782,7 +1782,7 @@ test('DISPATCH-FIX-01: unknown non-auto model name is 400 validation_error with 
     stubEnsure: true,
     fetchImpl: async (url) => { urls.push(String(url)); return jsonFetch({ choices: [{ message: { role: 'assistant', content: 'nope' } }] }); },
   });
-  for (const model of ['no-such-agent', 'gpt-5-turbo-imaginary', 'llama3']) {
+  for (const model of ['no-such-agent', 'foo-bar', 'llama3', 'my-gpt-4o', 'o5-mini', 'xclaude-3']) {
     const result = await request(server, { path: '/v1/chat/completions', method: 'POST', headers: { 'content-type': 'application/json' }, body: { model, messages: [{ role: 'user', content: 'hi' }] } });
     assert.equal(result.status, 400, model);
     assert.equal(result.body.error.type, 'validation_error');
@@ -1886,4 +1886,33 @@ test('pin-503 body carries a generic reason and no local paths', async (t) => {
   assert.deepEqual(result.body.error.details, { reason: 'pinned_agent_unavailable' });
   const raw = JSON.stringify(result.body) + JSON.stringify(result.headers);
   assert.doesNotMatch(raw, /\/home\/|\.gguf|[A-Za-z]:\\\\|secret/);
+});
+
+// ---- pass 4: client model families are auto ----
+test('auto families: gpt-4o-mini, gpt-4-turbo, o3-mini, o4-mini, claude-3-5-sonnet auto-route with 200', async (t) => {
+  const urls = [];
+  const { server } = await withServer(t, {}, {
+    ready: ['tool-router-agent', 'general-text-speculator'],
+    stubEnsure: true,
+    fetchImpl: async (url) => { urls.push(String(url)); return jsonFetch({ choices: [{ message: { role: 'assistant', content: 'auto-ok' } }] }); },
+  });
+  for (const model of ['gpt-4o-mini', 'gpt-4-turbo', 'o3-mini', 'o4-mini', 'O1', 'o3', 'claude-3-5-sonnet', 'Claude-3-5-Sonnet-20241022']) {
+    const result = await request(server, { path: '/v1/chat/completions', method: 'POST', headers: { 'content-type': 'application/json' }, body: { model, messages: [{ role: 'user', content: 'Say hello in one short sentence.' }] } });
+    assert.equal(result.status, 200, model);
+    assert.notEqual(result.headers['x-green-roomz-route-reason'], 'requested_alias', model);
+    assert.notEqual(result.headers['x-green-roomz-route-reason'], 'lock_alias', model);
+  }
+});
+
+test('auto families: anchored patterns, and a known agent alias that looks like a family still pins', () => {
+  for (const id of ['gpt-4o-mini', 'GPT-4-TURBO', 'o1', 'o1-preview', 'o3-mini', 'o4-mini', 'claude-3-5-sonnet']) assert.equal(isAutoModelFamily(id), true, id);
+  for (const id of ['foo-bar', 'my-gpt-4o', 'gpt', 'gpt-', 'o2', 'o5-mini', 'o10', 'xclaude-3', 'claude', 'qwenstral-code-speculator']) assert.equal(isAutoModelFamily(id), false, id);
+  const manifest = sampleManifest();
+  const base = manifest.agents.find((agent) => agent.alias === 'qwenstral-code-speculator');
+  manifest.agents.push({ ...structuredClone(base), alias: 'gpt-local-coder', port: 18198 });
+  const registry = new AgentRegistry(manifest);
+  registry.setStatus('gpt-local-coder', 'ready');
+  const pin = resolveExplicitModelPin('gpt-local-coder', registry, { lockAlias: true });
+  assert.deepEqual(pin, { decision: 'pin', alias: 'gpt-local-coder', reason: 'lock_alias' });
+  assert.throws(() => resolveExplicitModelPin('foo-bar', registry), /Unknown agent alias: foo-bar/);
 });
