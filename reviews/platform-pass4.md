@@ -14,7 +14,7 @@ Tree frozen for commit by Researcher. Live serve **not** bounced onto this tree 
 | **PF2** | **Landed (and owns B14 hole).** Allowlist + `Object.hasOwn` + fail-closed collapsed `/runtime/llama-server` were **not** on tree after recorded P0; PF2 implemented them. Coordinate if a later B14 duplicates. |
 | **PF3** | **Landed.** `DEFAULT_MANIFEST` → `agents.cursor.json`; package start passes it; cursor json portable `${GRZ_ROOT}`/`${GRZ_LLAMA}`. |
 | **PF4** | **Landed.** OS detect before chmod; refuse Linux ELF on BSD/Darwin; `GRZ_LLAMA`; merge loader paths; spawn cwd. |
-| **PF5** | **Landed.** note9/android under `${HOME}/grz-runtime`; no `/data/local/tmp` for command/resident model; wrap shebang env bash. |
+| **PF5** | **Landed.** android-legacy/android under `${HOME}/grz-runtime`; no `/data/local/tmp` for command/resident model; wrap shebang env bash. |
 | **PF6** | **Landed.** LocalAI vulkan fallback removed from `start.cmd`; curl/node fail-closed; robocopy XF ELF/`*.so`. |
 | **PF7** | **Landed.** SIGHUP drain; default `canSuspend` false (`suspend_evicted === true` opt-in); TCP `waitForPortsFree` fail-closed. |
 | **PF8** | **Landed.** 0.5B only on `tool-router-agent` + `languages:['en']`; code/text → `missing-qwen-instruct.gguf`; translate line narrowed; BOM/NFC/bidi/`chcp`. |
@@ -39,7 +39,7 @@ Spot-check 2026-09-06: `node bin/green-roomz.mjs stop` → `{ok:false,error:"no 
 1. **Bounce serve** onto the new tree when operator wants PF live (new pidfile). Not this turn.
 2. **Ship a Qwen-tokenizer instruct GGUF** for general-text/code (pack currently `missing-qwen-instruct.gguf` by design). 0.5B Tekken stays nexus-only.
 3. **Commit** when Researcher is ready (notes say unstaged).
-4. **Hardware proof** FreeBSD/Darwin/Note9/qodesh still out of scope on this Linux box.
+4. **Hardware proof** FreeBSD/Darwin/Android-legacy phone/mvp-host still out of scope on this Linux box.
 5. If RF4 exit-after-SIGKILL is still open in process-manager, that is race residual, not a new platform PF.
 
 ---

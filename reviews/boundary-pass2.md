@@ -118,7 +118,7 @@ B1 unauthenticated loopback operator. B3 nexus MONITOR accept-list + logical mai
 
 ## Recheck log (source confirm)
 
-All first-pass numbered claims re-read in tree: B1–B6, B8–B16, B18–B20, B27–B28 **CONFIRMED**. Network throw vs fuzz 403 remains machine vs ifX. `KIND_CAP` has no lockdown; `ipc.push({kind:'lockdown'})` rejects `"unknown kind"` before `STUB_KIND_REASON`; `MonitorIpc.lockdown()` still throws. Git tree has **no** `start.sh`; key is unset in `scripts/start-green-roomz.ps1`, `scripts/cursor-serve.sh`, `scripts/note9-restart-serve.sh`, `scripts/serve-window.cmd`. `this.apiKey = process.env.GREEN_ROOMZ_API_KEY || ''` (`gateway.mjs:290`).
+All first-pass numbered claims re-read in tree: B1–B6, B8–B16, B18–B20, B27–B28 **CONFIRMED**. Network throw vs fuzz 403 remains machine vs ifX. `KIND_CAP` has no lockdown; `ipc.push({kind:'lockdown'})` rejects `"unknown kind"` before `STUB_KIND_REASON`; `MonitorIpc.lockdown()` still throws. Git tree has **no** `start.sh`; key is unset in `scripts/start-green-roomz.ps1`, `scripts/cursor-serve.sh`, `scripts/termux-restart-serve.sh`, `scripts/serve-window.cmd`. `this.apiKey = process.env.GREEN_ROOMZ_API_KEY || ''` (`gateway.mjs:290`).
 
 
 ## Sibling pass2 (race / covert) — 2026-09-03 ~04:41 PT

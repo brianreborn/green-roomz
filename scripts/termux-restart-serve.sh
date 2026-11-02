@@ -7,7 +7,7 @@ fi
 sleep 1
 export LD_LIBRARY_PATH="$HOME/grz-runtime/lib:$HOME/grz-runtime/bin"
 cd "$HOME/green-roomz"
-nohup node ./bin/green-roomz.mjs serve --manifest ./config/agents.note9.json --host 127.0.0.1 --port 8080 \
+nohup node ./bin/green-roomz.mjs serve --manifest ./config/agents.android-termux.json --host 127.0.0.1 --port 8080 \
   >"$HOME/grz-serve.out.log" 2>"$HOME/grz-serve.err.log" &
 echo $! | tee "$HOME/grz-serve.pid" /sdcard/Download/grz/serve.pid
 sleep 10

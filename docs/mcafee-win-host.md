@@ -1,4 +1,4 @@
-# McAfee on shalom (Windows host)
+# McAfee on win-host (Windows host)
 
 McAfee Premium Individual is installed (`C:\Program Files\McAfee\wps\mc-launch.exe`, Real-Time Scanning). It has already false-positived Green-Roomz operator scripts:
 
@@ -13,8 +13,8 @@ McAfee → **My Protection** (or Antivirus) → **Real-Time Scanning** → **Exc
 | Path | Why |
 |---|---|
 | `C:\LocalAI` | GGUFs, llama-server, whisper, piper, sd-server, EAGLE-3 venv |
-| `C:\Users\brian\Documents\green-roomz` | git working copy |
-| `C:\Users\brian\Documents\Codex\2026-08-28\files-pasted-by-the-user-1\outputs\green-roomz` | live `serve` tree on :8080 |
+| `%USERPROFILE%\Documents\green-roomz` | git working copy |
+| `%USERPROFILE%\Documents\Codex\2026-08-28\files-pasted-by-the-user-1\outputs\green-roomz` | live `serve` tree on :8080 |
 | `C:\Program Files\nodejs` | `node.exe` launching the gateway |
 
 Do not exclude all of `%TEMP%`. If Grok Bot PowerShell in Temp still gets blocked, Allow that specific event in Protection History.
@@ -39,6 +39,6 @@ Do not delete saved profiles. Do not `winsock reset` unless enabling autoconfig 
 
 ## Operator rules
 
-- No `Add-Type` / P/Invoke in shalom helper scripts.
+- No `Add-Type` / P/Invoke in win-host helper scripts.
 - Prefer `Start-Process node.exe ... -WorkingDirectory <green-roomz>`.
 - Models stay under `C:\LocalAI` (not in git).

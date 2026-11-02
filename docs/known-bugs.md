@@ -1,6 +1,6 @@
 # Known bugs (2026-08-28)
 
-Live on shalom `green-roomz serve` unless noted. Bounce serve after this landing.
+Live on win-host `green-roomz serve` unless noted. Bounce serve after this landing.
 
 ## Routing / nexus
 
@@ -12,28 +12,28 @@ Live on shalom `green-roomz serve` unless noted. Bounce serve after this landing
 - **Missing native slash** (`/draw` `/imagine` `/image` `/tts` `/speak` `/embed` `/rerank`, and `model:` of those aliases) → **503** when the specialist cannot admit. Empty `/tts` text is still **400**. `/code` on an impractical specialist still **200** resident 0.5B.
 - **`/router`** pins the resident 0.5B (`slash_router`), does not hop as a user-visible specialist.
 - **Mixed image + audio** no longer `ValidationError`; both stay in nexus AVAILABLE unless `/vision` or `/audio` is explicit.
-- **qodesh specialists.** 7B code is `impractical` on 16GB. `/code` no longer 503s: skip to an admittable alias or the resident 0.5B. Whisper/Piper/sd-server binaries may still be missing.
+- **mvp-host specialists.** 7B code is `impractical` on 16GB. `/code` no longer 503s: skip to an admittable alias or the resident 0.5B. Whisper/Piper/sd-server binaries may still be missing.
 
-## Escape / embed (partially patched on shalom)
+## Escape / embed (partially patched on win-host)
 
-Landed on shalom both trees: C0/C1/ESC/CRLF stripped from route reason/headers/hop notes; route + HANDOFF `suggest` allowlisted; USER fenced so it cannot spoof AVAILABLE/HANDOFF; first `{...}` JSON only; slash ignored inside fences.
+Landed on win-host both trees: C0/C1/ESC/CRLF stripped from route reason/headers/hop notes; route + HANDOFF `suggest` allowlisted; USER fenced so it cannot spoof AVAILABLE/HANDOFF; first `{...}` JSON only; slash ignored inside fences.
 
 Still open:
 
 - JSON completions strip C0/C1/ESC from `message.content` / `delta.content`. Stream tails after HANDOFF peek are parsed and sanitized the same way (no raw SSE byte-forward).
 - Upstream hops allowlist `content-type` / `accept` / `idempotency-key` only.
-- Do not dump raw nexus/model text onto the qodesh `thinking.log` console without stripping ESC.
+- Do not dump raw nexus/model text onto the mvp-host `thinking.log` console without stripping ESC.
 
 ## Serve / ops
 
-- qodesh `:8080` is **degraded** without Qwen3-4B; nexus `:8187` 0.5B CPU-only is the working piece.
-- HTTP `192.168.1.251:8765` must stay bound to LAN (not 127.0.0.1). Duplicate python listeners caused 404/335-byte fake GGUFs.
+- mvp-host `:8080` is **degraded** without Qwen3-4B; nexus `:8187` 0.5B CPU-only is the working piece.
+- HTTP `192.0.2.10:<PORT>` must stay bound to LAN (not 127.0.0.1). Duplicate python listeners caused 404/335-byte fake GGUFs.
 - Grok Bot local-exec on both PCs can drop mid-command; reconnect and continue. Do not Shell two `machineId`s in one parent turn.
-- McAfee on shalom: no Add-Type/P/Invoke; long PowerShell here-strings abort; do not disable RTS.
-- **Note 9 Termux cannot exec `/data/local/tmp`.** SELinux `untrusted_app`. Copy llama pack to `~/grz-runtime`. `/sdcard` is noexec; needs `termux-setup-storage` to read `Download/`.
+- McAfee on win-host: no Add-Type/P/Invoke; long PowerShell here-strings abort; do not disable RTS.
+- **Android-legacy phone Termux cannot exec `/data/local/tmp`.** SELinux `untrusted_app`. Copy llama pack to `~/grz-runtime`. `/sdcard` is noexec; needs `termux-setup-storage` to read `Download/`.
 - **Phone RAM headroom.** 2 GiB floor blocked 0.5B nexus on ~3 GiB free. `headroomBytes()` is 256 MiB when `totalmem < 8 GiB`.
 - CUDA 6.5 installer is **on disk only** (`C:\LocalAI\_tmp\cuda_6.5.19_windows_general_64.exe`, md5 `63575eee9cb5cbf3e84f9c4496060399`). Do not run it on Win11/8600 (driver risk). 224MB VRAM cannot hold 0.5B Q4.
-- **sm11-monitor** (`native/sm11-monitor`): live copy+FNV on 8600 GT. On this VS2013 install the build falls back to **Win32** (`-m32`) when amd64 cross fails — see `build.bat` / issue #13. **N-API addon blocked** on qodesh (Win32 exe vs x64 Node 24; no `vcvars64.bat`; node-gyp needs VS2022 while CUDA 6.5 is VS2013-locked) — keep `--serve` stdin (#17).
+- **sm11-monitor** (`native/sm11-monitor`): live copy+FNV on 8600 GT. On this VS2013 install the build falls back to **Win32** (`-m32`) when amd64 cross fails — see `build.bat` / issue #13. **N-API addon blocked** on mvp-host (Win32 exe vs x64 Node 24; no `vcvars64.bat`; node-gyp needs VS2022 while CUDA 6.5 is VS2013-locked) — keep `--serve` stdin (#17).
 
 ## Known limitations: file drop vs agent switch
 
@@ -41,7 +41,7 @@ Still open:
 - **You do need `/image` (or `/imagine` `/draw`)** for *generating* a picture from text. Dropping an image is look-at-this (vision), not image-gen.
 - **Unicorn is in-repo now:** `GET /unicorn` and `scripts\unicorn.cmd`. Drop accepts any type at any time (not greyed during generate). llama.app may still hide attach unless the selected model looks multimodal — switch `/vision` or `/audio` first there; that is a llama.app limitation.
 - Mixed image+audio in one request goes to nexus (both parts in AVAILABLE) unless `/vision` or `/audio` is explicit. Gateway may still 400 that mix.
-- Historical shalom path `C:\LocalAI\green-unicorn.py` is a launcher that opens `/unicorn`; the UI lives in `web/unicorn.html`.
+- Historical win-host path `C:\LocalAI\green-unicorn.py` is a launcher that opens `/unicorn`; the UI lives in `web/unicorn.html`.
 
 ## Working around routing today
 

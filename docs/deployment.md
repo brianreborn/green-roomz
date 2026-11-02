@@ -114,9 +114,9 @@ manifest (e.g. `qwen2.5-coder-1.5b` instead of the 7B).
 The gateway answers loopback by default. To let **one** other host reach it:
 
 ```bash
-# manifest: "gateway": { "host": "192.168.1.251", "allow_peers": ["192.168.1.88"] }
+# manifest: "gateway": { "host": "192.0.2.10", "allow_peers": ["192.0.2.20"] }
 #   or at launch:
-node bin/green-roomz.mjs serve --host 192.168.1.251 --allow-peer 192.168.1.88
+node bin/green-roomz.mjs serve --host 192.0.2.10 --allow-peer 192.0.2.20
 ```
 
 Every request from a non-loopback address not on `allow_peers` gets **403**.
@@ -149,5 +149,5 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start-green-roomz.ps1
 
 `start-green-roomz.ps1` bounces any existing listener on 8080 and opens a serve
 console window that survives the parent. Model store layouts such as
-`C:\LocalAI` are a Windows/shalom concern — see INSTALL-WINDOWS; they are not
+`C:\LocalAI` are a Windows/win-host concern — see INSTALL-WINDOWS; they are not
 part of the Linux happy path.

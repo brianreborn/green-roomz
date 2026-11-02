@@ -89,7 +89,7 @@ test('credit then hash', () => {
 test('raw bits never appear on a fake envelope', () => {
   const core = createEntropy();
   const secret = 'super-secret-entropy-bits-do-not-ship';
-  const packet = { dst: '10.0.0.1', payload: secret, bytes: [1, 2, 3] };
+  const packet = { dst: '198.51.100.1', payload: secret, bytes: [1, 2, 3] };
 
   const credited = core.credit({
     source: 'voluntary_feed',
@@ -120,7 +120,7 @@ test('raw bits never appear on a fake envelope', () => {
   assert.deepEqual(fake.payload, { source: 'voluntary_feed', credit: 32, hash: credited.payload.hash });
   assertNoRawBits(fake, secret);
   assert.equal(dump(fake).includes(secret), false);
-  assert.equal(dump(fake.payload).includes('10.0.0.1'), false);
+  assert.equal(dump(fake.payload).includes('198.51.100.1'), false);
 
   const workerOnly = core.credit({
     source: 'nic_timestamps',

@@ -246,8 +246,8 @@ test('respond vote/tally/halt/apply branches', () => {
   assert.match(capMiss.reason, /missing capability/);
   const maskMiss = createRespond({ rightsMask: 0, bootId: boot }).lockdown({ ticket: { hi: 0x70, lo: 13 } }, { callerRole: 'respond' });
   assert.match(maskMiss.reason, /missing capability/);
-  const note9 = createRespond({ platform: 'note9', bootId: boot }).secure_reboot({ ticket: { hi: 0x70, lo: 14 } }, { callerRole: 'respond' });
-  assert.match(note9.reason, /missing capability/);
+  const androidLegacy = createRespond({ platform: 'android-legacy', bootId: boot }).secure_reboot({ ticket: { hi: 0x70, lo: 14 } }, { callerRole: 'respond' });
+  assert.match(androidLegacy.reason, /missing capability/);
   const aid = createRespond({ aidRoot: false, bootId: boot }).apply('secure_reboot', { ticket: { hi: 0x70, lo: 15 }, callerRole: 'respond' });
   assert.match(aid.reason, /missing capability/);
   const port8080 = createRespond({ port: 8080 }).reboot({ ticket: { hi: 0x70, lo: 16 } }, { callerRole: 'respond' });
@@ -300,8 +300,8 @@ test('isolate parseBits, encrypt/wipe, aid-root, unmap clear, apply dispatch', (
   assert.equal(cleared.mapped, false);
   const miss = createIsolate({ capabilities: [] }).grant({ bits: ISO_CAP.GRANT }, { callerRole: 'place' });
   assert.match(miss.reason, /missing capability/);
-  const note9 = createIsolate({ platform: 'android' }).map({ bits: ISO_CAP.MAP }, { callerRole: 'place' });
-  assert.match(note9.reason, /missing capability/);
+  const androidLegacy = createIsolate({ platform: 'android' }).map({ bits: ISO_CAP.MAP }, { callerRole: 'place' });
+  assert.match(androidLegacy.reason, /missing capability/);
   const mask = createIsolate({ rightsMask: 0 }).unmap({ bits: ISO_CAP.UNMAP }, { callerRole: 'place' });
   assert.match(mask.reason, /missing capability/);
   const sadLock = iso.grant({ bits: ISO_CAP.LOCKDOWN, subject: 'sad' }, { callerRole: 'place' });

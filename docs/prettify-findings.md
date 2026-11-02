@@ -16,10 +16,10 @@ Parent stack should keep this and apply even if the background worker only does 
 - /router vs "nexus not user-visible"
 - /vision with no image locks a blind specialist
 - session affinity without /auto after /code
-- qodesh tree is old tar, diverges from shalom
+- mvp-host tree is old tar, diverges from win-host
 - stream path still forwards raw SSE (ANSI/OSC)
 
 ## CUDA 6.5 (parallel, not routing)
-- shalom: C:\LocalAI\_tmp\cuda_6.5.19_windows_general_64.exe 1053974928 bytes md5 63575eee9cb5cbf3e84f9c4496060399
-- LAN: http://192.168.1.251:8765/_tmp/cuda_6.5.19_windows_general_64.exe
+- win-host: C:\LocalAI\_tmp\cuda_6.5.19_windows_general_64.exe 1053974928 bytes md5 63575eee9cb5cbf3e84f9c4496060399
+- LAN: http://192.0.2.10:<PORT>/_tmp/cuda_6.5.19_windows_general_64.exe
 - do not install (Win11 + 8600 driver)

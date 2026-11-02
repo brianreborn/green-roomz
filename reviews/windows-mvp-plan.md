@@ -1,6 +1,6 @@
-# Windows MVP plan — Green-Roomz on qodesh
+# Windows MVP plan — Green-Roomz on mvp-host
 
-Date: 2026-09-06 ~08:05 PT. Operator: **Brian**. Target: **qodesh** (Win11, Athlon II, 16 GB RAM, 8600 GT 224 MB display-only / CUDA sm_1.1 — **never load GGUFs there**). Chat stays **CPU llama** (`--device none --n-gpu-layers 0`). Tree: `/workspace/green-roomz`. Live box serve on `:8080`/`:8187` left alone. No git push.
+Date: 2026-09-06 ~08:05 PT. Operator: **Brian**. Target: **mvp-host** (Win11, Athlon II, 16 GB RAM, 8600 GT 224 MB display-only / CUDA sm_1.1 — **never load GGUFs there**). Chat stays **CPU llama** (`--device none --n-gpu-layers 0`). Tree: `/workspace/green-roomz`. Live box serve on `:8080`/`:8187` left alone. No git push.
 
 Goal: feature set that matches **basic** Grok/ChatGPT — multi-turn chat, clear model pick, streaming tokens, stop, simple system/user turns — on minimal hardware.
 
@@ -29,7 +29,7 @@ Goal: feature set that matches **basic** Grok/ChatGPT — multi-turn chat, clear
 | **No first-party web chat UI** | High (feel) | Document OpenAI-compatible curl; `docs/help/index.html` is operator help only, not a chat SPA. Do **not** invent an API-key product. |
 | **No in-app model picker** | Medium | Operator picks alias via `"model": "general-text-speculator"` (or nexus). `/v1/models` is the list. |
 | **No Stop button UI** | Low (API has abort) | Document Ctrl-C / abort; streaming already tears down on client close. |
-| **general-text / code GGUFs missing on qodesh pack** | High (quality) | Fetch tiny Instruct Q4 into `models/`; MVP manifest points general-text there. Code stays cold. |
+| **general-text / code GGUFs missing on mvp-host pack** | High (quality) | Fetch tiny Instruct Q4 into `models/`; MVP manifest points general-text there. Code stays cold. |
 | **Nexus 0.5B is English JSON router, not a chat buddy** | Medium (PF8) | Keep nexus as router only; chat replies come from general-text Instruct. |
 | **No conversation sidebar / regenerate / edit** | Out of scope | Client (curl, Open WebUI, SillyTavern, etc.) can sit on the same API later. |
 | **beta-0.2 installer has no one-click model fetch** | Medium | Add `scripts/fetch-tiny-instruct.cmd`; plan beta-0.4 to call it optionally. |
@@ -49,9 +49,9 @@ Leave OS + browser + gateway + KV headroom. Prefer **≤~1–2B Q4**. **Never** 
 | general-text alt | Official Qwen/Qwen2.5-0.5B-Instruct-GGUF `qwen2.5-0.5b-instruct-q4_k_m.gguf` | ~491 MB | Multilingual | Verified HEAD 302→octet-stream | [official resolve](https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf) |
 | **Optional sprint** | Qwen2.5-1.5B-Instruct Q4_K_M | **~986 MB** | Multilingual | When RAM free (nexus + 1.5B + OS still OK on 16 GB) | [bartowski 1.5B](https://huggingface.co/bartowski/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf) |
 | code | coder 1.5B–7B Q4 | ≥~1 GB | EN code | **Cold** until RAM/UX allows second warm specialist | later |
-| vision / SD / whisper | various | large | — | Out of MVP on qodesh | missing-* placeholders |
+| vision / SD / whisper | various | large | — | Out of MVP on mvp-host | missing-* placeholders |
 
-**RAM sketch (qodesh):** 16 GB total → ~4–6 GB OS+Firefox+Node → nexus 0.5B mmap + KV (~1–2 GB warm) → Instruct 0.5B second specialist (~1–2 GB) leaves headroom. 1.5B Q4 optional when only one specialist warm. **4B+ stays off** this host for MVP.
+**RAM sketch (mvp-host):** 16 GB total → ~4–6 GB OS+Firefox+Node → nexus 0.5B mmap + KV (~1–2 GB warm) → Instruct 0.5B second specialist (~1–2 GB) leaves headroom. 1.5B Q4 optional when only one specialist warm. **4B+ stays off** this host for MVP.
 
 **Verified 2026-09-06 (curl -sI):** bartowski 0.5B Instruct Q4_K_M → HTTP 200, `content-length: 397808192`. Official Qwen 0.5B Q4_K_M and bartowski 1.5B Q4_K_M also resolve.
 
@@ -65,7 +65,7 @@ Current: **beta-0.2** `install-windows.cmd` → `%LOCALAPPDATA%\Green-Roomz`, St
 
 - Same LocalAppData + Start Menu + uninstall footprint.
 - Same CPU llama b10702 fetch (fail closed).
-- Manifest default for qodesh MVP: `config/agents.windows-mvp.json` (or flag), still `${GRZ_ROOT}` / CPU profiles.
+- Manifest default for mvp-host MVP: `config/agents.windows-mvp.json` (or flag), still `${GRZ_ROOT}` / CPU profiles.
 - **Never** copy LocalAI vulkan paths; **never** load GGUFs on 8600 GT.
 
 **Add for one-click tiny instruct:**

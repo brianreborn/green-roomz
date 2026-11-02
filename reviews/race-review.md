@@ -5,7 +5,7 @@ Scope: stability, races, liveness only. No exploit / PoC. Trust-boundary review 
 
 Policy held: `lockdown` / `reboot` / `secure_reboot` stay uncallable stubs. 8080 mask is `CAP.POST|OBSERVE|SNAPSHOT` only (`src/gateway.mjs:32-33`). No race found that makes reboot-class callable from 8080.
 
-Intended 4-thread resident default is **not** a machine cap on Cursor/Note9 (see RACE-L3).
+Intended 4-thread resident default is **not** a machine cap on Cursor/Android-legacy phone (see RACE-L3).
 
 ---
 

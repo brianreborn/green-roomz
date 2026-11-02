@@ -1,11 +1,23 @@
-# qodesh-maintenance.ps1
-# Proactive health-check for the qodesh Windows LocalAI stack.
+# mvp-maintenance.ps1
+# Proactive health-check for the mvp-host Windows LocalAI stack.
 # Fully non-interactive. Run as Administrator.
 
 function Write-Info   { param($m) Write-Host ("[INFO]  " + $m) -ForegroundColor Cyan   }
 function Write-Ok     { param($m) Write-Host ("[OK]    " + $m) -ForegroundColor Green  }
 function Write-Warn   { param($m) Write-Host ("[WARN]  " + $m) -ForegroundColor Yellow }
 function Write-ErrorM { param($m) Write-Host ("[ERROR] " + $m) -ForegroundColor Red    }
+function Get-GrzSetting {
+    # Env var first, then the gitignored private override (KEY=VALUE lines), then default.
+    param([string]$Name, [string]$Default = '', [string]$File = (Join-Path $PSScriptRoot 'local.env'))
+    $v = [Environment]::GetEnvironmentVariable($Name)
+    if ($v) { return $v }
+    if ($File -and (Test-Path -LiteralPath $File)) {
+        foreach ($line in Get-Content -LiteralPath $File) {
+            if ($line -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$' -and $Matches[1] -eq $Name) { return $Matches[2] }
+        }
+    }
+    return $Default
+}
 
 # 1 - Kill stray llama-server
 Write-Info "Stopping stray llama-server..."
@@ -79,7 +91,7 @@ if (Test-Path -LiteralPath $benchPath) {
 }
 
 # 7 - Scheduled task (hourly)
-$taskName = "QodeshMaintenance"
+$taskName = Get-GrzSetting -Name 'GRZ_MAINTENANCE_TASK' -Default 'GrzMvpMaintenance'
 $thisScript = $MyInvocation.MyCommand.Path
 Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue |
     Unregister-ScheduledTask -Confirm:$false -ErrorAction SilentlyContinue
@@ -90,7 +102,7 @@ $trigger   = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
 $principal = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\SYSTEM" `
     -LogonType ServiceAccount -RunLevel Highest
 Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger `
-    -Principal $principal -Description "Hourly qodesh health-check" `
+    -Principal $principal -Description "Hourly mvp-host health-check" `
     -ErrorAction SilentlyContinue | Out-Null
 Write-Ok ("Task " + $taskName + " installed.")
 Write-Info "Maintenance complete."

@@ -73,7 +73,7 @@ self-signed cert.
 If Node is missing, the installer prints the official LTS MSI URL and exits 1.
 It does not download Node. Install yourself, open a **new** cmd window, retry.
 
-qodesh 8600 GT is display-only (224 MB, sm_1.1). Manifest stays
+mvp-host 8600 GT is display-only (224 MB, sm_1.1). Manifest stays
 `--device none --n-gpu-layers 0`. Do not install CUDA 6.5. Do not fetch
 vulkan/cuda llama zips.
 
@@ -100,7 +100,7 @@ That copies the ELF into `$HOME` and serves. Do not `su`. Host forward:
 adb forward tcp:18080 tcp:8080
 ```
 
-See [`../note9-termux.md`](../note9-termux.md).
+See [`../android-legacy-termux.md`](../android-legacy-termux.md).
 
 ## FreeBSD / other Unix
 

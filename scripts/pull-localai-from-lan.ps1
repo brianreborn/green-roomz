@@ -1,11 +1,25 @@
-﻿# Run this ON the Compaq (or any LAN box). Pulls useful LocalAI artifacts from shalom.
-# Skip USB. Requires: both on Spectrum, shalom sharing C:\LocalAI (read), network Private.
+﻿# Run this ON a LAN box. Pulls useful LocalAI artifacts from the source host's LocalAI share.
+# Skip USB. Requires: both on the same private LAN, source host sharing C:\LocalAI (read), network Private.
+# Source shares come from GRZ_LOCALAI_SOURCES (semicolon-separated UNC paths), set in the
+# environment or in the gitignored config/local.env (see config/local.env.example).
 # Re-run is safe (robocopy /XO /Z).
 
 $ErrorActionPreference = 'Stop'
+function Get-GrzSetting {
+    # Env var first, then the gitignored private override (KEY=VALUE lines), then default.
+    param([string]$Name, [string]$Default = '', [string]$File = (Join-Path (Split-Path -Parent $PSScriptRoot) 'config\local.env'))
+    $v = [Environment]::GetEnvironmentVariable($Name)
+    if ($v) { return $v }
+    if ($File -and (Test-Path -LiteralPath $File)) {
+        foreach ($line in Get-Content -LiteralPath $File) {
+            if ($line -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$' -and $Matches[1] -eq $Name) { return $Matches[2] }
+        }
+    }
+    return $Default
+}
 $SrcRoot = 'C:\LocalAI'
-if ($env:SHALOM_LOCALAI) { $SrcRoot = $env:SHALOM_LOCALAI }
-$Hosts = @('\\192.168.1.251\LocalAI', '\\shalom\LocalAI')
+$Hosts = @((Get-GrzSetting -Name 'GRZ_LOCALAI_SOURCES') -split ';' | Where-Object { $_ })
+if (-not $Hosts) { throw 'Set GRZ_LOCALAI_SOURCES (env or config/local.env), e.g. \\<HOST>\LocalAI;\\192.0.2.10\LocalAI' }
 $Dst = 'C:\LocalAI'
 if ($env:LOCALAI_DST) { $Dst = $env:LOCALAI_DST }
 
@@ -15,9 +29,9 @@ foreach ($candidate in $Hosts) {
 }
 if (-not $Src) {
     throw @"
-Cannot see shalom's LocalAI share.
-On shalom: set Wi-Fi (SpectrumSetup-A40D) to Private, then share C:\LocalAI read-only as 'LocalAI'.
-Then from this PC: ping 192.168.1.251
+Cannot see the source host's LocalAI share (tried: $($Hosts -join ', ')).
+On the source host: set its Wi-Fi network profile to Private, then share C:\LocalAI read-only as 'LocalAI'.
+Then from this PC: ping <HOST>
 "@
 }
 

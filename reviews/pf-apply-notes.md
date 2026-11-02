@@ -17,9 +17,9 @@ Sources: `/workspace/reviews/platform-fixes.md`, `/workspace/reviews/integrate-r
 |---|---|
 | **PF1** | `data/serve.pid` + `data/children.json` from ProcessManager; CLI `stop` reads pidfile (exit 1 if missing — never empty `stopAll` claim); pack `stop.sh`/`stop.cmd` copied into git root; reap ports **8080 + 8181–8187**; no POST `/stop`; no `xargs -r`; no `taskkill /IM llama-server.exe`; `sleep 1`. |
 | **PF2** | `expandEnvironment` allowlist `GRZ_ROOT`/`GRZ_EXE`/`HOME`/`GRZ_LLAMA` + `Object.hasOwn`; case-sensitive (`${grz_root}` untouched); `%VAR%` documented-rejected (left literal); `withDefaultGrzEnv` defaults `GRZ_ROOT` to package root via `import.meta.url`; fail-closed empty/unresolved/collapsed `/runtime/llama-server` command; path normalize after expand; resolve `runtime.command`/`env`. |
-| **PF3** | `DEFAULT_MANIFEST` → `agents.cursor.json`; package `start` passes that manifest; git cursor json rewritten to `${GRZ_ROOT}`/`${GRZ_LLAMA}` (no `/workspace/green-roomz` in raw file); `cursor-*.sh` + `start-green-roomz.ps1` portable (`PSScriptRoot` / PATH node). `agents.windows.json` remains shalom overlay only. |
+| **PF3** | `DEFAULT_MANIFEST` → `agents.cursor.json`; package `start` passes that manifest; git cursor json rewritten to `${GRZ_ROOT}`/`${GRZ_LLAMA}` (no `/workspace/green-roomz` in raw file); `cursor-*.sh` + `start-green-roomz.ps1` portable (`PSScriptRoot` / PATH node). `agents.windows.json` remains win-host overlay only. |
 | **PF4** | `start.sh`: OS detect **before** chmod; refuse Linux ELF on BSD/Darwin; set `GRZ_LLAMA` to PATH llama when needed; merge `LD_LIBRARY_PATH`/`DYLD_*` (prepend, keep `/usr/local/lib`); `buildLaunch` merges loader paths; spawn `{ cwd: packRoot, windowsHide, shell:false }`; serve log under packRoot/`data`. |
-| **PF5** | `agents.note9.json` / `agents.android.json`: command + resident model under `${HOME}/grz-runtime`; missing specialists under `${HOME}/grz-runtime/missing/`; `termux-start.sh` + `note9-termux-setup.sh` pidfile/port wait (no `pkill -f`); wrap shebang `#!/usr/bin/env bash`; `note9-run-llama-server.termux.sh` no longer execs `/data/local/tmp`; `benchmark.mjs` does not treat wrap script as `llama-bench`. |
+| **PF5** | `agents.android-termux.json` / `agents.android.json`: command + resident model under `${HOME}/grz-runtime`; missing specialists under `${HOME}/grz-runtime/missing/`; `termux-start.sh` + `termux-setup.sh` pidfile/port wait (no `pkill -f`); wrap shebang `#!/usr/bin/env bash`; `termux-run-llama-server.sh` no longer execs `/data/local/tmp`; `benchmark.mjs` does not treat wrap script as `llama-bench`. |
 | **PF6** | `start.cmd`: removed `C:\LocalAI` vulkan fallback; `chcp 65001`; curl fail → `exit /b 1`. `install-windows.cmd`: curl/expand/node-not-on-PATH fail closed; robocopy `/XF llama-server *.so`. `uninstall-windows.cmd`: stop then wait for exe unlock. |
 | **PF7** | `SIGHUP` → same drain as `SIGTERM` (POSIX). Default no SIGSTOP. `waitForPortsFree` uses TCP connect; timeout ⇒ still occupied (`false`). |
 | **PF8** | Cursor/pack: 0.5B only on `tool-router-agent` with `languages: ['en']`; code/general-text point at `missing-qwen-instruct.gguf`. Narrowed `policies/general-text.md` translate line; BOM strip in `loadManifest`; `nfcPath` on Darwin; bidi U+2066–U+2069 in strip helpers; `headerSafe` UTF-8 byte cap; `start.cmd` `chcp 65001`. Recompiled `build/prompts/` from windows manifest after policy edit. |
@@ -55,7 +55,7 @@ Also: `node bin/green-roomz.mjs validate --manifest config/agents.cursor.json` �
 
 ## Pack copies
 
-Launcher fixes also synced into `/workspace/e2e-fresh/green-roomz/` (and cursor/note9/android configs where applicable) so the unzipped pack matches git.
+Launcher fixes also synced into `/workspace/e2e-fresh/green-roomz/` (and cursor/android-legacy/android configs where applicable) so the unzipped pack matches git.
 
 ## Live ports after apply (PT)
 
@@ -64,7 +64,7 @@ Launcher fixes also synced into `/workspace/e2e-fresh/green-roomz/` (and cursor/
 
 ## Not done / out of scope
 
-- FreeBSD/Darwin/qodesh/Note9 hardware proof on this Linux box
+- FreeBSD/Darwin/mvp-host/Android-legacy phone hardware proof on this Linux box
 - Shipping Windows `llama-server.exe` in slim zip
 - API-key product (F-B1 P2)
 - Homoglyph decoder / translation-agent

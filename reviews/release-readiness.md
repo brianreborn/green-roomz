@@ -17,16 +17,16 @@
 | PF1–PF9 | **GREEN** | `efa7e2b`; live bounce optional / not required for pack |
 | RF4 race residuals | **GREEN (tree+disk)** | `4b5e6ad`; e2e-fresh synced on disk; live node still pre-RF4 until bounce |
 | Windows MVP | **GREEN** | `d7843bd` + docs/launchers |
-| Stream SSE fix | **GREEN** | `a6be0f9`; box e2e + qodesh case E PASS |
+| Stream SSE fix | **GREEN** | `a6be0f9`; box e2e + mvp-host case E PASS |
 | Athlon threads=1 | **GREEN** | `0cebc78` |
 | Locked parity battery | **GREEN** | `ff5f284`; in beta-0.5.1-slim + 0.5.2-slim |
-| qodesh MVP parity A–G | **GREEN** | 7/7 PASS reverify (`qodesh-mvp-parity-battery.md`) |
+| mvp-host MVP parity A–G | **GREEN** | 7/7 PASS reverify (`mvp-host-parity-battery.md`) |
 | Pack beta-0.5-slim | **STALE vs HEAD** | Built ~00:12 UTC Sep 7 **before** RF4 / locked launcher |
 | Pack beta-0.5.1-slim | **BUILT** | `/workspace/green-roomz-beta-0.5.1-slim.zip` 25.03 MiB; RF4+locked |
 | Pack beta-0.5.2-slim | **BUILT** | `/workspace/green-roomz-beta-0.5.2-slim.zip` 26241466 bytes (25.03 MiB); md5 `c89c25fdc8bbbfa9e7639c8a69b7abd1`; sha256 `e2b9c6016a0e5153a03e3f400c546b5d35ed544399f64cedad37bc35377cd11f` |
 | Docs (INSTALL / WINDOWS-MVP / SMOKE) | **GREEN enough** | Present in tree + 0.5.x packs |
 | Push to GitHub | **BLOCKED** | electrobrian pull-only; need **brianreborn PAT** (blocks push only) |
-| Release DONE | **YES** | 2026-09-06 ~18:33 PT — full suite green + beta-0.5.2-slim built; residuals honest (no push; live pre-bounce; Note9 optional) |
+| Release DONE | **YES** | 2026-09-06 ~18:33 PT — full suite green + beta-0.5.2-slim built; residuals honest (no push; live pre-bounce; Android-legacy phone optional) |
 
 ---
 
@@ -45,7 +45,7 @@
   - Cancelled (unchanged; stability parent open-handles): 6 in `stability.test.mjs`
   - Skip: `gateway` real audio whisper round-trip (whisper-server/model/fixture missing)
 - [x] Box live :8080 stream e2e PASS
-- [x] qodesh MVP parity 7/7 PASS
+- [x] mvp-host MVP parity 7/7 PASS
 
 ### P0 / PF / RF4
 - [x] P0 integrate
@@ -58,7 +58,7 @@
 - [x] WINDOWS-MVP + threads=1 manifest
 - [x] Parity battery A-G
 - [x] Locked launcher (ff5f284)
-- [x] qodesh reverify PASS
+- [x] mvp-host reverify PASS
 - [ ] Optional effective-alias assert in runner — **deferred** (out of scope for this cut)
 
 ### Packs
@@ -84,8 +84,8 @@
 | Homoglyphs / API-key | Out of scope | Do not fold |
 | Fuzz HEAD /health 200 | Locked intentional | See p0-residual-notes.md |
 | missing-qwen-instruct.gguf | Known gap | Placeholder for code/text |
-| qodesh local-tool double-spawn | Ops | Prefer locked battery |
-| Note9 Android peer | Non-blocking | Optional when ADB appears; do not block release |
+| mvp-host local-tool double-spawn | Ops | Prefer locked battery |
+| Android-legacy phone Android peer | Non-blocking | Optional when ADB appears; do not block release |
 
 ---
 
@@ -98,7 +98,7 @@ ff5f284  locked parity battery launcher
 0cebc78  Athlon threads=1 + bounce helpers
 a6be0f9  stream:true SSE on resident_fallback
 40e870a  MVP parity battery A-G
-d7843bd  Windows MVP (qodesh)
+d7843bd  Windows MVP (mvp-host)
 efa7e2b  PF1-PF9
 16fc8f7  P0 security integrate
 ```
@@ -137,10 +137,10 @@ Checklist green (or deferred with reason) + beta-0.5.2-slim built + honest resid
 
 ---
 
-## Android peer (Note 9) — non-blocking
-FYI 2026-09-06 ~18:25 PT via Researcher/operator: Galaxy Note 9 coming online ASAP as first Android peer.
-Path when ADB appears (often via shalom): stock/unrooted only — Termux/HOME, sidecar :8199 via adb reverse; no Knox trip; no secure_reboot/wipe/map.
-**Do not block release readiness on Note9.** Harmless deploy/smoke only if cheap (`deploy-android.sh`, `config/agents.note9.json`, Termux scripts already in tree/beta). Primary track remains beta packs + RF4 e2e-fresh sync.
+## Android peer (Android-legacy phone) — non-blocking
+FYI 2026-09-06 ~18:25 PT via Researcher/operator: legacy Android phone coming online ASAP as first Android peer.
+Path when ADB appears (often via win-host): stock/unrooted only — Termux/HOME, sidecar :8199 via adb reverse; no Knox trip; no secure_reboot/wipe/map.
+**Do not block release readiness on Android-legacy phone.** Harmless deploy/smoke only if cheap (`deploy-android.sh`, `config/agents.android-termux.json`, Termux scripts already in tree/beta). Primary track remains beta packs + RF4 e2e-fresh sync.
 
 ---
 
@@ -204,7 +204,7 @@ Path when ADB appears (often via shalom): stock/unrooted only — Termux/HOME, s
 ### DONE — honest residuals
 - **No git push** — PAT blocked for push only (electrobrian pull-only; need brianreborn PAT)
 - **Live pre-bounce** — :8080/:8187 still pre-RF4 in-memory (PIDs 2348422 / 2348463); e2e-fresh disk synced; bounce only on ask
-- **Note9 optional / non-blocking** — Android peer FYI; do not block ship
+- **Android-legacy phone optional / non-blocking** — Android peer FYI; do not block ship
 - **health degraded expected** — missing vision/whisper/embed/rerank/guard/piper/sd models
 - **6 cancelled** stability tests (parent open-handles) — unchanged, not failures
 - **effective-alias assert** — deferred out of scope
@@ -220,16 +220,16 @@ Operator: fill all missing models for all platforms (slow OK). Never GGUF on 860
 
 - Size table (HEAD-verified): `/workspace/reviews/models-install-size-by-platform.md`
 - Fetch plan: `/workspace/reviews/missing-models-plan.md`
-- qodesh LocalAI rerank file is **15 bytes (corrupt)** — must re-fetch (~639150304)
+- mvp-host LocalAI rerank file is **15 bytes (corrupt)** — must re-fetch (~639150304)
 - Cursor e2e-fresh still nexus-only; Instruct 397808192 not on box yet
 - Release DONE pack (`beta-0.5.2-slim`) unchanged; this is a **post-DONE capability fill** track
 
 
 ---
 
-## Note9 ops policy (operator, 2026-09-06 ~11:35 PM PT)
+## Android-legacy phone ops policy (operator, 2026-09-06 ~11:35 PM PT)
 
-- Plug **USB into qodesh** with **Wi-Fi OFF** (local-only).
+- Plug **USB into mvp-host** with **Wi-Fi OFF** (local-only).
 - Prefer **USB ADB** over wireless.
 - After device appears, optional enforce: `adb shell svc wifi disable` (leave airplane/Wi-Fi off).
 - **No Knox**, no root wipe / secure_reboot / map abuse.
@@ -247,8 +247,8 @@ Operator ~89% usage — **stop heavy loops**. No new long fetches/sprints until 
 - Live `/health` still lists instruct missing until **PF bounce** (not done)
 - Size board: `/workspace/reviews/models-install-size-by-platform.md`
 - Fetch plan: `/workspace/reviews/missing-models-plan.md`
-- Note9 USB/qodesh Wi-Fi-off policy on docs + boards; local git commit blocked (no author identity)
-- qodesh rerank LocalAI was **15 B corrupt**; replacement may be incomplete
+- Android-legacy phone USB/mvp-host Wi-Fi-off policy on docs + boards; local git commit blocked (no author identity)
+- mvp-host rerank LocalAI was **15 B corrupt**; replacement may be incomplete
 - Partial left on disk: `models/ggml-small.bin.partial` (incomplete whisper — delete or resume later)
 - Remaining gaps: vision, whisper-server+bin, embed, rerank, guard, piper+voice, sd-server+sd
 

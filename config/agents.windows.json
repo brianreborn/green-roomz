@@ -41,7 +41,7 @@
     "runtimes":  {
                      "llama_server":  {
                                           "kind":  "llama-server",
-                                          "command":  "C:\\Users\\brian\\Documents\\green-roomz\\runtime\\llama-b10702-bin-win-cpu-x64\\llama-server.exe",
+                                          "command":  "${GRZ_ROOT}\\runtime\\llama-b10702-bin-win-cpu-x64\\llama-server.exe",
                                           "base_args":  [
                                                             "--host",
                                                             "127.0.0.1",

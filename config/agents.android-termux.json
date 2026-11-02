@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "manifest_version": "0.1.0-note9-arm64",
+  "manifest_version": "0.1.0-android-legacy-arm64",
   "product": "Green-Roomz",
   "gateway": {
     "host": "127.0.0.1",
@@ -166,7 +166,7 @@
     },
     {
       "alias": "general-text-speculator",
-      "description": "General chat/writing on CPU - Qwen2.5-0.5B-Instruct Q4_K_M (Note9)",
+      "description": "General chat/writing on CPU - Qwen2.5-0.5B-Instruct Q4_K_M (Android-legacy phone)",
       "runtime": "llama_server",
       "port": 8184,
       "native_capabilities": [
@@ -210,7 +210,7 @@
           "file": "Qwen2.5-0.5B-Instruct-Q4_K_M.gguf",
           "url": "https://huggingface.co/bartowski/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf",
           "approx_bytes": 397808192,
-          "notes": "CPU only. Place under ${HOME}/grz-runtime/models/ for Note9 termux runtime."
+          "notes": "CPU only. Place under ${HOME}/grz-runtime/models/ for Android-legacy phone termux runtime."
         }
       }
     },

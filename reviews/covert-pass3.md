@@ -81,7 +81,7 @@ Still open vs pass1/pass2; refinement parked them P1. Do not treat as this-cut s
 | F-B21 / F18 | error `details` / health paths | HTTP client |
 | F3 / F8 | `cache_prompt` + other slot fields forwarded | llama-server same alias |
 | F2 | unpadded nested mailbox payload; occupancy on `/health` | HTTP client |
-| F6 | `--poll 0` cursor-only | co-resident on android/windows/note9 |
+| F6 | `--poll 0` cursor-only | co-resident on android/windows/android-legacy |
 | F7/F9/F10 | image/WAV/whisper unsanitized stores | HTTP client |
 | F-B13 | `logger.read` omit role | in-process |
 
@@ -89,7 +89,7 @@ Still open vs pass1/pass2; refinement parked them P1. Do not treat as this-cut s
 
 ## P2 (demoted)
 
-`/metrics` PIDs/RAM (CC-7), council `ms` (CC-12), route headers (CC-14), proxied `usage` (CC-16), `serve.log` tok/s (CC-21), bench tps (CC-24), android/note9 warm cap. API-key product demoted: loopback remains v1 trust boundary.
+`/metrics` PIDs/RAM (CC-7), council `ms` (CC-12), route headers (CC-14), proxied `usage` (CC-16), `serve.log` tok/s (CC-21), bench tps (CC-24), android/android-legacy warm cap. API-key product demoted: loopback remains v1 trust boundary.
 
 ---
 

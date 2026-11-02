@@ -46,11 +46,11 @@ test('e006 huge key not allowlisted stays literal', () => {
 
 test('e007 object tree expands allowlisted only', () => {
   const out = expandEnvironment({ a: '${GRZ_ROOT}/m', b: '${PATH}/x', c: ['${HOME}/z'] }, {
-    GRZ_ROOT: '/root', HOME: '/home', PATH: '/bin',
+    GRZ_ROOT: '/root', HOME: '/srv/h', PATH: '/bin',
   });
   assert.equal(out.a, '/root/m');
   assert.equal(out.b, '${PATH}/x');
-  assert.equal(out.c[0], '/home/z');
+  assert.equal(out.c[0], '/srv/h/z');
 });
 
 test('e008 unclosed brace left alone', () => {
@@ -106,9 +106,9 @@ test('headerSafe caps by utf8 bytes', () => {
   assert.ok(Buffer.byteLength(out, 'utf8') <= 10);
 });
 
-test('note9 after expand has no /data/local/tmp for command or resident model', async () => {
+test('android-legacy after expand has no /data/local/tmp for command or resident model', async () => {
   const env = withDefaultGrzEnv({ HOME: '/data/data/com.termux/files/home' });
-  const manifest = await loadManifest(new URL('../config/agents.note9.json', import.meta.url), env);
+  const manifest = await loadManifest(new URL('../config/agents.android-termux.json', import.meta.url), env);
   const cmd = manifest.runtimes.llama_server.command;
   const nexus = manifest.agents.find((a) => a.alias === 'tool-router-agent');
   assert.ok(!cmd.includes('/data/local/tmp'));
@@ -117,9 +117,9 @@ test('note9 after expand has no /data/local/tmp for command or resident model', 
   assert.deepEqual(nexus.languages, ['en']);
 });
 
-test('PF-M8 empty HOME must not collapse note9 command to /grz-runtime (fail closed)', async () => {
+test('PF-M8 empty HOME must not collapse android-legacy command to /grz-runtime (fail closed)', async () => {
   await assert.rejects(
-    () => loadManifest(new URL('../config/agents.note9.json', import.meta.url), {
+    () => loadManifest(new URL('../config/agents.android-termux.json', import.meta.url), {
       HOME: '',
       GRZ_ROOT: '/nonexistent/grz-root',
       GRZ_EXE: '',
@@ -138,7 +138,7 @@ test('PF-M8 empty HOME must not collapse note9 command to /grz-runtime (fail clo
 test('PF-M8 unset HOME key inherits process.env; explicit empty still fail-closed', async () => {
   const out = expandEnvironment('${HOME}/grz-runtime/run-llama-server.sh', { HOME: '' });
   assert.equal(out, '/grz-runtime/run-llama-server.sh');
-  // withDefaultGrzEnv copies process HOME only when key absent — note9 with real HOME still loads
+  // withDefaultGrzEnv copies process HOME only when key absent — android-legacy with real HOME still loads
   if (process.env.HOME) {
     const env = withDefaultGrzEnv({ GRZ_ROOT: '/nonexistent/grz-root' });
     assert.equal(env.HOME, process.env.HOME);

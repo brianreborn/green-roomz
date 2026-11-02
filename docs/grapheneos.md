@@ -12,4 +12,4 @@ Full matrix: `/workspace/reviews/grapheneos-platform-matrix.md`.
 
 **GOS-P7:** `deploy-android.sh` pushes `green-roomz-models.lock.json` (+ optional slim `.torrent` / note) into `/data/local/tmp/grz` beside models for Termux verify after copy.
 
-Stock Note9 Termux path: `docs/note9-termux.md`.
+Stock Android-legacy phone Termux path: `docs/android-legacy-termux.md`.

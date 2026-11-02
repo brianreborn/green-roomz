@@ -1,6 +1,6 @@
 # Green-Roomz Windows MVP console chat — multi-turn, model pick, streaming, Ctrl-C stop.
 # CPU gateway on localhost only. No API key. Never loads GGUFs on 8600 GT.
-# Operator: Brian. Host: qodesh.
+# Operator: Brian. Host: mvp-host.
 
 param(
   [string]$BaseUrl = "http://127.0.0.1:8080",

@@ -1,6 +1,6 @@
-# Local CI loop for qodesh green-roomz. Totally offline. Append-only log.
+# Local CI loop for mvp-host green-roomz. Totally offline. Append-only log.
 $ErrorActionPreference = 'Continue'
-$Root = 'C:\Users\brian\Documents\green-roomz'
+$Root = Split-Path -Parent $PSScriptRoot
 $Node = 'C:\Program Files\nodejs\node.exe'
 $Log = Join-Path $Root 'data\local-ci.log'
 $IntervalSec = 900

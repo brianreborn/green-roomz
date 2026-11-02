@@ -1,8 +1,8 @@
-# GPU prep — qodesh (2026-09-14)
+# GPU prep — mvp-host (2026-09-14)
 
 Prepare only. Did **not** bounce serve, run the CUDA 6.5 installer, enable PnP devices, or switch the live manifest to `Vulkan0`.
 
-Hostname **qodesh**. Live `:8080` did not answer this pass (`serve.pid` 15372 has no process).
+Hostname **mvp-host**. Live `:8080` did not answer this pass (`serve.pid` 15372 has no process).
 
 ## Operator plan (this turn)
 
@@ -47,7 +47,7 @@ I will re-run observe-only:
 
 Then, only if 8600 is OK:
 
-5. Copy CUDA 6.5 from shalom LAN and **hash** (`md5 63575eee9cb5cbf3e84f9c4496060399`) — do not run until you say so.
+5. Copy CUDA 6.5 from win-host LAN and **hash** (`md5 63575eee9cb5cbf3e84f9c4496060399`) — do not run until you say so.
 6. VS2013 `cl` + CUDA 6.5 `nvcc` for sm_1.1. Not VS2022-as-fake.
 7. Custom sm_1.1 binary; first probe `--n-gpu-layers 1` on 0.5B.
 

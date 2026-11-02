@@ -32,7 +32,7 @@ Fuzz leftover :8184 is not a zombie; it is a SIGSTOP specialist that still owns 
 | **PLAT-I1** | Keep critical. Not exercised on this Linux box (pack ELF matches). Code path unchanged.
 | **PLAT-P1** | Keep high. This serve has GRZ_ROOT set (health missing-* paths are pack-absolute). Empty expansion is the no-launcher path.
 | **PLAT-P2** | Keep high. Pack cursor json is portable; git is not. Default loadManifest still windows.json.
-| **PLAT-P3** | Keep high. Not live here (no adb). note9 model path still tmp.
+| **PLAT-P3** | Keep high. Not live here (no adb). android-legacy model path still tmp.
 | **PLAT-S2** | Keep high. Linux half live-confirmed (narrow ports). Windows image-kill not run here.
 | **PLAT-I2** | Keep high. Installer vs start.cmd disagreement is pack-only; git start-green-roomz.ps1 is a third Windows story.
 | **PLAT-I3** | Keep high. package.json start script still bare serve.
@@ -70,7 +70,7 @@ Fuzz leftover :8184 is not a zombie; it is a SIGSTOP specialist that still owns 
 - **RF4 vs LIVE-SUSPEND:** if waitForPortsFree is only called for terminated victims, suspended aliases keep the port forever. Integrate: either no SIGSTOP of llama-server, or waitForPortsFree also on resume/restart of that alias.
 - **PF1 stop vs live serve:** do not run pack stop.sh on this box during integrate; it would kill the e2e gateway and miss :8184.
 - **Git vs pack cursor json:** packing must keep rewriting git absolute paths until P2 lands in git. Integrate against git tree; copy launchers from pack.
-- **agents.windows.json:** shalom overlay. CPU installer must not start using it.
+- **agents.windows.json:** win-host overlay. CPU installer must not start using it.
 
 ---
 
@@ -83,7 +83,7 @@ Pass-1 holds. New live fact: suspended general-text still owns :8184. Fix pack n
 
 - **beta-0.2-wip** exists at `/workspace/releases/beta-0.2-wip/`: INSTALL-WINDOWS.md, SMOKE-WINDOWS.md, install-windows.cmd, uninstall-windows.cmd only (no zip). Pack e2e-fresh already has the same four plus start/stop. Treat wip as the docs source of truth for PF6.
 - **Boundary B14-B17** is the same expandEnvironment empty-key / resolveManifestPath / echoed paths. Platform owns fail-closed loadManifest (PF2). Boundary owns HTTP echoing expanded paths. Fuzz e001-e010 is the test corpus to promote into `test/` (none exist today for expandEnvironment; `test/native-paths.test.mjs` is Win drive/UNC only).
-- **git note9-termux-setup.sh** sed-rewrites the tmp GGUF path; pack `termux-start.sh` does not (PLAT-P3). git `note9-run-llama-server.termux.sh` still execs `/data/local/tmp/grz/bin/llama-server`.
+- **git termux-setup.sh** sed-rewrites the tmp GGUF path; pack `termux-start.sh` does not (PLAT-P3). git `termux-run-llama-server.sh` still execs `/data/local/tmp/grz/bin/llama-server`.
 - **P20** `src/benchmark.mjs:118` rename llama-server -> llama-bench does not match the Termux wrap `run-llama-server.sh`. Fold into PF5.
 - **stop.sh** GNU `xargs -r` and `sleep 0.5` (OpenBSD sleep is integer). Fold into PF1/PF4.
 - **Pack ENOENT:** `node bin/green-roomz.mjs serve` without --manifest looks for agents.windows.json which the pack does not ship. Strengthens PLAT-P2/I3.

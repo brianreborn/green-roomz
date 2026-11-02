@@ -1,7 +1,7 @@
-# Windows MVP aliases (qodesh)
+# Windows MVP aliases (mvp-host)
 
 Companion to `config/agents.windows-mvp.json` and pack-root `WINDOWS-MVP.md`.
-Does **not** replace `agents.cursor.json` (Linux box) or `agents.windows.json` (shalom overlay).
+Does **not** replace `agents.cursor.json` (Linux box) or `agents.windows.json` (win-host overlay).
 
 ## Recommended aliases
 
