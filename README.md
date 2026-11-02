@@ -91,7 +91,7 @@ Mermaid diagrams of `host/cursor` (`8f6f1e1`), rendered by GitHub. Existing oper
 flowchart TB
   client["OpenAI-compatible clients<br/>Hermes desktop (frontend only), llama-ui, curl"]
   subgraph gw["Node gateway: bin/green-roomz.mjs serve (local gateway)"]
-    auth["auth + peer check<br/>(public bind needs API key)"]
+    auth["auth + peer check<br/>(non-loopback bind needs<br/>API key or gateway.allow_peers)"]
     routing["src/routing.mjs<br/>hard rules, pins, auto family"]
     lrouter["src/logical-router.mjs<br/>planRoute()"]
     nexus["src/nexus.mjs<br/>consult resident nexus"]
@@ -119,7 +119,7 @@ flowchart TB
 ```mermaid
 flowchart TD
   req["POST /v1/chat/completions<br/>model = ?"] --> m{"model field"}
-  m -->|"empty, auto, default, green-roomz,<br/>gpt-*, o1/o3/o4*, claude-*"| auto["auto: route"]
+  m -->|"empty, auto, default, green-roomz,<br/>green-roomz-auto, gpt-*, o1/o3/o4*, claude-*"| auto["auto: route"]
   m -->|"known pinnable alias"| pin["pinned alias"]
   m -->|"internal or deny-by-type agent<br/>(monitor, guardian, pentest, defender)"| auto
   m -->|"unknown alias"| e400["400, 'allowed' lists<br/>only pinnable agents"]
@@ -138,29 +138,40 @@ flowchart TD
   plan -.->|"router down: fallback header"| gen
 ```
 
-A registered agent alias always wins over an auto-family match. Every hop is published to the mailbox, and responses carry `x-green-roomz-requested-alias` and `x-green-roomz-effective-alias`.
+A registered agent alias always wins over an auto-family match. Once an agent is chosen, the request takes an admission slot (`PolicyGate.acquire`: FIFO, `maxHeavyInFlight` per policy), then `ensure()` cold-starts the backend if needed, `pin()` holds it, the request is proxied, and `unpin` / `release` run in that order. Every hop is published to the mailbox, and responses carry `x-green-roomz-requested-alias` and `x-green-roomz-effective-alias`.
 
 ### Backend lifecycle (`src/process-manager.mjs`)
 
 ```mermaid
 stateDiagram-v2
   [*] --> cold
-  cold --> starting: first request (cold start)
-  starting --> ready: GET /health ok
-  starting --> cold: start failed / child exited
-  ready --> suspended: idle, no refs (SIGSTOP)
-  suspended --> starting: resume (SIGCONT), recheck /health
-  suspended --> cold: resume health failed
-  ready --> stopping: idle evict / max warm specialists / shutdown
-  stopping --> exited: SIGTERM, SIGKILL after 3 s
-  exited --> cold
+  cold --> starting: first request (cold start), next profile in order
+  cold --> cold: memory floor, 503 (retry shortly)
   cold --> unavailable: required artifacts missing
+  starting --> ready: GET /health ok
+  starting --> cold: child exited during start
+  starting --> stopping: health deadline / profile failed / evict / shutdown
+  stopping --> starting: next profile
+  starting --> unavailable: every profile failed or skipped (sticky until serve restarts)
+  ready --> stopping: idle evict / over max warm specialists / memory evict / shutdown
+  ready --> suspended: idle or over warm ceiling, only if gateway.suspend_evicted (POSIX only, default off)
+  suspended --> starting: resume (SIGCONT), recheck /health
+  suspended --> stopping: long idle / memory evict / resume health failed / shutdown (SIGCONT then SIGTERM)
+  stopping --> cold: SIGTERM, SIGKILL at 3 s, record removed
+  ready --> cold: child exited
   unavailable --> [*]
   note right of ready
     tool-router-agent is resident:
     pre-warmed at serve start, never idle-evicted.
   end note
+  note left of stopping
+    Exit is awaited only after SIGTERM. After SIGKILL the
+    record goes cold at once; only the evict path then
+    waits for the port to be free (up to 8 s).
+  end note
 ```
+
+Non-resident cold starts are serialized on one chain; the resident nexus starts outside it. Concurrent requests for the same alias share one start, and a client abort never cancels a spawn or its health wait. The default idle path is terminate, not suspend.
 
 ### Mailbox and monitor IPC (`src/mailbox.mjs`)
 
@@ -171,10 +182,14 @@ sequenceDiagram
   participant D as Drain (setImmediate)
   participant L as Listeners (security monitor, logger)
   P->>M: push({kind, source, ticket, payload})
-  alt ring full
-    M->>M: drop oldest (dropped += 1)
+  alt unknown or stub kind
+    M-->>P: {ok: false, kind: reject}, no ring write
+  else known hop kind
+    opt ring full
+      M->>M: drop oldest (dropped += 1)
+    end
+    M-->>P: {ok, seq} immediately, never waits
   end
-  M-->>P: {ok, seq} immediately, never waits
   D->>M: drain()
   M->>L: every drained slot (broadcast, not steal)
   Note over P,M: kind in hop, success, agent_unavailable, route_exhausted, observe, snapshot.<br/>lockdown, reboot, secure_reboot, vote are stubs and rejected.<br/>Long string payloads are stored as sha256.
@@ -232,7 +247,7 @@ flowchart LR
   subgraph fbsd["FreeBSD node"]
     fb["start.sh with system llama-server<br/>(pack ELF does not run)"]
   end
-  subgraph phones["Android phone x2 (Termux)"]
+  subgraph phones["Android phones (Termux)"]
     termux["termux-start.sh<br/>ELF copied into the app home"]
   end
   lin["Linux node<br/>test loop"]
