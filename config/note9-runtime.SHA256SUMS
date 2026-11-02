@@ -1,4 +1,4 @@
-# Green-Roomz note9 native runtime manifest (sha256sum format).
+# Green-Roomz android-legacy native runtime manifest (sha256sum format).
 # Plain paths are relative to $HOME/grz.<sha>/runtime; "tree/" paths to $HOME/grz.<sha>/tree, e.g.
 #   <64-hex>  bin/llama-server
 #   <64-hex>  bin/libggml.so      (every bin/*.so must be listed; runner refuses otherwise)
@@ -13,5 +13,5 @@
 #   5b31863616c7942c11da577426e8277e46f7b90df69b375ae4751b2047c502c2
 # The model hash goes in this same anchored manifest (models/<file>.gguf).
 # PLACEHOLDER: entries not yet generated from /workspace/release/note9-runtime-b11969/.
-# With no entries, note9-termux-setup.sh refuses to install a runtime
+# With no entries, android-legacy-termux-setup.sh refuses to install a runtime
 # (unless GRZ_ALLOW_UNVERIFIED_RUNTIME=1). Every staged file must be listed.

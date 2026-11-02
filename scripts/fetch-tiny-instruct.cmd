@@ -2,7 +2,7 @@
 setlocal EnableExtensions EnableDelayedExpansion
 rem Green-Roomz: fetch ONE tiny Instruct GGUF into models\ (CPU only). Fail closed.
 rem Default: bartowski Qwen2.5-0.5B-Instruct Q4_K_M (~0.40 GB). Never targets GPU.
-rem Operator: Brian. Host: qodesh. Do not load onto 8600 GT.
+rem Operator: Brian. Host: mvp-host. Do not load onto 8600 GT.
 
 set "GRZ_ROOT=%~dp0.."
 if "%GRZ_ROOT:~-1%"=="\" set "GRZ_ROOT=%GRZ_ROOT:~0,-1%"

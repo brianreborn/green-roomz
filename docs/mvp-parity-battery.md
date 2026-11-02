@@ -1,4 +1,4 @@
-# MVP parity battery (Windows / qodesh)
+# MVP parity battery (Windows / mvp-host)
 
 Capability-surface check that Green-Roomz localhost gateway behaves like a **basic** ChatGPT/Grok client target — multi-turn, stream, model pick, abort, health, instruct follow. **Not** a quality / SOTA bench.
 
@@ -8,7 +8,7 @@ Capability-surface check that Green-Roomz localhost gateway behaves like a **bas
 | Target | `http://127.0.0.1:8080` (`GRZ_BASE_URL` override) |
 | Default model | `general-text-speculator` (`GRZ_MODEL` or argv) |
 | Results | `data/mvp-parity-last.json` (gitignored under `data/*.json`) |
-| Host | qodesh Win11 Athlon II — short prompts, `max_tokens` 48–128 |
+| Host | mvp-host Win11 Athlon II — short prompts, `max_tokens` 48–128 |
 | Rules | CPU llama only; never GGUF on 8600 GT; do not stop Linux cursor `:8080`/`:8187` |
 
 Run (serve already up with `config/agents.windows-mvp.json`):
@@ -55,7 +55,7 @@ Prompts stay Athlon-friendly (roughly 64–128 tokens max per request). Quality 
 }
 ```
 
-Operator review template (filled on qodesh): `/workspace/reviews/qodesh-mvp-parity-battery.md`.
+Operator review template (filled on mvp-host): `/workspace/reviews/mvp-host-parity-battery.md`.
 
 ---
 

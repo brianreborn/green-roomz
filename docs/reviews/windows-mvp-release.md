@@ -1,10 +1,10 @@
-# Windows MVP dogfood release (qodesh)
+# Windows MVP dogfood release (mvp-host)
 
 **Cut:** localhost OpenAI gateway on Win11 Athlon II / 16 GB / **8600 GT display-only**. CPU llama only. Never load GGUFs on the 8600 GT. Do not git push. Do not bounce serve. Do not start downloads, CUDA installer, 4B/7B, or sprints.
 
 | | |
 |---|---|
-| Host | qodesh |
+| Host | mvp-host |
 | Manifest | `config/agents.windows-mvp.json` (`0.1.0-windows-mvp`) |
 | Gateway | `http://127.0.0.1:8080` (`policy=responsive`) |
 | Operator guide | `WINDOWS-MVP.md` |
@@ -27,7 +27,7 @@ This is **dogfood**, not a quality/SOTA ship. Tiny Instruct will ramble; capabil
 
 ### Parity battery — 7/7 PASS (health still degraded)
 
-`data/mvp-parity-last.json` (`green-roomz.mvp-parity-battery.v1`, host hint `qodesh-windows-mvp`):
+`data/mvp-parity-last.json` (`green-roomz.mvp-parity-battery.v1`, host hint `mvp-host-windows-mvp`):
 
 | ID | Case | Result |
 |----|------|--------|
@@ -61,8 +61,8 @@ Checked on disk. **Did not download.**
 
 | Where | Tiny chat Instruct `Qwen2.5-0.5B-Instruct-Q4_K_M.gguf` |
 |---|---|
-| `C:\Users\brian\Documents\green-roomz\models\` | **Yes** — landed. Manifest points `general-text-speculator` here. |
-| `C:\LocalAI\` | **No** file of that name. LocalAI has other instruct-named weights (coder 1.5B/7B, VL-3B, `Qwen3-4B-Q4_K_M.gguf`) plus the **nexus** `Qwenstral-Small-3.1-0.5B.Q4_K_M.gguf`. Those are **not** this MVP chat model. Do not copy 4B/7B/VL onto qodesh serve. |
+| `%USERPROFILE%\Documents\green-roomz\models\` | **Yes** — landed. Manifest points `general-text-speculator` here. |
+| `C:\LocalAI\` | **No** file of that name. LocalAI has other instruct-named weights (coder 1.5B/7B, VL-3B, `Qwen3-4B-Q4_K_M.gguf`) plus the **nexus** `Qwenstral-Small-3.1-0.5B.Q4_K_M.gguf`. Those are **not** this MVP chat model. Do not copy 4B/7B/VL onto mvp-host serve. |
 
 Also in `models/` (not the chat Instruct): `Qwenstral-Small-3.1-0.5B.Q4_K_M.gguf`, `ggml-small.bin`, `en_US-lessac-medium.onnx`. `scripts/fetch-tiny-instruct.cmd` is a no-op if the GGUF already exists — **do not run it**.
 
@@ -88,7 +88,7 @@ On the Windows MVP manifest, most of the 11 aliases are **placeholders**. Typica
 
 Ready/cold on this cut: **nexus** (resident), **general-text-speculator** (cold until first chat), **security-monitor-agent** (logical mailbox). Piper `runtime/piper.exe` + `models/en_US-lessac-medium.onnx` exist in the pack; speech may be admittable on a serve that loaded the current JSON. Stale snapshots `data/health-now.json` / `data/health-snap.json` still show older `missing-whisper.bin` / `missing-piper` paths — treat those as **not** the current MVP manifest.
 
-`docs/known-bugs.md` also says qodesh `:8080` is degraded without Qwen3-4B. **Do not fetch 4B** to “fix” health. Degraded is the dogfood status.
+`docs/known-bugs.md` also says mvp-host `:8080` is degraded without Qwen3-4B. **Do not fetch 4B** to “fix” health. Degraded is the dogfood status.
 
 ### Empty `profiles` / `max_warm_specialists` (Race)
 
@@ -99,15 +99,15 @@ Race’s config debt, still true in `config/agents.windows-mvp.json`:
 
 Do **not** fill profiles by fetching models. If anything is enabled later from files already on disk, copy the cpu-1 arg block first.
 
-### Note 9 is ADB-ready — not this MVP cut
+### Android-legacy phone is ADB-ready — not this MVP cut
 
-`docs/fleet-targets.md`: shalom ADB to **SM-N960U / SDM845 / Adreno 630 / Android 10 / 5.7 GB** (`27841130ae1c7ece`). Android CPU pack / Termux / `config/agents.android.json` is a **later** fleet item. llama.android APK is minSdk 33 (Pixel 8), not Note 9 API 28. **Out of this Windows dogfood.** No `adb push`, no NDK sprint.
+`docs/fleet-targets.md`: win-host ADB to **SM-N960U / SDM845 / Adreno 630 / Android 10 / 5.7 GB** (`<adb-serial>`). Android CPU pack / Termux / `config/agents.android.json` is a **later** fleet item. llama.android APK is minSdk 33 (Pixel 8), not Android-legacy phone API 28. **Out of this Windows dogfood.** No `adb push`, no NDK sprint.
 
 ---
 
 ## Next ship checklist (no downloads)
 
-Stay on files already on qodesh. No Hugging Face, no CUDA 6.5 installer, no 1.5B/4B/7B, no serve bounce unless the operator asks.
+Stay on files already on mvp-host. No Hugging Face, no CUDA 6.5 installer, no 1.5B/4B/7B, no serve bounce unless the operator asks.
 
 1. **Dogfood the surface that passed.** Point clients at `http://127.0.0.1:8080`, model `general-text-speculator`. `scripts\chat-mvp.cmd` for multi-turn. Expect slow Athlon tokens and weak wording (cases D/G).
 2. **Treat `degraded` as green for this cut.** Do not chase `/health` `ok` by adding specialists.
@@ -117,6 +117,6 @@ Stay on files already on qodesh. No Hugging Face, no CUDA 6.5 installer, no 1.5B
 6. **Optional TTS smoke** only if current serve already admits `speech-synthesis-agent` (piper.exe + onnx already in-tree). Missing piper still 503 by Wave 1. Do not fetch voices.
 7. **Help page gap:** `WINDOWS-MVP.md` points at `docs\help\index.html` — that tree is not on disk. Curl/chat-mvp is the client.
 8. **Hard rules unchanged:** CPU llama only; do not stop Linux cursor `:8080`/`:8187`; do not git push; nexus stays 0.5B JSON router.
-9. **Not this cut:** Note 9 / Android pack, vision/embed/rerank/guard/sd, Qwen2.5-1.5B, Qwen3-4B, CUDA 6.5, Vulkan on 8600 GT.
+9. **Not this cut:** Android-legacy phone / Android pack, vision/embed/rerank/guard/sd, Qwen2.5-1.5B, Qwen3-4B, CUDA 6.5, Vulkan on 8600 GT.
 
-**Ship call:** Windows MVP dogfood is **usable on qodesh** for localhost chat (CPU Instruct + nexus + 7/7 parity + Wave 1 503). Health `degraded` is expected. Do not enlarge the model set to make the badge green.
+**Ship call:** Windows MVP dogfood is **usable on mvp-host** for localhost chat (CPU Instruct + nexus + 7/7 parity + Wave 1 503). Health `degraded` is expected. Do not enlarge the model set to make the badge green.

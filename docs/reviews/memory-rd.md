@@ -1,6 +1,6 @@
-# Memory R&D (qodesh, 2026-09-07)
+# Memory R&D (mvp-host, 2026-09-07)
 
-Worker: Green-Roomz MEMORY SYSTEM R&D. Host: qodesh. No GGUF load, no CUDA, no live 16-case battery.
+Worker: Green-Roomz MEMORY SYSTEM R&D. Host: mvp-host. No GGUF load, no CUDA, no live 16-case battery.
 
 ## What was already landed
 

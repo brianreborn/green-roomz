@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SD-31: safe extraction of the Note9 release tarball (run AFTER checking its sha256 = T).
+# SD-31: safe extraction of the android-legacy release tarball (run AFTER checking its sha256 = T).
 # Usage: bash note9-extract-release.sh <tarball> <dest>
 #   - GNU tar only: $PREFIX/bin/tar on Termux (toybox/busybox tar refused);
 #   - lists first (tar -tvzf): refuses absolute paths, any '..' component, and any entry that

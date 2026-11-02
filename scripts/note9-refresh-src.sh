@@ -28,4 +28,4 @@ bash "$VERIFY" "$ST" "$ST/green-roomz" || { echo "ERROR: verify failed; grz.curr
 grz_resolve_current || exit 1
 echo "refreshed: grz.current -> $GRZ_DIR"
 [[ ${GRZ_REFRESH_NO_RESTART:-0} == 1 ]] && exit 0
-exec bash "$GRZ_TREE/scripts/note9-restart-serve.sh"
+exec bash "$GRZ_TREE/scripts/termux-restart-serve.sh"

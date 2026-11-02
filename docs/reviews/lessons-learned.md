@@ -1,4 +1,4 @@
-# Lessons learned (qodesh Windows MVP)
+# Lessons learned (mvp-host Windows MVP)
 
 Living list. Add a row when a failure mode costs real time. Do not restate the design doc — state the **mistake**, the **cost**, and the **rule**.
 
@@ -37,7 +37,7 @@ Host: Athlon II X2, 16 GB, CPU llama only. Never GGUF on the 8600 GT.
 |---|---|---|---|
 | L13 | Leave a morning serve running while landing routing/health | Live probes tested **stale** code; 60s aborts looked like product bugs | Bounce Windows `:8080` when the tree must be the process. Reap by **PID** (`stop.cmd`), never by image name. Do not stop Linux cursor live serve |
 | L14 | R&D worker exits after the first green Ada test | Streamed SSE still dropped assistant text; windows.json keys missing | Workers **keep iterating** the named backlog unless a true blocker (CUDA/download, rebase in progress, would kill Linux serve, unfixable red test) |
-| L15 | Call the default branch `master` | This repo’s default is **`main`**. Live host line is **`host/qodesh`** | Push product to `main` and `host/qodesh`. No GGUF, no `runtime/` |
+| L15 | Call the default branch `master` | This repo’s default is **`main`**. Live host line is **`host/mvp-host`** | Push product to `main` and `host/mvp-host`. No GGUF, no `runtime/` |
 | L16 | Continual merge feared because it might lose history | Blocked landing | Merge. Git can check out old SHAs. Do not rewrite landed `origin/main` to clean a conflict-message nit |
 
 ## 6GL / shape of the code

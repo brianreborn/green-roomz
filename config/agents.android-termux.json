@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "manifest_version": "0.1.0-note9-arm64",
+  "manifest_version": "0.1.0-android-legacy-arm64",
   "product": "Green-Roomz",
   "gateway": {
     "host": "127.0.0.1",
@@ -34,7 +34,7 @@
   "runtimes": {
     "llama_server": {
       "kind": "llama-server",
-      "command": "${HOME}/grz.current/tree/scripts/note9-run-llama-server.termux.sh",
+      "command": "${HOME}/grz.current/tree/scripts/termux-run-llama-server.sh",
       "base_args": ["--host", "127.0.0.1", "--parallel", "1", "--prio", "-1", "--split-mode", "none"],
       "env": {
         "GGML_VULKAN": "0",

@@ -28,7 +28,7 @@ async function close(server) {
 test('graph proxy manifests are loopback-only and require explicit aliases', () => {
   assert.equal(validateGraphProxyManifest(manifest(12345)).graph_host, 'test-host');
   assert.throws(() => validateGraphProxyManifest(manifest(12345, {
-    coder: { kind: 'chat', url: 'http://192.168.1.2:9941' },
+    coder: { kind: 'chat', url: 'http://192.0.2.2:9941' },
   })), /loopback URL/);
   assert.throws(() => validateGraphProxyManifest(manifest(12345, {
     coder: { kind: 'chat', url: 'http://localhost:9941' },

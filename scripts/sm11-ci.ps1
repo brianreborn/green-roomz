@@ -2,7 +2,7 @@
 # Usage: .\scripts\sm11-ci.ps1
 #        .\scripts\sm11-ci.ps1 -Root C:\path\to\green-roomz
 param(
-  [string]$Root = 'C:\Users\brian\Documents\green-roomz',
+  [string]$Root = (Split-Path -Parent $PSScriptRoot),
   [string]$Log = ''
 )
 

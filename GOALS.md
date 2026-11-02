@@ -9,7 +9,7 @@ Read this file first. `main` does not have this work. The branch is `disclosure-
 - Do not copy Brainz into this repo. `scripts/with-fleet.ps1` (or `with-fleet.sh`) clones `green-agentz` beside it. Set `GREEN_BRAINZ_ROOT` to `green-agentz/systems/green-brainz`. Skills live in `green-agentz/skills`.
 - `green-agency` is a retired name. Do not open new work there.
 - Token compression we own is the Memory Feedback Loop in green-agentz: nap, impress, the `green-dreamz` drive, then a new Roomz generation with bounded recall. GDICT does not compress prose. `src/memory.mjs` only decides whether weights fit in RAM.
-- This Athlon II X2 (qodesh) generates at about 1.6 tokens/second on one thread with the GPU off. Dogfood the model on a faster machine. Use this box to edit and push.
+- This Athlon II X2 (mvp-host) generates at about 1.6 tokens/second on one thread with the GPU off. Dogfood the model on a faster machine. Use this box to edit and push.
 
 ## Where we stopped
 

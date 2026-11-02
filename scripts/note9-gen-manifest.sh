@@ -43,7 +43,7 @@ if (( nmodel == 0 )); then
 fi
 {
   if (( ALLOW_NO_MODEL == 1 && nmodel == 0 )); then echo "# DRYRUN: no model line (--allow-no-model); not a release manifest"; fi
-  echo "# Green-Roomz note9 manifest (sha256sum format), from scripts/note9-gen-manifest.sh"
+  echo "# Green-Roomz android-legacy manifest (sha256sum format), from scripts/note9-gen-manifest.sh"
   echo "# npm-deps: none"
   cat "$RT" "$TR"
 } > "$TMP"

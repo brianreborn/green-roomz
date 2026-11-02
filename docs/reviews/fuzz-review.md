@@ -1,6 +1,6 @@
-# Fuzz review — Windows dogfood (qodesh)
+# Fuzz review — Windows dogfood (mvp-host)
 
-Operator pass on `C:\Users\brian\Documents\green-roomz`. Did **not** git commit/push, bounce serve, download models, or edit `src/process-manager.mjs`.
+Operator pass on `%USERPROFILE%\Documents\green-roomz`. Did **not** git commit/push, bounce serve, download models, or edit `src/process-manager.mjs`.
 
 Live `http://127.0.0.1:8080` and `:8187` were **not listening** this turn (`data/serve.pid` 12252 and `data/children.json` nexus pid 13868 are stale). Did not start or stop serve.
 
@@ -75,8 +75,8 @@ On disk (did **not** download):
 
 | Path | Status |
 |---|---|
-| `C:\Users\brian\Documents\green-roomz\models\Qwen2.5-0.5B-Instruct-Q4_K_M.gguf` | **present**, 397808192 bytes (2026-09-06) |
-| `C:\Users\brian\Documents\green-roomz\models\Qwenstral-Small-3.1-0.5B.Q4_K_M.gguf` | **present**, 460616064 bytes |
+| `%USERPROFILE%\Documents\green-roomz\models\Qwen2.5-0.5B-Instruct-Q4_K_M.gguf` | **present**, 397808192 bytes (2026-09-06) |
+| `%USERPROFILE%\Documents\green-roomz\models\Qwenstral-Small-3.1-0.5B.Q4_K_M.gguf` | **present**, 460616064 bytes |
 | `C:\LocalAI\Qwen2.5-0.5B-Instruct-Q4_K_M.gguf` | **missing** (LocalAI has coder 1.5B/7B Instruct, VL-3B Instruct, Qwenstral 0.5B — not this chat Instruct) |
 
 MVP chat alias is wired and the GGUF is in-tree under `models\`. Serve was down so health/availability was not live-checked.

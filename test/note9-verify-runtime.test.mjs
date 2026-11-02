@@ -36,7 +36,7 @@ function run(f, env = {}) {
   return { code: r.status, out: r.stdout + r.stderr };
 }
 
-test('NOTE9-RT: valid manifest + anchor copies and verifies', { skip: !hasBash }, () => {
+test('android-legacy-RT: valid manifest + anchor copies and verifies', { skip: !hasBash }, () => {
   const f = fixture(); const r = run(f);
   assert.equal(r.code, 0, r.out);
   assert.equal(readFileSync(join(f.rt, 'bin/llama-server'), 'utf8'), 'ELF');
@@ -44,57 +44,57 @@ test('NOTE9-RT: valid manifest + anchor copies and verifies', { skip: !hasBash }
   assert.equal(statSync(join(f.rt, 'bin/llama-server')).mode & 0o777, 0o755);
   assert.equal(readFileSync(join(f.cur, '.verified'), 'utf8').trim(), f.manSha);
 });
-test('NOTE9-RT: hash mismatch aborts', { skip: !hasBash }, () => {
+test('android-legacy-RT: hash mismatch aborts', { skip: !hasBash }, () => {
   const f = fixture(); f.put(f.stage, 'lib/libggml.so', 'TAMPERED');
   const r = run(f); assert.notEqual(r.code, 0); assert.match(r.out, /mismatch/);
 });
-test('NOTE9-RT: tampered JS tree file aborts', { skip: !hasBash }, () => {
+test('android-legacy-RT: tampered JS tree file aborts', { skip: !hasBash }, () => {
   const f = fixture(); f.put(f.tsrc, 'src/gateway.mjs', 'evil');
   const r = run(f); assert.notEqual(r.code, 0); assert.match(r.out, /mismatch/);
 });
-test('NOTE9-RT: missing manifest aborts', { skip: !hasBash }, () => {
+test('android-legacy-RT: missing manifest aborts', { skip: !hasBash }, () => {
   const f = fixture({ manifest: null }); const r = run(f);
   assert.notEqual(r.code, 0); assert.match(r.out, /missing; refusing/);
   assert.equal(existsSync(join(f.rt, 'bin/llama-server')), false);
 });
-test('NOTE9-RT: empty (placeholder) manifest aborts', { skip: !hasBash }, () => {
+test('android-legacy-RT: empty (placeholder) manifest aborts', { skip: !hasBash }, () => {
   const f = fixture({ manifest: [] }); const r = run(f);
   assert.notEqual(r.code, 0); assert.match(r.out, /no entries|has no hash lines; refusing/);
 });
-test('NOTE9-RT: unlisted staged runtime file aborts and is not copied', { skip: !hasBash }, () => {
+test('android-legacy-RT: unlisted staged runtime file aborts and is not copied', { skip: !hasBash }, () => {
   const f = fixture(); f.put(f.stage, 'lib/libevil.so', 'x');
   const r = run(f); assert.notEqual(r.code, 0); assert.match(r.out, /lib\/libevil\.so is not listed/);
   assert.equal(existsSync(join(f.rt, 'lib/libevil.so')), false);
 });
-test('NOTE9-RT: unlisted JS tree file aborts', { skip: !hasBash }, () => {
+test('android-legacy-RT: unlisted JS tree file aborts', { skip: !hasBash }, () => {
   const f = fixture(); f.put(f.tsrc, 'src/extra.mjs', 'x');
   const r = run(f); assert.notEqual(r.code, 0); assert.match(r.out, /tree\/src\/extra\.mjs is not listed/);
 });
-test('NOTE9-RT: GRZ_MANIFEST_SHA256 unset or wrong aborts and prints actual hash', { skip: !hasBash }, () => {
+test('android-legacy-RT: GRZ_MANIFEST_SHA256 unset or wrong aborts and prints actual hash', { skip: !hasBash }, () => {
   const f = fixture();
   let r = run(f, { GRZ_MANIFEST_SHA256: '' });
   assert.notEqual(r.code, 0); assert.match(r.out, new RegExp(`unset \\(manifest sha256=${f.manSha}\\)`));
   r = run(f, { GRZ_MANIFEST_SHA256: '0'.repeat(64) });
   assert.notEqual(r.code, 0); assert.match(r.out, /does not match/); assert.ok(r.out.includes(f.manSha));
 });
-test('NOTE9-RT: GRZ_RUNTIME_SUMS is ignored (manifest only from the staged tree)', { skip: !hasBash }, () => {
+test('android-legacy-RT: GRZ_RUNTIME_SUMS is ignored (manifest only from the staged tree)', { skip: !hasBash }, () => {
   const f = fixture(); f.put(f.root, 'outside.sums', '# x\n');
   const r = run(f, { GRZ_RUNTIME_SUMS: join(f.root, 'outside.sums') });
   assert.equal(r.code, 0, r.out); assert.match(r.out, new RegExp(`sha256=${f.manSha}`));
 });
-test('NOTE9-RT: GRZ_ALLOW_UNVERIFIED_RUNTIME=1 proceeds with loud warning', { skip: !hasBash }, () => {
+test('android-legacy-RT: GRZ_ALLOW_UNVERIFIED_RUNTIME=1 proceeds with loud warning', { skip: !hasBash }, () => {
   const f = fixture({ manifest: null });
   const r = run(f, { GRZ_ALLOW_UNVERIFIED_RUNTIME: '1' });
   assert.equal(r.code, 0, r.out); assert.match(r.out, /WARNING: GRZ_ALLOW_UNVERIFIED_RUNTIME=1/);
 });
-test('NOTE9-PID: pidfile kill only when /proc cmdline matches; pidfile mode 600', { skip: !hasBash || !existsSync('/proc/self/cmdline') }, () => {
+test('android-legacy-PID: pidfile kill only when /proc cmdline matches; pidfile mode 600', { skip: !hasBash || !existsSync('/proc/self/cmdline') }, () => {
   const root = mkdtempSync(join(tmpdir(), 'grz-pid-'));
   const pf = join(root, 'grz-serve.pid');
   const script = `. "${PIDLIB}"; sleep 30 & other=$!; grz_write_pid $other; stat -c %a "$GRZ_SERVE_PIDFILE"; grz_stop_serve; kill -0 $other && echo ALIVE; kill $other`;
   const r = spawnSync('bash', ['-c', script], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: root, GRZ_SERVE_PIDFILE: pf } });
   assert.match(r.stdout, /^600$/m); assert.match(r.stdout, /ALIVE/); assert.match(r.stderr, /not green-roomz serve; not killing/);
 });
-test('NOTE9-PID: kill -9 re-checks cmdline; pid-reuse after SIGTERM is not SIGKILL\'d', { skip: !hasBash || !existsSync('/proc/self/cmdline') }, () => {
+test('android-legacy-PID: kill -9 re-checks cmdline; pid-reuse after SIGTERM is not SIGKILL\'d', { skip: !hasBash || !existsSync('/proc/self/cmdline') }, () => {
   const root = mkdtempSync(join(tmpdir(), 'grz-pid9-'));
   const pf = join(root, 'grz-serve.pid');
   const bin = join(root, 'bin'); mkdirSync(bin, { recursive: true });
@@ -116,7 +116,7 @@ test('NOTE9-PID: kill -9 re-checks cmdline; pid-reuse after SIGTERM is not SIGKI
   assert.match(src, /Re-check before SIGKILL|re-check/i);
 });
 
-const RUNNER = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'note9-run-llama-server.termux.sh');
+const RUNNER = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'android-legacy-run-llama-server.termux.sh');
 function runRunner(f, env = {}) {
   const r = spawnSync('bash', [RUNNER, '--version'], { encoding: 'utf8', env: { PATH: stubGetprop(join(f.root, 'gp28'), 28), HOME: join(f.root, 'home'), TERMUX_VERSION: '0.118', LD_LIBRARY_PATH: '/evil', GRZ_MANIFEST_SHA256: f.manSha, ...env } });
   return { code: r.status, out: r.stdout + r.stderr };
@@ -128,7 +128,7 @@ function installed() {
 }
 const listTree = (d) => spawnSync('bash', ['-c', `cd "${d}" && find . -type f -exec sha256sum {} + | sort`], { encoding: 'utf8' }).stdout;
 
-test('NOTE9-RT: mismatch leaves the live tree byte-identical; temp dir removed', { skip: !hasBash }, () => {
+test('android-legacy-RT: mismatch leaves the live tree byte-identical; temp dir removed', { skip: !hasBash }, () => {
   const f = installed(); const live = join(f.home, `grz.${f.manSha}`);
   const before = listTree(join(live, 'runtime')) + listTree(join(live, 'tree'));
   unlinkSync(f.cur); // force a real install (same sha + intact would be skipped, SD-25)
@@ -137,53 +137,53 @@ test('NOTE9-RT: mismatch leaves the live tree byte-identical; temp dir removed',
   assert.equal(listTree(join(live, 'runtime')) + listTree(join(live, 'tree')), before);
   assert.deepEqual(spawnSync('bash', ['-c', `ls -A "${join(f.root, 'home')}" | grep grz-verify || true`], { encoding: 'utf8' }).stdout, '');
 });
-test('NOTE9-RT: stale unlisted file in live runtime is removed by the swap', { skip: !hasBash }, () => {
+test('android-legacy-RT: stale unlisted file in live runtime is removed by the swap', { skip: !hasBash }, () => {
   const f = installed(); f.put(f.rt, 'bin/libstale.so', 'old'); f.put(f.dst, 'src/stale.mjs', 'old');
   const r = run(f); assert.equal(r.code, 0, r.out);
   assert.equal(existsSync(join(f.rt, 'bin/libstale.so')), false);
   assert.equal(existsSync(join(f.dst, 'src/stale.mjs')), false);
 });
-test('NOTE9-RT: staged symlink is refused loudly', { skip: !hasBash }, () => {
+test('android-legacy-RT: staged symlink is refused loudly', { skip: !hasBash }, () => {
   const f = fixture(); symlinkSync('/etc/passwd', join(f.stage, 'bin', 'evil.so'));
   const r = run(f); assert.notEqual(r.code, 0); assert.match(r.out, /staged symlink .*evil\.so; refusing/);
   assert.equal(existsSync(join(f.rt)), false);
 });
-test('NOTE9-RT: exec bits set after the cmp-skip path (second identical run)', { skip: !hasBash }, () => {
+test('android-legacy-RT: exec bits set after the cmp-skip path (second identical run)', { skip: !hasBash }, () => {
   const f = installed(); spawnSync('chmod', ['600', join(f.rt, 'bin/llama-server')]);
   const r = run(f); assert.equal(r.code, 0, r.out);
   assert.equal(statSync(join(f.rt, 'bin/llama-server')).mode & 0o777, 0o755);
 });
-test('NOTE9-RUN: runner refuses without .verified, or when it does not match', { skip: !hasBash }, () => {
+test('android-legacy-RUN: runner refuses without .verified, or when it does not match', { skip: !hasBash }, () => {
   const f = installed();
   let r = runRunner(f); assert.equal(r.code, 0, r.out);
   r = runRunner(f, { GRZ_MANIFEST_SHA256: '0'.repeat(64) }); assert.notEqual(r.code, 0); assert.match(r.out, /GRZ_MANIFEST_SHA256; refusing/);
   writeFileSync(join(f.cur, '.verified'), 'f'.repeat(64)); r = runRunner(f); assert.notEqual(r.code, 0); assert.match(r.out, /does not match manifest/);
   spawnSync('rm', [join(f.cur, '.verified')]); r = runRunner(f); assert.notEqual(r.code, 0); assert.match(r.out, /\.verified missing/);
 });
-test('NOTE9-RUN: LD_LIBRARY_PATH is exactly $RT/bin (caller value dropped)', { skip: !hasBash }, () => {
+test('android-legacy-RUN: LD_LIBRARY_PATH is exactly $RT/bin (caller value dropped)', { skip: !hasBash }, () => {
   const f = installed(); const r = runRunner(f);
   assert.equal(r.code, 0, r.out); assert.match(r.out, new RegExp(`^LDP=${f.home}/grz.${f.manSha}/runtime/bin$`, 'm'));
 });
-test('NOTE9-RUN: refuses if a bin/*.so or model in $RT is not in the manifest', { skip: !hasBash }, () => {
+test('android-legacy-RUN: refuses if a bin/*.so or model in $RT is not in the manifest', { skip: !hasBash }, () => {
   let f = installed(); f.put(f.rt, 'bin/libextra.so', 'x');
   let r = runRunner(f); assert.notEqual(r.code, 0); assert.match(r.out, /bin\/libextra\.so is not listed/);
   f = installed(); f.put(f.rt, 'models/other.gguf', 'x');
   r = runRunner(f); assert.notEqual(r.code, 0); assert.match(r.out, /models\/other\.gguf is not listed/);
 });
-test('NOTE9-RUN: adb /data/local/tmp branch needs GRZ_ADB_DEBUG=1', { skip: !hasBash }, () => {
+test('android-legacy-RUN: adb /data/local/tmp branch needs GRZ_ADB_DEBUG=1', { skip: !hasBash }, () => {
   const r = spawnSync('bash', [RUNNER], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: tmpdir() } });
   assert.notEqual(r.status, 0); assert.match(r.stderr, /UNVERIFIED.*GRZ_ADB_DEBUG=1/);
 });
 
 // --- SD layout: $HOME/grz.<sha>/ + grz.current, sweep, anchor, SDK gate -------------------
-test('NOTE9-LAYOUT: one folder grz.<sha> with runtime+tree; grz.current is the only symlink', { skip: !hasBash }, () => {
+test('android-legacy-LAYOUT: one folder grz.<sha> with runtime+tree; grz.current is the only symlink', { skip: !hasBash }, () => {
   const f = installed();
   assert.ok(lstatSync(f.cur).isSymbolicLink());
   assert.equal(readlinkSync(f.cur), `grz.${f.manSha}`);
   assert.equal(readFileSync(join(f.home, `grz.${f.manSha}`, '.verified'), 'utf8').trim(), f.manSha);
   assert.equal(statSync(join(f.home, `grz.${f.manSha}`)).mode & 0o777, 0o700);
 });
-test('NOTE9-SWEEP: startup removes .grz-verify.* and *.old.*; keeps current + one previous grz.*', { skip: !hasBash }, () => {
+test('android-legacy-SWEEP: startup removes .grz-verify.* and *.old.*; keeps current + one previous grz.*', { skip: !hasBash }, () => {
   const f = installed();
   mkdirSync(join(f.home, '.grz-verify.ABC123')); mkdirSync(join(f.home, `grz.${f.manSha}.old.42`));
   const old1 = join(f.home, 'grz.' + '1'.repeat(64)); const old2 = join(f.home, 'grz.' + '2'.repeat(64));
@@ -199,20 +199,20 @@ test('NOTE9-SWEEP: startup removes .grz-verify.* and *.old.*; keeps current + on
   assert.ok(left.includes(`grz.${f.manSha}`), 'previous kept'); // newest non-current
   assert.ok(!left.includes(old1.split('/').pop()) && !left.includes(old2.split('/').pop()), left.join(','));
 });
-test('NOTE9-LAYOUT: a non-symlink grz.current is refused', { skip: !hasBash }, () => {
+test('android-legacy-LAYOUT: a non-symlink grz.current is refused', { skip: !hasBash }, () => {
   const f = fixture(); mkdirSync(f.cur, { recursive: true });
   const r = run(f); assert.notEqual(r.code, 0); assert.match(r.out, /not a symlink; refusing/);
 });
-test('NOTE9-RUN: anchor always required; escape hatch only with GRZ_ALLOW_UNVERIFIED_RUNTIME=1', { skip: !hasBash }, () => {
+test('android-legacy-RUN: anchor always required; escape hatch only with GRZ_ALLOW_UNVERIFIED_RUNTIME=1', { skip: !hasBash }, () => {
   const f = installed();
   let r = runRunner(f, { GRZ_MANIFEST_SHA256: '' }); assert.notEqual(r.code, 0); assert.match(r.out, /GRZ_MANIFEST_SHA256 unset; refusing/);
   r = runRunner(f, { GRZ_MANIFEST_SHA256: '', GRZ_ALLOW_UNVERIFIED_RUNTIME: '1' }); assert.equal(r.code, 0, r.out); assert.match(r.out, /anchor check skipped/);
 });
-test('NOTE9-RUN: GRZ_RUNTIME_DIR / GRZ_TREE_DIR overrides are ignored', { skip: !hasBash }, () => {
+test('android-legacy-RUN: GRZ_RUNTIME_DIR / GRZ_TREE_DIR overrides are ignored', { skip: !hasBash }, () => {
   const f = installed(); const r = runRunner(f, { GRZ_RUNTIME_DIR: '/nonexistent', GRZ_TREE_DIR: '/nonexistent' });
   assert.equal(r.code, 0, r.out);
 });
-test('NOTE9-RUN: refuses any symlink inside the versioned folder, and a current not named grz.<sha>', { skip: !hasBash }, () => {
+test('android-legacy-RUN: refuses any symlink inside the versioned folder, and a current not named grz.<sha>', { skip: !hasBash }, () => {
   let f = installed(); symlinkSync('/etc/passwd', join(f.dst, 'evil'));
   let r = runRunner(f); assert.notEqual(r.code, 0); assert.match(r.out, /symlink .*evil.*refusing/);
   f = installed(); const d = join(f.home, `grz.${f.manSha}`); renameSync(d, join(f.home, 'grz.other'));
@@ -224,22 +224,22 @@ function stubGetprop(root, sdk) {
   writeFileSync(join(bin, 'getprop'), `#!/bin/sh\n[ "$1" = ro.build.version.sdk ] && echo ${sdk}\n`); chmodSync(join(bin, 'getprop'), 0o755);
   return `${bin}:${process.env.PATH}`;
 }
-test('NOTE9-SDK: runner refuses Android < 9 (stubbed getprop sdk 27), allows 28', { skip: !hasBash }, () => {
+test('android-legacy-SDK: runner refuses Android < 9 (stubbed getprop sdk 27), allows 28', { skip: !hasBash }, () => {
   const f = installed();
   let r = runRunner(f, { PATH: stubGetprop(f.root, 27) }); assert.notEqual(r.code, 0); assert.match(r.out, /SDK 27 .*needs Android 9 \(API 28\) or later/);
   r = runRunner(f, { PATH: stubGetprop(join(f.root, 'b'), 28) }); assert.equal(r.code, 0, r.out);
 });
-const SETUP = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'note9-termux-setup.sh');
-test('NOTE9-SDK: setup refuses Android < 9 before touching anything (stubbed getprop)', { skip: !hasBash }, () => {
+const SETUP = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'android-legacy-termux-setup.sh');
+test('android-legacy-SDK: setup refuses Android < 9 before touching anything (stubbed getprop)', { skip: !hasBash }, () => {
   const root = mkdtempSync(join(tmpdir(), 'grz-n9sdk-'));
   const r = spawnSync('bash', [SETUP], { encoding: 'utf8', env: { PATH: stubGetprop(root, 26), HOME: root } });
   assert.notEqual(r.status, 0); assert.match(r.stderr, /SDK 26 .*needs Android 9 \(API 28\) or later/);
   assert.equal(existsSync(join(root, 'grz-setup.log')), false);
 });
-test('NOTE9-SETUP: setup never edits verified files (no sed on the manifest; override in state dir)', () => {
+test('android-legacy-SETUP: setup never edits verified files (no sed on the manifest; override in state dir)', () => {
   const text = readFileSync(SETUP, 'utf8');
   assert.doesNotMatch(text.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n'), /\bsed\s/);
-  assert.match(text, /OVR="\$STATE\/agents\.note9\.local\.json"/);
+  assert.match(text, /OVR="\$STATE\/agents\.android-legacy\.local\.json"/);
 });
 
 // --- N5 SDK strictness, .node addons, refresh/restart via grz.current, log_opt_in -------------
@@ -298,7 +298,7 @@ test('NODE: runner refuses an unlisted .node dropped into the installed tree (ou
 // Fixture tree carrying the real scripts + src so refresh/restart run end to end (stub serve).
 function realTree(extra = {}) {
   const tree = { 'bin/green-roomz.mjs': 'console.log("serve-stub", process.argv.slice(2).join(" ")); console.error("serve-stub-err");\n', ...extra };
-  for (const n of ['note9-verify-runtime.sh', 'note9-common.sh', 'note9-serve-pid.sh', 'note9-restart-serve.sh', 'note9-refresh-src.sh', 'note9-run-llama-server.termux.sh', 'note9-shared-storage.sh']) tree[`scripts/${n}`] = readFileSync(join(SCRIPTS, n), 'utf8');
+  for (const n of ['note9-verify-runtime.sh', 'note9-common.sh', 'note9-serve-pid.sh', 'android-legacy-restart-serve.sh', 'note9-refresh-src.sh', 'android-legacy-run-llama-server.termux.sh', 'note9-shared-storage.sh']) tree[`scripts/${n}`] = readFileSync(join(SCRIPTS, n), 'utf8');
   tree['config/shared-storage-prefixes.txt'] = readFileSync(join(REPO, 'config', 'shared-storage-prefixes.txt'), 'utf8');
   for (const rel of spawnSync('bash', ['-c', 'cd src && find . -type f -name "*.mjs" -printf "%P\\n"'], { cwd: REPO, encoding: 'utf8' }).stdout.trim().split('\n')) tree[`src/${rel}`] = readFileSync(join(REPO, 'src', rel), 'utf8');
   return fixture({ files: { 'bin/llama-server': 'ELF', 'bin/libggml.so': 'SO', 'models/m.gguf': 'GGUF' }, tree });
@@ -319,12 +319,12 @@ test('REFRESH: goes through verify + flip from the verified tree; bad anchor lea
 });
 test('RESTART: resolves via grz.current (no stored path); refuses when grz.current is missing', { skip: !hasBash }, () => {
   const f = realTree(); assert.equal(run(f).code, 0);
-  let r = spawnSync('bash', [join(f.dst, 'scripts/note9-restart-serve.sh')], { encoding: 'utf8', env: envFor(f) });
+  let r = spawnSync('bash', [join(f.dst, 'scripts/termux-restart-serve.sh')], { encoding: 'utf8', env: envFor(f) });
   assert.equal(r.status, 0, r.stdout + r.stderr); assert.match(r.stdout, new RegExp(`tree=${f.home}/grz\\.${f.manSha}/tree logs=off`));
   spawnSync('rm', [f.cur]);
-  r = spawnSync('bash', [join(SCRIPTS, 'note9-restart-serve.sh')], { encoding: 'utf8', env: envFor(f) });
+  r = spawnSync('bash', [join(SCRIPTS, 'android-legacy-restart-serve.sh')], { encoding: 'utf8', env: envFor(f) });
   assert.notEqual(r.status, 0); assert.match(r.stderr, /grz\.current missing/);
-  for (const n of ['note9-restart-serve.sh', 'note9-refresh-src.sh', 'note9-termux-setup.sh', 'note9-enable-external-apps.sh', 'note9-common.sh']) {
+  for (const n of ['android-legacy-restart-serve.sh', 'note9-refresh-src.sh', 'android-legacy-termux-setup.sh', 'android-legacy-enable-external-apps.sh', 'note9-common.sh']) {
     const t = readFileSync(join(SCRIPTS, n), 'utf8');
     assert.doesNotMatch(t, /\$HOME\/grz-runtime|\$HOME\/green-roomz\b|GRZ_SDCARD_LOGS/, n);
   }
@@ -332,31 +332,31 @@ test('RESTART: resolves via grz.current (no stored path); refuses when grz.curre
 const sleepMs = (ms) => spawnSync('sleep', [String(ms / 1000)]);
 function writeOverride(home, o) {
   const st = join(home, '.green-roomz-state'); mkdirSync(st, { recursive: true }); chmodSync(st, 0o700);
-  writeFileSync(join(st, 'agents.note9.local.json'), JSON.stringify(o)); chmodSync(join(st, 'agents.note9.local.json'), 0o600);
+  writeFileSync(join(st, 'agents.android-legacy.local.json'), JSON.stringify(o)); chmodSync(join(st, 'agents.android-legacy.local.json'), 0o600);
 }
 test('LOGS: log_opt_in off by default (no files); on -> $STATE/logs/*.log mode 600; never /sdcard', { skip: !hasBash }, () => {
   const f = realTree(); assert.equal(run(f).code, 0);
   writeOverride(f.home, { port: 8099, log_opt_in: false });
-  let r = spawnSync('bash', [join(f.dst, 'scripts/note9-restart-serve.sh')], { encoding: 'utf8', env: envFor(f) });
+  let r = spawnSync('bash', [join(f.dst, 'scripts/termux-restart-serve.sh')], { encoding: 'utf8', env: envFor(f) });
   assert.equal(r.status, 0, r.stderr); sleepMs(400);
   assert.equal(existsSync(join(f.home, '.green-roomz-state', 'logs')), false);
   assert.ok(!readdirSync(f.home).some((n) => n.endsWith('.log')));
   writeOverride(f.home, { port: 8099, log_opt_in: true });
-  r = spawnSync('bash', [join(f.dst, 'scripts/note9-restart-serve.sh')], { encoding: 'utf8', env: envFor(f) });
+  r = spawnSync('bash', [join(f.dst, 'scripts/termux-restart-serve.sh')], { encoding: 'utf8', env: envFor(f) });
   assert.equal(r.status, 0, r.stderr); sleepMs(600);
   const logs = join(f.home, '.green-roomz-state', 'logs');
   assert.equal(statSync(logs).mode & 0o777, 0o700);
   for (const n of ['serve.out.log', 'serve.err.log']) assert.equal(statSync(join(logs, n)).mode & 0o777, 0o600);
   assert.match(readFileSync(join(logs, 'serve.out.log'), 'utf8'), /serve-stub .*--port 8099/);
-  for (const n of ['note9-common.sh', 'note9-termux-setup.sh', 'note9-restart-serve.sh', 'note9-refresh-src.sh']) {
+  for (const n of ['note9-common.sh', 'android-legacy-termux-setup.sh', 'android-legacy-restart-serve.sh', 'note9-refresh-src.sh']) {
     const code = readFileSync(join(SCRIPTS, n), 'utf8').split('\n').filter((l) => !/^\s*#/.test(l) && !/^SD=/.test(l)).join('\n');
     assert.doesNotMatch(code, /\/sdcard/, n);
   }
 });
 test('LOGS: a refused override (mode 644) stops restart instead of defaulting', { skip: !hasBash }, () => {
   const f = realTree(); assert.equal(run(f).code, 0);
-  writeOverride(f.home, { log_opt_in: true }); chmodSync(join(f.home, '.green-roomz-state', 'agents.note9.local.json'), 0o644);
-  const r = spawnSync('bash', [join(f.dst, 'scripts/note9-restart-serve.sh')], { encoding: 'utf8', env: envFor(f) });
+  writeOverride(f.home, { log_opt_in: true }); chmodSync(join(f.home, '.green-roomz-state', 'agents.android-legacy.local.json'), 0o644);
+  const r = spawnSync('bash', [join(f.dst, 'scripts/termux-restart-serve.sh')], { encoding: 'utf8', env: envFor(f) });
   assert.notEqual(r.status, 0); assert.match(r.stderr, /must be 600|override refused/);
 });
 test('N6: setup resolves paths via $REALPATH (Termux $PREFIX/bin/realpath), not bare realpath', () => {
@@ -366,10 +366,10 @@ test('N6: setup resolves paths via $REALPATH (Termux $PREFIX/bin/realpath), not 
 });
 test('EXT-APPS: enable-external-apps writes status only under the state folder', { skip: !hasBash }, () => {
   const h = mkdtempSync(join(tmpdir(), 'grz-ext-'));
-  const r = spawnSync('bash', [join(SCRIPTS, 'note9-enable-external-apps.sh')], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: h } });
+  const r = spawnSync('bash', [join(SCRIPTS, 'android-legacy-enable-external-apps.sh')], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: h } });
   assert.equal(r.status, 0, r.stderr);
   assert.match(readFileSync(join(h, '.green-roomz-state', 'ext-apps.status'), 'utf8'), /enabled[\s\S]*DONE/);
-  assert.doesNotMatch(readFileSync(join(SCRIPTS, 'note9-enable-external-apps.sh'), 'utf8'), /data\/local\/tmp\/grz/);
+  assert.doesNotMatch(readFileSync(join(SCRIPTS, 'android-legacy-enable-external-apps.sh'), 'utf8'), /data\/local\/tmp\/grz/);
 });
 
 // --- SD-20 / SD-24 / SD-25 ------------------------------------------------------------------
@@ -432,7 +432,7 @@ test('SD-21: setup refuses a $HOME on shared storage; runner refuses a current d
   const f = realTree(); assert.equal(run(f).code, 0);
   const p2 = join(f.root, 'p2.txt'); writeFileSync(p2, `${f.home}/grz.\n`); // matches nothing (prefix must be exact dir)
   writeFileSync(p2, `${f.home}\n`);
-  const rr = spawnSync('bash', [join(f.cur, 'tree', 'scripts', 'note9-run-llama-server.termux.sh'), '--version'], { encoding: 'utf8', env: { PATH: stubGetprop(join(f.root, 'gpx'), 28), HOME: f.home, TERMUX_VERSION: '0.118', GRZ_MANIFEST_SHA256: f.manSha, GRZ_SHARED_PREFIXES_EXTRA: p2 } });
+  const rr = spawnSync('bash', [join(f.cur, 'tree', 'scripts', 'android-legacy-run-llama-server.termux.sh'), '--version'], { encoding: 'utf8', env: { PATH: stubGetprop(join(f.root, 'gpx'), 28), HOME: f.home, TERMUX_VERSION: '0.118', GRZ_MANIFEST_SHA256: f.manSha, GRZ_SHARED_PREFIXES_EXTRA: p2 } });
   assert.notEqual(rr.status, 0); assert.match(rr.stderr, /on shared storage; refusing/);
 });
 
@@ -462,7 +462,7 @@ test('SD-22 (= N5a): on Android, empty / non-numeric / missing getprop refused i
 function packRepo() {
   // Pack = git archive of HEAD: build a throwaway clean repo holding the packed files.
   const t = mkdtempSync(join(tmpdir(), 'grz-pack-')); const g = join(t, 'repo');
-  const files = ['config/note9-runtime.SHA256SUMS', 'config/shared-storage-prefixes.txt', 'scripts/note9-common.sh', 'scripts/note9-shared-storage.sh', 'scripts/note9-termux-setup.sh', 'scripts/note9-verify-runtime.sh', 'scripts/note9-extract-release.sh', 'scripts/note9-pack-release.sh'];
+  const files = ['config/note9-runtime.SHA256SUMS', 'config/shared-storage-prefixes.txt', 'scripts/note9-common.sh', 'scripts/note9-shared-storage.sh', 'scripts/termux-setup.sh', 'scripts/note9-verify-runtime.sh', 'scripts/note9-extract-release.sh', 'scripts/note9-pack-release.sh'];
   for (const f of files) { mkdirSync(dirname(join(g, f)), { recursive: true }); writeFileSync(join(g, f), readFileSync(join(REPO, f))); }
   const gi = (...a) => spawnSync('git', ['-C', g, ...a], { encoding: 'utf8', env: { ...process.env, GIT_AUTHOR_DATE: '@0 +0000', GIT_COMMITTER_DATE: '@0 +0000', GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } });
   gi('init', '-q'); gi('add', '-A'); gi('commit', '-qm', 'x');
@@ -479,7 +479,7 @@ test('PACK: git archive of HEAD, deterministic, holds setup+verifier+extract+hel
   assert.match(a.stdout, new RegExp(`tarball  sha256=${tsha}`));
   assert.match(a.stdout, new RegExp(`manifest sha256=${sha(readFileSync(join(REPO, 'config', 'note9-runtime.SHA256SUMS')))}`));
   const list = spawnSync('tar', ['tzf', join(t, 'a.tar.gz')], { encoding: 'utf8' }).stdout.trim().split('\n').filter((l) => !l.endsWith('/'));
-  assert.deepEqual(list, ['config/note9-runtime.SHA256SUMS', 'config/shared-storage-prefixes.txt', 'scripts/note9-common.sh', 'scripts/note9-extract-release.sh', 'scripts/note9-shared-storage.sh', 'scripts/note9-termux-setup.sh', 'scripts/note9-verify-runtime.sh']);
+  assert.deepEqual(list, ['config/note9-runtime.SHA256SUMS', 'config/shared-storage-prefixes.txt', 'scripts/note9-common.sh', 'scripts/note9-extract-release.sh', 'scripts/note9-shared-storage.sh', 'scripts/termux-setup.sh', 'scripts/note9-verify-runtime.sh']);
   const buf = readFileSync(join(t, 'a.tar.gz')); assert.equal(buf[4] | buf[5] | buf[6] | buf[7], 0, 'gzip -n: no mtime');
   assert.match(readFileSync(pack, 'utf8'), /git -C "\$ROOT" -c tar\.umask=0022 archive --format=tar HEAD/);
   writeFileSync(join(g, 'scripts', 'note9-common.sh'), '# dirty\n');
@@ -495,7 +495,7 @@ test('SD-31: extract lists first (GNU tar only), refuses .., absolute, symlink/h
   assert.equal(spawnSync('bash', [pack, join(t, 'ok.tar.gz')], { encoding: 'utf8' }).status, 0);
   const ex = (tb, dest, env = {}) => spawnSync('bash', [EXTRACT, tb, dest], { encoding: 'utf8', env: { PATH: process.env.PATH, ...env } });
   let r = ex(join(t, 'ok.tar.gz'), join(t, 'out')); assert.equal(r.status, 0, r.stderr);
-  assert.equal(statSync(join(t, 'out')).mode & 0o777, 0o700); assert.ok(existsSync(join(t, 'out', 'scripts', 'note9-termux-setup.sh')));
+  assert.equal(statSync(join(t, 'out')).mode & 0o777, 0o700); assert.ok(existsSync(join(t, 'out', 'scripts', 'android-legacy-termux-setup.sh')));
   r = ex(join(t, 'ok.tar.gz'), join(t, 'out')); assert.notEqual(r.status, 0); assert.match(r.stderr, /already exists; extract into a fresh folder/);
   const mk = (name, script) => { const w = join(t, `w-${name}`); mkdirSync(w); spawnSync('bash', ['-c', `cd "${w}" && ${script}`]); return join(t, `${name}.tar.gz`); };
   const bad = {
@@ -511,7 +511,7 @@ test('SD-31: extract lists first (GNU tar only), refuses .., absolute, symlink/h
   const toy = join(t, 'toy', 'bin'); mkdirSync(toy, { recursive: true }); writeFileSync(join(toy, 'tar'), '#!/bin/sh\necho "toybox 0.8.9"\n', { mode: 0o755 });
   r = ex(join(t, 'ok.tar.gz'), join(t, 'o-toy'), { PREFIX: join(t, 'toy') }); assert.notEqual(r.status, 0); assert.match(r.stderr, /not GNU tar \(toybox\/busybox refused\)/);
   const ext = readFileSync(EXTRACT, 'utf8'); assert.match(ext, /TAR=\$PREFIX\/bin\/tar/); assert.match(ext, /--no-same-owner/); assert.match(ext, /mkdir -m 700/);
-  const doc = readFileSync(join(REPO, 'docs', 'note9-termux.md'), 'utf8'); assert.match(doc, /TAR=\$PREFIX\/bin\/tar/); assert.match(doc, /\$TAR -tvzf "\$T"/); assert.match(doc, /--no-same-owner/); assert.match(doc, /mkdir -m 700/);
+  const doc = readFileSync(join(REPO, 'docs', 'android-legacy-termux.md'), 'utf8'); assert.match(doc, /TAR=\$PREFIX\/bin\/tar/); assert.match(doc, /\$TAR -tvzf "\$T"/); assert.match(doc, /--no-same-owner/); assert.match(doc, /mkdir -m 700/);
 });
 test('SD-31: setup refuses a release folder containing a symlink; setup uses $PREFIX/bin/find', { skip: !hasBash }, () => {
   const s = readFileSync(SETUP, 'utf8');
@@ -519,7 +519,7 @@ test('SD-31: setup refuses a release folder containing a symlink; setup uses $PR
   const { t, pack } = packRepo(); spawnSync('bash', [pack, join(t, 'ok.tar.gz')]);
   const rel = join(t, 'rel'); assert.equal(spawnSync('bash', [EXTRACT, join(t, 'ok.tar.gz'), rel]).status, 0);
   symlinkSync('/etc/passwd', join(rel, 'config', 'evil'));
-  const r = spawnSync('bash', [join(rel, 'scripts', 'note9-termux-setup.sh')], { encoding: 'utf8', env: { PATH: stubGetprop(join(t, 'gp'), 28), HOME: t, TERMUX_VERSION: '0.118' } });
+  const r = spawnSync('bash', [join(rel, 'scripts', 'android-legacy-termux-setup.sh')], { encoding: 'utf8', env: { PATH: stubGetprop(join(t, 'gp'), 28), HOME: t, TERMUX_VERSION: '0.118' } });
   assert.notEqual(r.status, 0); assert.match(r.stdout + r.stderr, /non-regular entry .*evil in the release folder; .*refusing/);
 });
 
@@ -557,7 +557,7 @@ test('NPM: verifier, setup and runner refuse any node_modules dir (npm-deps: non
   const pkg = JSON.parse(readFileSync(join(REPO, 'package.json'), 'utf8'));
   assert.equal(Object.keys(pkg.dependencies ?? {}).length, 0); assert.equal(existsSync(join(REPO, 'package-lock.json')), false);
   assert.match(readFileSync(join(REPO, 'config', 'note9-runtime.SHA256SUMS'), 'utf8'), /^# npm-deps: none$/m);
-  for (const sc of ['note9-termux-setup.sh', 'note9-refresh-src.sh', 'note9-restart-serve.sh', 'note9-verify-runtime.sh', 'note9-common.sh']) {
+  for (const sc of ['android-legacy-termux-setup.sh', 'note9-refresh-src.sh', 'android-legacy-restart-serve.sh', 'note9-verify-runtime.sh', 'note9-common.sh']) {
     assert.doesNotMatch(readFileSync(join(SCRIPTS, sc), 'utf8').replace(/^\s*#.*$/gm, ''), /\bnpm\b(?!-deps)/, sc);
   }
   const f = fixture({ tree: { 'src/gateway.mjs': 'js', 'node_modules/x/index.js': '1' } });
@@ -627,7 +627,7 @@ test('KEY: GREEN_ROOMZ_API_KEY -> 0600 file passed via --api-key-file; key never
 test('KEY: override api_key_file is validated and passed; bad mode or caller --api-key refused', { skip: !hasBash }, () => {
   const { f, st } = keyed(); const kf = join(f.root, 'home', 'k.key');
   writeFileSync(kf, 'k'.repeat(32), { mode: 0o600 });
-  writeFileSync(join(st, 'agents.note9.local.json'), JSON.stringify({ api_key_file: kf }), { mode: 0o600 });
+  writeFileSync(join(st, 'agents.android-legacy.local.json'), JSON.stringify({ api_key_file: kf }), { mode: 0o600 });
   let r = runSrv(f); assert.equal(r.code, 0, r.out); assert.match(r.out, new RegExp(`--api-key-file ${kf.replace(/[.]/g, '\\.')}$`, 'm'));
   r = runSrv(f, {}, ['--api-key', 'x']); assert.notEqual(r.code, 0); assert.match(r.out, /caller passed --api-key/);
   r = runSrv(f, {}, ['--api-key-file=/tmp/x']); assert.notEqual(r.code, 0); assert.match(r.out, /caller passed --api-key-file/);
@@ -646,7 +646,7 @@ test('KEY: grz_key_generate makes a 0600 64-hex key once; grz_key_check refuses 
   assert.equal(r.status, 0, r.stderr); assert.equal(r.stdout, 'env');
 });
 test('KEY: setup and restart wire the key (generate, override api_key_file, check before serve, bearer probe)', () => {
-  const s = readFileSync(SETUP, 'utf8'); const rs = readFileSync(join(REPO, 'scripts', 'note9-restart-serve.sh'), 'utf8');
+  const s = readFileSync(SETUP, 'utf8'); const rs = readFileSync(join(REPO, 'scripts', 'android-legacy-restart-serve.sh'), 'utf8');
   assert.match(s, /grz_key_generate "\$KEYF"/); assert.match(s, /api_key_file: process\.env\.GRZ_OVR_KEY/);
   assert.ok(s.indexOf('grz_key_check') < s.indexOf('grz_serve_start "$PORT"')); assert.doesNotMatch(s, /fetch\('http/);
   assert.ok(rs.indexOf('grz_key_check') < rs.indexOf('grz_stop_serve\n')); assert.doesNotMatch(rs, /fetch\('http/);
@@ -752,9 +752,9 @@ test('R1: two concurrent installs (no flock): exactly one wins; loser’s releas
 
 test('R2: restart-serve holds the install lock; a held lock refuses restart; two concurrent restarts: one wins', { skip: !hasBash }, () => {
   const f = realTree(); assert.equal(run(f).code, 0);
-  const restart = join(f.dst, 'scripts/note9-restart-serve.sh');
+  const restart = join(f.dst, 'scripts/termux-restart-serve.sh');
   const commonSrc = readFileSync(join(SCRIPTS, 'note9-common.sh'), 'utf8');
-  const restartSrc = readFileSync(join(SCRIPTS, 'note9-restart-serve.sh'), 'utf8');
+  const restartSrc = readFileSync(join(SCRIPTS, 'android-legacy-restart-serve.sh'), 'utf8');
   assert.match(restartSrc, /grz_install_lock_acquire/);
   assert.match(restartSrc, /grz_install_lock_release/);
   assert.match(commonSrc, /grz_install_lock_acquire/);

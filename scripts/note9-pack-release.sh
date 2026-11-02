@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
-# Build the Note9 release bootstrap tarball: everything setup executes before verification
+# Build the android-legacy release bootstrap tarball: everything setup executes before verification
 # (setup, verifier, sourced helpers, shared-storage list) plus the manifest, in ONE file.
 # Deterministic: git archive of HEAD (refuses a dirty tree), gzip -n.
-# Usage: bash scripts/note9-pack-release.sh [out.tar.gz]   (default dist/grz-note9-release.tar.gz)
+# Usage: bash scripts/note9-pack-release.sh [out.tar.gz]   (default dist/grz-android-legacy-release.tar.gz)
 # Prints the tarball sha256 and the manifest sha256 (GRZ_MANIFEST_SHA256); publish them together.
 # Brian checks the tarball sha256 on the device before extracting or running anything.
 # Local only: never uploads, pushes or publishes.
 set -euo pipefail
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-OUT=${1:-$ROOT/dist/grz-note9-release.tar.gz}
+OUT=${1:-$ROOT/dist/grz-android-legacy-release.tar.gz}
 FILES=(
   config/note9-runtime.SHA256SUMS
   config/shared-storage-prefixes.txt
   scripts/note9-common.sh
   scripts/note9-shared-storage.sh
-  scripts/note9-termux-setup.sh
+  scripts/termux-setup.sh
   scripts/note9-verify-runtime.sh
 )
 FILES+=(scripts/note9-extract-release.sh)

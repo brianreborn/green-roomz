@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
-$root = 'C:\Users\brian\Documents\Codex\2026-08-28\files-pasted-by-the-user-1\outputs\green-roomz'
-$node = 'C:\Users\brian\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe'
+$root = Split-Path -Parent $PSScriptRoot
+$node = (Get-Command node -ErrorAction Stop).Source
 Set-Location $root
 $os = Get-CimInstance Win32_OperatingSystem
 $freeGB = [math]::Round($os.FreePhysicalMemory/1MB, 2)

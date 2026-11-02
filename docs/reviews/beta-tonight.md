@@ -1,6 +1,6 @@
-# Beta tonight (qodesh Windows MVP, 2026-09-07 ~10:10 UTC)
+# Beta tonight (mvp-host Windows MVP, 2026-09-07 ~10:10 UTC)
 
-Operator board. Host: qodesh (Win11 Athlon II, CPU llama only). Manifest: `config/agents.windows-mvp.json`. No model download, no CUDA.
+Operator board. Host: mvp-host (Win11 Athlon II, CPU llama only). Manifest: `config/agents.windows-mvp.json`. No model download, no CUDA.
 
 Lessons (append when a failure costs real time): `docs/reviews/lessons-learned.md`.
 

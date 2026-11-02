@@ -1499,8 +1499,8 @@ test('bind-all needs the override; a specific LAN host needs allow_peers or a ke
   delete process.env.GREEN_ROOMZ_ALLOW_PUBLIC;
 
   assert.throws(() => mk().bindAddress('0.0.0.0'), /all interfaces/);
-  assert.throws(() => mk().bindAddress('192.168.1.5'), /allow_peers/);
-  assert.equal(mk({ allow_peers: ['192.168.1.42'] }).bindAddress('192.168.1.5'), '192.168.1.5');
+  assert.throws(() => mk().bindAddress('192.0.2.5'), /allow_peers/);
+  assert.equal(mk({ allow_peers: ['192.0.2.42'] }).bindAddress('192.0.2.5'), '192.0.2.5');
   assert.equal(mk().bindAddress('127.0.0.1'), '127.0.0.1');
 });
 
@@ -1509,12 +1509,12 @@ test('peerAllowed gates non-loopback clients against the allowlist', async () =>
   assert.equal(peerAllowed('127.0.0.1', []), true);
   assert.equal(peerAllowed('::1', []), true);
   assert.equal(peerAllowed('::ffff:127.0.0.1', []), true);
-  assert.equal(normalizeAddr('::ffff:192.168.1.42'), '192.168.1.42');
-  assert.equal(peerAllowed('192.168.1.42', ['192.168.1.42']), true);
-  assert.equal(peerAllowed('::ffff:192.168.1.42', ['192.168.1.42']), true);
-  assert.equal(peerAllowed('192.168.1.43', ['192.168.1.42']), false);
-  assert.equal(peerAllowed('192.168.1.99', ['192.168.1.0/24']), true);
-  assert.equal(peerAllowed('10.0.0.1', ['192.168.1.0/24']), false);
+  assert.equal(normalizeAddr('::ffff:192.0.2.42'), '192.0.2.42');
+  assert.equal(peerAllowed('192.0.2.42', ['192.0.2.42']), true);
+  assert.equal(peerAllowed('::ffff:192.0.2.42', ['192.0.2.42']), true);
+  assert.equal(peerAllowed('192.0.2.43', ['192.0.2.42']), false);
+  assert.equal(peerAllowed('192.0.2.99', ['192.0.2.0/24']), true);
+  assert.equal(peerAllowed('203.0.113.1', ['192.0.2.0/24']), false);
 });
 
 test('council: /council on sets a session default that fans out later turns', async (t) => {

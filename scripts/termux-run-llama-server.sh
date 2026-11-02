@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Portable shebang. Invoke as: bash note9-run-llama-server.termux.sh [llama-server args]
+# Portable shebang. Invoke as: bash android-legacy-run-llama-server.termux.sh [llama-server args]
 # Under Termux: runs the verified $HOME/grz.current/runtime copy only. Refuses unless
 #   - grz.current is a symlink to $HOME/grz.<sha> with no other symlinks inside,
 #   - <sha> == .verified == sha256(manifest) == GRZ_MANIFEST_SHA256 (always required;
@@ -31,7 +31,7 @@ if [ "$is_android" = 1 ]; then
   if [ -n "${PREFIX:-}" ] && [ -x "$PREFIX/bin/realpath" ]; then REALPATH=$PREFIX/bin/realpath; else REALPATH=realpath; fi
   HOME_REAL=$("$REALPATH" -e -- "$HOME") || die "HOME missing"
   CUR=$HOME_REAL/grz.current
-  [ -L "$CUR" ] || die "$CUR missing or not a symlink. Run note9-termux-setup.sh first; /data/local/tmp/grz/bin is adb-only (SELinux denies exec from Termux)."
+  [ -L "$CUR" ] || die "$CUR missing or not a symlink. Run android-legacy-termux-setup.sh first; /data/local/tmp/grz/bin is adb-only (SELinux denies exec from Termux)."
   D=$("$REALPATH" -e -- "$CUR") || die "$CUR is dangling; refusing"
   hex=${D#"$HOME_REAL"/grz.}
   [[ $D == "$HOME_REAL"/grz.* && $hex =~ ^[0-9a-f]{64}$ ]] || die "$CUR resolves to $D, not $HOME_REAL/grz.<sha256>; refusing"
@@ -48,7 +48,7 @@ if [ "$is_android" = 1 ]; then
   link=$("$FIND" "$D" -type l -print -quit 2>/dev/null)
   [ -z "$link" ] || die "symlink $link inside $D; refusing (only grz.current may be a symlink)"
   [ -x "$RT/bin/llama-server" ] || die "$RT/bin/llama-server missing or not executable"
-  [ -f "$D/.verified" ] || die "$D/.verified missing; runtime not verified. Re-run note9-termux-setup.sh with GRZ_MANIFEST_SHA256."
+  [ -f "$D/.verified" ] || die "$D/.verified missing; runtime not verified. Re-run android-legacy-termux-setup.sh with GRZ_MANIFEST_SHA256."
   [ -f "$MAN" ] || die "manifest $MAN missing; refusing"
   stamp=$(tr -d '[:space:]' < "$D/.verified")
   cur=$(sha256sum < "$MAN" | cut -d' ' -f1)
@@ -93,7 +93,7 @@ if [ "$is_android" = 1 ]; then
   KEYF=$(GRZ_OVR_TREE="$D/tree" node --input-type=module -e '
     const { readHostOverride, hostOverridePath, readApiKeyFile } = await import(process.env.GRZ_OVR_TREE + "/src/config.mjs");
     try {
-      const o = readHostOverride(hostOverridePath("agents.note9.json", process.env), process.env);
+      const o = readHostOverride(hostOverridePath("agents.android-termux.json", process.env), process.env);
       if (o?.api_key_file) { readApiKeyFile(o.api_key_file, process.env); process.stdout.write(o.api_key_file); }
     } catch (e) { console.error("api_key_file: " + (e.details ? JSON.stringify(e.details) : e.message)); process.exit(1); }') \
     || die "api_key_file refused; refusing to start llama-server"

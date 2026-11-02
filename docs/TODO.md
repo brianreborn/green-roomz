@@ -113,7 +113,7 @@ Analysis in `docs/model-lifecycle.md`. Built: SIGSTOP/SIGCONT, `coldStartChain`,
 
 - [!] **GPU-yield protocol** (`docs/model-lifecycle.md` §"GPU-yield protocol").
       `SIGUSR1` → `vkFreeMemory` weight+KV → confirm → SIGSTOP-able with VRAM
-      released. Needs a bounded llama.cpp patch. dGPU hosts only (qodesh/note-dGPU).
+      released. Needs a bounded llama.cpp patch. dGPU hosts only (mvp-host/note-dGPU).
 - [!] **Managed VRAM build flag for ggml** — `cudaMallocManaged` /
       `VK_EXT_pageable_device_local_memory` so idle GPU models page to host RAM
       automatically. Build flag / small ggml patch. dGPU only; UMA APU needs none.
@@ -126,7 +126,7 @@ Analysis in `docs/model-lifecycle.md`. Built: SIGSTOP/SIGCONT, `coldStartChain`,
       alloc pageable/suspendable while weights stay on GPU. Wire in `buildLaunch`
       for non-resident vulkan profiles.
 - [ ] **Windows native suspend** — `this.suspendImpl` is a no-op stub on win32
-      (we terminate instead). A `NtSuspendProcess` helper would let SHALOM freeze
+      (we terminate instead). A `NtSuspendProcess` helper would let WIN-HOST freeze
       CPU models like POSIX.
 
 ## Council / variants
@@ -145,7 +145,7 @@ Built: variants expansion, `pinned`, council fan-out, 3 judges, scorecard,
       are wired, the dedicated profile is not).
 - [ ] **Cascade / escalate** — run the cheap variant alone; convene the council
       only when its `/confidence` is low or its JSON fails the schema.
-- [ ] **Cross-host council** — fan out to note9 + qodesh + shalom over the peer
+- [ ] **Cross-host council** — fan out to android-legacy + mvp-host + win-host over the peer
       allowlist. Blocked on host bring-ups (#2-#5).
 - [ ] **Judge = security-monitor** for policy-sensitive turns.
 - [ ] **Checkpoint the winner's KV** (`snapshotModel`) so the next similar request warm-starts from it.
@@ -166,12 +166,12 @@ Issues + `host/<name>` branches exist; actual work does not. Each: push local
 changes, cut a local checkout on the host, get `green-roomz serve` green, set the
 host's `default_variant`. Reference japanglify / UMAssisted layout.
 
-- [ ] **#2 note9** (SM-N960U, Android 10, no root, 5.7 GB, Termux). SELinux blocks
+- [ ] **#2 android-legacy** (SM-N960U, Android 10, no root, 5.7 GB, Termux). SELinux blocks
       exec from `/data/local/tmp` and `/sdcard` — runtime must live in `~/grz-runtime`.
 - [ ] **#3 pixel8** (Tensor G3, KernelSU, 8 GB).
-- [ ] **#4 qodesh** (Athlon II X2, 8600GT 224 MB, 16 GB DDR3, Win11). GPU too
+- [ ] **#4 mvp-host** (Athlon II X2, 8600GT 224 MB, 16 GB DDR3, Win11). GPU too
       small for 0.5B Q4 — CPU nexus only, ~3 tok/s. 7B code stays `impractical`.
-- [ ] **#5 godslove** (i7-620M, FreeBSD 15, 8 GB).
+- [ ] **#5 bsd-laptop** (i7-620M, FreeBSD 15, 8 GB).
 
 ## Diagrams produced earlier — where they are
 
@@ -194,7 +194,7 @@ host's `default_variant`. Reference japanglify / UMAssisted layout.
 - [ ] **green-agentz subtree refresh** — `systems/green-roomz/` subtree is at
       commit 8668fad; green-roomz `main` has advanced ~15 commits since. Re-pull.
 - [?] **Deployed manifest divergence** (see memory `deployed-gateway-manifest-divergence`).
-      Live SHALOM gateway loads `C:\LocalAI\android-pack\grz-termux\config\agents.windows.json`
+      Live WIN-HOST gateway loads `C:\LocalAI\android-pack\grz-termux\config\agents.windows.json`
       (all agents `runtime: "logical"` → single `:8081` backend, vision `unavailable`),
       not the repo manifest. Decide: repoint the deployment at the repo manifest,
       or formally fork the deployed one. Gateway also observed crashing with

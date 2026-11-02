@@ -4,7 +4,7 @@
   "measured_at_utc": "2026-08-28T17:53:49Z",
   "measured_at_pt": "2026-08-28T10:53:49 PT",
   "host": {
-    "machine": "shalom",
+    "machine": "win-host",
     "total_ram_gb": 15.24,
     "free_ram_gb_before": 8.96,
     "free_ram_kb_before": 9399884,

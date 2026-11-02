@@ -247,7 +247,7 @@ let procfsHintLogged = false;
 export const _keyPathIssuesForTest = (real, homeReal) => keyPathIssues(real, homeReal);
 export function _resetProcfsHintForTest() { procfsHintLogged = false; }
 
-/** Key content rule (shared with the note9 scripts and familia): one token, no \r, no \n,
+/** Key content rule (shared with the android-legacy scripts and familia): one token, no \r, no \n,
  * no whitespace anywhere, incl. trailing newline. llama-server reads one key per line and does
  * not trim, so a stray \r would 401 every client. Setup writes with printf '%s'. */
 export function apiKeyContentIssues(raw, file = 'api_key_file') {
@@ -260,7 +260,7 @@ export function apiKeyContentIssues(raw, file = 'api_key_file') {
 
 const SHARED_PREFIX_FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'config', 'shared-storage-prefixes.txt');
 let sharedPrefixCache = null;
-/** Shared-storage prefixes (config/shared-storage-prefixes.txt; same list the note9 scripts use). */
+/** Shared-storage prefixes (config/shared-storage-prefixes.txt; same list the android-legacy scripts use). */
 export function sharedStoragePrefixes() {
   if (!sharedPrefixCache) {
     sharedPrefixCache = Object.freeze(readFileSync(SHARED_PREFIX_FILE, 'utf8').split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#')));

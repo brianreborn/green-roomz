@@ -3,8 +3,8 @@ $dest = 'C:\LocalAI\Qwen3-4B-Q4_K_M.gguf'
 $url = 'https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/main/Qwen3-4B-Q4_K_M.gguf'
 $expectedSize = 2497280256
 $expectedHash = '7485FE6F11AF29433BC51CAB58009521F205840F5B4AE3A32FA7F92E8534FDF5'
-$log = 'C:\Users\brian\Documents\Codex\2026-08-28\files-pasted-by-the-user-1\outputs\green-roomz\data\qwen3-4b-download.log'
-$status = 'C:\Users\brian\Documents\Codex\2026-08-28\files-pasted-by-the-user-1\outputs\green-roomz\data\qwen3-4b-download-status.json'
+$log = Join-Path (Split-Path -Parent $PSScriptRoot) '\data\qwen3-4b-download.log'
+$status = Join-Path (Split-Path -Parent $PSScriptRoot) '\data\qwen3-4b-download-status.json'
 function Write-Status($obj) {
   $json = $obj | ConvertTo-Json -Compress
   [System.IO.File]::WriteAllText($status, $json)
@@ -38,7 +38,7 @@ if (Test-Path $dest) {
 Write-Status @{ phase='downloading'; path=$dest }
 Log "starting curl download $url -> $dest"
 $curl = 'C:\Windows\System32\curl.exe'
-$curlLog = 'C:\Users\brian\Documents\Codex\2026-08-28\files-pasted-by-the-user-1\outputs\green-roomz\data\qwen3-4b-curl.err'
+$curlLog = Join-Path (Split-Path -Parent $PSScriptRoot) '\data\qwen3-4b-curl.err'
 $argList = @('-L','--fail','--retry','8','--retry-all-errors','--retry-delay','3','-C','-','--output',$dest,$url)
 $p = Start-Process -FilePath $curl -ArgumentList $argList -NoNewWindow -PassThru -Wait -RedirectStandardError $curlLog
 if ($p.ExitCode -ne 0) {

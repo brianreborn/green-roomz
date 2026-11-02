@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Portable shebang (NewTermux may use a non-com.termux $PREFIX). Invoke as: bash <script>.sh
 : "${LANG:=C.UTF-8}"; export LANG
-# Green-Roomz Note9 Termux setup — no root
+# Green-Roomz android-legacy Termux setup — no root
 # Runtime is copied into $HOME because SELinux blocks executing /data/local/tmp.
 set -uo pipefail
 umask 077
@@ -30,7 +30,7 @@ STATE=$GRZ_STATE
 LOG_OPT_IN=0; [[ ${GRZ_LOG_OPT_IN:-0} == 1 ]] && LOG_OPT_IN=1
 LOG=$(grz_log_path setup "$LOG_OPT_IN")
 if [[ $LOG != /dev/null ]]; then exec > >(tee -a "$LOG") 2>&1; fi
-echo "=== note9 setup $(date -Is 2>/dev/null || date) ==="
+echo "=== android-legacy setup $(date -Is 2>/dev/null || date) ==="
 echo "uid=$(id)"
 echo "HOME=$HOME PREFIX=${PREFIX:-}"
 
@@ -79,23 +79,23 @@ if [[ -n $nm ]]; then echo "ERROR: node_modules present in staged tree ($nm); pa
 echo "=== copy + verify native runtime into \$HOME (never executed from $SRC_TMP) ==="
 # Manifest ships in the cut: tree/config/note9-runtime.SHA256SUMS, anchored by
 # GRZ_MANIFEST_SHA256. Installs $HOME/grz.<sha>/{runtime,tree} and flips grz.current. Only listed
-# files are copied (runtime + JS tree); nothing is exec'd from $SRC_TMP. See docs/note9-termux.md.
+# files are copied (runtime + JS tree); nothing is exec'd from $SRC_TMP. See docs/android-legacy-termux.md.
 # Verifier comes from setup's own dir (the sha-checked release tarball, note9-pack-release.sh),
 # never from the staged, unverified tree.
 bash "$SELF_DIR/note9-verify-runtime.sh" "$SRC_TMP" "$TREE_SRC" || exit 1
 
-RUNNER="$HOME_GRZ/scripts/note9-run-llama-server.termux.sh"
+RUNNER="$HOME_GRZ/scripts/termux-run-llama-server.sh"
 test -x "$RUNNER" || { echo "ERROR: runner not executable at $RUNNER"; exit 1; }
 test -x "$RT/bin/llama-server" || { echo "ERROR: llama-server not executable at $RT/bin/llama-server"; ls -la "$RT/bin"; exit 1; }
 "$RUNNER" --version | head -3 || echo "WARN: version probe failed"
 
-MAN="$HOME_GRZ/config/agents.note9.json"
+MAN="$HOME_GRZ/config/agents.android-termux.json"
 # Host-specific values go to an unlisted override (the verified manifest is never edited).
 # Allowlisted keys only (port, api_key_file, log_opt_in); values pass via env to node and
 # are JSON-encoded there, never through sed or a shell. tmp+mv, mode 600.
 PORT=${GRZ_PORT:-8080}
 [[ $PORT =~ ^[0-9]+$ ]] || { echo "ERROR: GRZ_PORT must be numeric"; exit 1; }
-OVR="$STATE/agents.note9.local.json"
+OVR="$STATE/agents.android-legacy.local.json"
 # API key (always required, loopback included): 0600 key in the state dir, generated if absent.
 KEYF="$STATE/api.key"
 grz_key_generate "$KEYF" || { echo "ERROR: generating $KEYF failed"; exit 1; }
@@ -118,7 +118,7 @@ cd "$GRZ_TREE" || exit 1
 
 echo "=== validate ==="
 VAL=$(grz_log_path validate "$LOG_OPT_IN")
-node ./bin/green-roomz.mjs validate --manifest ./config/agents.note9.json | tee -a "$VAL"
+node ./bin/green-roomz.mjs validate --manifest ./config/agents.android-termux.json | tee -a "$VAL"
 
 # shellcheck source=note9-serve-pid.sh
 . "$GRZ_TREE/scripts/note9-serve-pid.sh"

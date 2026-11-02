@@ -14,7 +14,7 @@
 #   bin/libggml.so, models/x.gguf); "tree/" entries are relative to tree/.
 # Trust anchor: GRZ_MANIFEST_SHA256 (operator-supplied out of band) must equal sha256(manifest).
 # Install lock: $HOME/.grz-install.lock via grz_install_lock_* in note9-common.sh (SD-24/33, Race R1);
-#   same lock used by note9-restart-serve.sh (Race R2). Dead-pid locks are taken over; release is pid-checked.
+#   same lock used by android-legacy-restart-serve.sh (Race R2). Dead-pid locks are taken over; release is pid-checked.
 # Startup sweep (SD-20): only real dirs named grz.<64hex>.old.<n>, grz.unverified.<t>.<p>.old.<n>
 #   or .grz-verify.XXXXXX (ours);
 #   never a bare *.old.*, never a symlink.
@@ -157,7 +157,7 @@ if [[ $UNVERIFIED == 0 && -L $CUR && $(readlink -- "$CUR") == "grz.$ACTUAL" ]]; 
     # Nothing unlisted, no symlinks, exec bits intact.
     nlive=$("$FIND" "$LIVE/runtime" "$LIVE/tree" \( -type f -o -type l \) -not -path "$LIVE/tree/$MAN_REL" -printf x | wc -c)
     [[ $nlive == "${#listed[@]}" ]] || ok=0
-    for b in "$LIVE"/runtime/bin/llama-server "$LIVE"/runtime/bin/llama-cli "$LIVE"/runtime/bin/llama-bench "$LIVE"/tree/scripts/note9-run-llama-server.termux.sh; do
+    for b in "$LIVE"/runtime/bin/llama-server "$LIVE"/runtime/bin/llama-cli "$LIVE"/runtime/bin/llama-bench "$LIVE"/tree/scripts/termux-run-llama-server.sh; do
       [[ ! -f $b || $(stat -c %a -- "$b") == 755 ]] || ok=0
     done
     if [[ $ok == 1 ]]; then
@@ -198,7 +198,7 @@ for b in "$NRT"/bin/llama-server "$NRT"/bin/llama-cli "$NRT"/bin/llama-bench; do
   [[ -f $b ]] && chmod 755 "$b"
 done
 # The cut runner is the manifest's runtime command: executable, from the hashed tree only.
-[[ -f $NTREE/scripts/note9-run-llama-server.termux.sh ]] && chmod 755 "$NTREE/scripts/note9-run-llama-server.termux.sh"
+[[ -f $NTREE/scripts/termux-run-llama-server.sh ]] && chmod 755 "$NTREE/scripts/termux-run-llama-server.sh"
 
 if [[ $UNVERIFIED == 0 ]]; then NAME=grz.$ACTUAL; else NAME=grz.unverified.$(date +%s).$$; fi
 DEST=$HOME_REAL/$NAME

@@ -14,7 +14,7 @@ data/local-ci-last.txt
 data/serve*
 data/ram-watch*
 data/open-taskmgr.ps1
-data/shalom-ram-watch.ps1
+data/*-ram-watch.ps1
 data/*.stdout.log
 data/*.note.txt
 data/agent-e2e/
@@ -22,7 +22,7 @@ data/agent-ws*/
 data/sessions/
 scripts/_*.ps1
 scripts/_*.mjs
-_qodesh-size-probe.ps1
+_*-size-probe.ps1
 *.gguf
 .DS_Store
 Thumbs.db
@@ -35,3 +35,9 @@ data/local-env.cmd
 
 dist/
 
+
+# Private per-host overrides (issue #28): never commit; see *.example
+local.env
+hosts.local.json
+private.env
+privacy-hosts.local.txt

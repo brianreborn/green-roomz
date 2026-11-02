@@ -1,0 +1,4 @@
+# Copy to scripts/privacy-hosts.local.txt (gitignored). One private host name per
+# line; scripts/lint_privacy.py fails on any of them in public files, in addition
+# to its built-in (hashed) list. Lines starting with # are ignored.
+<HOST>

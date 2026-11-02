@@ -109,14 +109,14 @@ test('encrypt-volumes rejects; missing cap rejects', () => {
   assert.equal(missGrant.kind, 'reject');
   assert.match(missGrant.reason, /missing capability/);
 
-  const note9 = createIsolate({ platform: 'note9', aidRoot: false });
-  const nmap = note9.map({ bits: ISO_CAP.MAP }, { callerRole: 'place' });
+  const androidLegacy = createIsolate({ platform: 'android-legacy', aidRoot: false });
+  const nmap = androidLegacy.map({ bits: ISO_CAP.MAP }, { callerRole: 'place' });
   assert.equal(nmap.kind, 'reject');
   assert.match(nmap.reason, /missing capability/);
-  const nwipe = note9.wipe({}, { callerRole: 'place' });
+  const nwipe = androidLegacy.wipe({}, { callerRole: 'place' });
   assert.equal(nwipe.kind, 'reject');
   assert.match(nwipe.reason, /missing capability/);
-  const nsr = note9.apply('secure_reboot', { callerRole: 'place' });
+  const nsr = androidLegacy.apply('secure_reboot', { callerRole: 'place' });
   assert.equal(nsr.kind, 'reject');
   assert.match(nsr.reason, /missing capability/);
   assert.notEqual(nsr.ok, true);

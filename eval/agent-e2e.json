@@ -2,7 +2,7 @@
   "schema": "green-roomz.agent-e2e.v1",
   "title": "End-to-end coding tasks (write / run / test / languages)",
   "notes": [
-    "Not SWE-bench. Frozen coding tasks the jail can actually execute on qodesh (Node, Python, PowerShell).",
+    "Not SWE-bench. Frozen coding tasks the jail can actually execute on mvp-host (Node, Python, PowerShell).",
     "Default runner is SMOKE + FAIL-FAST + OFFLINE (seconds). Halt on first FAIL. Health 'degraded' is expected (do not halt); gateway DOWN is a halt. --full is the long set. --live is one gateway hit (liveSmoke), not 16×270s.",
     "smoke cases are orthogonal failure modes: print loop, python TDD, CLI argv, missing toolchain.",
     "Go/Rust/C missing is an expected 127, not a skip-as-pass."

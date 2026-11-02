@@ -1,5 +1,5 @@
 $dest = 'C:\LocalAI\Qwen3-4B-Q4_K_M.gguf'
-$status = 'C:\Users\brian\Documents\Codex\2026-08-28\files-pasted-by-the-user-1\outputs\green-roomz\data\qwen3-4b-download-status.json'
+$status = Join-Path (Split-Path -Parent $PSScriptRoot) '\data\qwen3-4b-download-status.json'
 $expected = 2497280256
 if (Test-Path $dest) {
   $len = (Get-Item $dest).Length

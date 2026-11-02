@@ -1,4 +1,4 @@
-# Speed opt (2026-09-07, qodesh Athlon II)
+# Speed opt (2026-09-07, mvp-host Athlon II)
 
 Goal: faster local gateway + coding-agent loop without wrecking the usable default. No covert padding. `timing_privacy` stays `off`. Serve was not bounced.
 

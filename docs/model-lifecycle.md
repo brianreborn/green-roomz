@@ -1,6 +1,6 @@
 # Model lifecycle: start / stop / freeze / thaw
 
-Measured on SHALOM (Ryzen 5 7520U, 8 logical, Radeon 610M UMA, NVMe), llama.cpp
+Measured on WIN-HOST (Ryzen 5 7520U, 8 logical, Radeon 610M UMA, NVMe), llama.cpp
 b10665, `--load-mode mmap`.
 
 ## Measured overhead
@@ -178,7 +178,7 @@ off automatically. Cost is a host↔device migration (1–4 s over PCIe) only fo
 pages a revived model actually touches. Under heavy thrash it can be
 unpredictable — the explicit yield signal (above) is the disciplined fallback.
 
-**On a UMA APU (shalom) there is no separate VRAM to trade** — one pool, so a
+**On a UMA APU (win-host) there is no separate VRAM to trade** — one pool, so a
 "GPU" model is a host allocation with GPU compute, and CPU-side SIGSTOP + swap
 already covers it (buffers are `HOST_VISIBLE` on the `uma:1` path). The APU case
 needs none of the dGPU machinery.

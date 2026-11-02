@@ -1,6 +1,6 @@
 # Covert Fixer checkpoint (2026-09-06)
 
-Fixer: Covert Channel Fixer. Host: qodesh (Win11 Athlon II X2). Scope this pass: `src/timing-quant.mjs` + `test/timing-quant.test.mjs`. Grok Bot’s `/workspace/reviews/covert-fixer-checkpoint-2026-09-06.md` was not on this disk. Reviewer board used: local `docs/reviews/covert-checkpoint-2026-09-07.md`. No git commit/push. No serve bounce. No process-manager / gateway routing / android edits.
+Fixer: Covert Channel Fixer. Host: mvp-host (Win11 Athlon II X2). Scope this pass: `src/timing-quant.mjs` + `test/timing-quant.test.mjs`. Grok Bot’s `/workspace/reviews/covert-fixer-checkpoint-2026-09-06.md` was not on this disk. Reviewer board used: local `docs/reviews/covert-checkpoint-2026-09-07.md`. No git commit/push. No serve bounce. No process-manager / gateway routing / android edits.
 
 ## What landed
 

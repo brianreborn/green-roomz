@@ -1,4 +1,4 @@
-# Green-Roomz Windows MVP (qodesh)
+# Green-Roomz Windows MVP (mvp-host)
 
 Operator: **Brian**. Host: Win11 Athlon II, 16 GB RAM, **8600 GT display only** — chat is **CPU llama** only. Never load GGUFs on the 8600 GT.
 
@@ -22,7 +22,7 @@ Clients (use any mix; they share the same gateway):
 | **llama.app** | OpenAI-compat GUI at `http://127.0.0.1:8080` | Desktop JSON/REST client |
 | curl / SDK | `POST /v1/chat/completions` | Anything OpenAI-shaped |
 
-## One-time on qodesh
+## One-time on mvp-host
 
 1. Run `install-windows.cmd` → `%LOCALAPPDATA%\Green-Roomz` (CPU llama b10702).
 2. Fetch the tiny Instruct GGUF (CPU mmap):

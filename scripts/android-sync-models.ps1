@@ -1,6 +1,8 @@
 [CmdletBinding()]
-param([string]$Device = '27841130ae1c7ece')
+param([string]$Device = $env:GRZ_ADB_SERIAL)
 $ErrorActionPreference = 'Stop'
+# Device serial is private: pass -Device or set GRZ_ADB_SERIAL (never commit it).
+if (-not $Device) { throw 'Pass -Device <adb-serial> or set GRZ_ADB_SERIAL.' }
 $root = 'C:\LocalAI'
 $target = '/data/local/tmp/grz/models'
 $items = @(
@@ -14,7 +16,7 @@ $items = @(
   @{ Source = "$root\piper\voices\en_US-lessac-medium.onnx"; Name = 'en_US-lessac-medium.onnx' },
   @{ Source = "$root\stable-diffusion.cpp\models\sd15-q4_0.gguf"; Name = 'sd15-q4_0.gguf' }
 )
-$log = Join-Path (Split-Path -Parent $PSScriptRoot) 'data\note9-model-sync.log'
+$log = Join-Path (Split-Path -Parent $PSScriptRoot) 'data\android-legacy-model-sync.log'
 function Log($s) { $line = "[{0}] {1}" -f (Get-Date -Format o), $s; Add-Content -Path $log -Value $line; Write-Output $line }
 $missing = @($items | Where-Object { -not (Test-Path $_.Source) })
 if ($missing.Count) { throw ('Missing local sources: ' + (($missing | ForEach-Object Source) -join '; ')) }

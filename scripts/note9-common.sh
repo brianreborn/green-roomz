@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Sourced helper for note9 setup / refresh / restart. Layout (see note9-verify-runtime.sh):
+# Sourced helper for android-legacy setup / refresh / restart. Layout (see note9-verify-runtime.sh):
 #   $HOME/grz.current -> grz.<sha>/{runtime,tree,.verified}; user state in $HOME/.green-roomz-state.
 # Nothing here stores a runtime path: every caller resolves through grz.current.
 if [[ -n ${PREFIX:-} && -x ${PREFIX}/bin/realpath ]]; then REALPATH=$PREFIX/bin/realpath; else REALPATH="realpath"; fi
@@ -35,7 +35,7 @@ grz_state_init() {
 grz_resolve_current() {
   local home_real hex
   home_real=$("$REALPATH" -e -- "$HOME") || return 1
-  [[ -L $GRZ_CUR ]] || { echo "ERROR: $GRZ_CUR missing or not a symlink; run note9-termux-setup.sh" >&2; return 1; }
+  [[ -L $GRZ_CUR ]] || { echo "ERROR: $GRZ_CUR missing or not a symlink; run android-legacy-termux-setup.sh" >&2; return 1; }
   GRZ_DIR=$("$REALPATH" -e -- "$GRZ_CUR") || { echo "ERROR: $GRZ_CUR dangling" >&2; return 1; }
   hex=${GRZ_DIR#"$home_real"/grz.}
   [[ $GRZ_DIR == "$home_real"/grz.* && $hex =~ ^[0-9a-f]{64}$ ]] || { echo "ERROR: $GRZ_CUR -> $GRZ_DIR is not grz.<sha256>" >&2; return 1; }
@@ -48,7 +48,7 @@ grz_log_opt_in() {
   local tree=${1:?tree}
   GRZ_OVR_TREE=$tree node --input-type=module -e '
     const { readHostOverride, hostOverridePath } = await import(process.env.GRZ_OVR_TREE + "/src/config.mjs");
-    const o = readHostOverride(hostOverridePath("agents.note9.json", process.env), process.env);
+    const o = readHostOverride(hostOverridePath("agents.android-termux.json", process.env), process.env);
     process.stdout.write(o?.log_opt_in === true ? "1" : "0");'
 }
 
@@ -68,7 +68,7 @@ grz_serve_start() {
   local port=$1 optin=$2 out err
   out=$(grz_log_path serve.out "$optin"); err=$(grz_log_path serve.err "$optin")
   ( cd "$GRZ_TREE" && unset LD_LIBRARY_PATH && GRZ_ROOT="$GRZ_TREE" exec nohup node ./bin/green-roomz.mjs serve \
-      --manifest ./config/agents.note9.json --host 127.0.0.1 --port "$port" >>"$out" 2>>"$err" ) &
+      --manifest ./config/agents.android-termux.json --host 127.0.0.1 --port "$port" >>"$out" 2>>"$err" ) &
   GRZ_SERVE_PID=$!
   grz_write_pid "$GRZ_SERVE_PID"
 }
@@ -91,7 +91,7 @@ grz_key_check() {
   GRZ_OVR_TREE=${1:?tree} node --input-type=module -e '
     const { readHostOverride, hostOverridePath, readApiKeyFile } = await import(process.env.GRZ_OVR_TREE + "/src/config.mjs");
     try {
-      const o = readHostOverride(hostOverridePath("agents.note9.json", process.env), process.env);
+      const o = readHostOverride(hostOverridePath("agents.android-termux.json", process.env), process.env);
       if (o?.api_key_file) { readApiKeyFile(o.api_key_file, process.env); process.stdout.write(o.api_key_file); process.exit(0); }
     } catch (e) { console.error("ERROR: api key: " + (e.details ? JSON.stringify(e.details) : e.message)); process.exit(1); }
     if ((process.env.GREEN_ROOMZ_API_KEY ?? "").trim()) { process.stdout.write("env"); process.exit(0); }
@@ -111,13 +111,13 @@ grz_probe() {
 grz_port() {
   GRZ_OVR_TREE=${1:?tree} node --input-type=module -e '
     const { readHostOverride, hostOverridePath } = await import(process.env.GRZ_OVR_TREE + "/src/config.mjs");
-    const o = readHostOverride(hostOverridePath("agents.note9.json", process.env), process.env);
+    const o = readHostOverride(hostOverridePath("agents.android-termux.json", process.env), process.env);
     process.stdout.write(String(o?.port ?? 8080));'
 }
 
 # ---------------------------------------------------------------------------
 # Install / serve mutual exclusion (SD-24 / SD-33 / Race R1 / R2).
-# Same lock for note9-verify-runtime.sh and note9-restart-serve.sh:
+# Same lock for note9-verify-runtime.sh and android-legacy-restart-serve.sh:
 #   $HOME/.grz-install.lock  (mkdir + owner pid token)
 # Prefer $PREFIX/bin/flock when present (.grz-install.flock). Without flock the
 # mkdir path still holds the lock exclusively: cand dir is built with pid already

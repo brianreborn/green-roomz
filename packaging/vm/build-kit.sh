@@ -1,6 +1,6 @@
 #!/bin/sh
 # Build a bootable VM kit: Debian cloud qcow2 + cloud-init seed ISO.
-# Intended for GitHub Actions / a Linux builder (not qodesh).
+# Intended for GitHub Actions / a Linux builder (not mvp-host).
 set -eu
 ROOT="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
 OUT="${1:-$ROOT/../dist/vm}"

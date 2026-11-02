@@ -1,25 +1,25 @@
-# Platform review — Note 9 on qodesh ADB + Windows MVP paths
+# Platform review — Android-legacy phone on mvp-host ADB + Windows MVP paths
 
-**Reviewer:** Platform Reviewer. **Host:** qodesh (this USB plug). **Date:** 2026-09-07.
+**Reviewer:** Platform Reviewer. **Host:** mvp-host (this USB plug). **Date:** 2026-09-07.
 
 Fingerprint only. Did **not** git commit/push, bounce serve, download models, install APKs/Magisk modules, run `android-cross-build.ps1`, start an Android sidecar, or treat this serial as Pixel 8.
 
 | | |
 |---|---|
-| USB host | **qodesh** — Windows 10 Home 19045 (64-bit), Node v24.19.0, PowerShell 5.1 |
-| ADB | `C:\Users\brian\AppData\Local\Microsoft\WinGet\Packages\Google.PlatformTools_Microsoft.Winget.Source_8wekyb3d8bbwe\platform-tools\adb.exe` **1.0.41 / 37.0.1-15733141** |
-| Serial | `27841130ae1c7ece` |
-| Device | Galaxy Note 9 **SM-N960U** `crownqltesq` — **not** Pixel 8 |
+| USB host | **mvp-host** — Windows 10 Home 19045 (64-bit), Node v24.19.0, PowerShell 5.1 |
+| ADB | `%USERPROFILE%\AppData\Local\Microsoft\WinGet\Packages\Google.PlatformTools_Microsoft.Winget.Source_8wekyb3d8bbwe\platform-tools\adb.exe` **1.0.41 / 37.0.1-15733141** |
+| Serial | `<adb-serial>` |
+| Device | legacy Android phone **SM-N960U** `crownqltesq` — **not** Pixel 8 |
 | Sidecar | **not started** (`src/hosts/android.mjs` read only) |
 | Patch | **none** (see Windows path section) |
 
 ---
 
-## 1. Note 9 live ADB fingerprint
+## 1. Android-legacy phone live ADB fingerprint
 
-`adb -s 27841130ae1c7ece get-state` → **`device`**.
+`adb -s <adb-serial> get-state` → **`device`**.
 
-`adb devices -l`: `27841130ae1c7ece device product:crownqltesq model:SM_N960U device:crownqltesq transport_id:1`.
+`adb devices -l`: `<adb-serial> device product:crownqltesq model:SM_N960U device:crownqltesq transport_id:1`.
 
 ### Identity / build
 
@@ -46,7 +46,7 @@ Fingerprint only. Did **not** git commit/push, bounce serve, download models, in
 | `ro.build.type` / `tags` | user / release-keys |
 | `ro.csc.sales_code` / `ro.boot.carrierid` | CHA / **VZW** |
 | `ril.official_cscver` | N960UOYN9FVG2 |
-| `ro.boot.serialno` | 27841130ae1c7ece |
+| `ro.boot.serialno` | <adb-serial> |
 | `sys.usb.config` | mtp,conn_gadget,adb |
 | kernel | `Linux localhost 4.9.186-22990573 #1 SMP PREEMPT Thu Jul 21 20:50:02 KST 2022 aarch64` (dpi@21HHAG04, gcc 4.9.x) |
 | page size | **4096** (`getconf PAGESIZE`) |
@@ -126,7 +126,7 @@ Battery: USB powered, charging, **85%**, 24.6 °C, Li-ion, health 2. Display **1
 - `/sbin` is stock Samsung (`knox_changer`, `sswap` only); `/debug_ramdisk` empty
 - `/data/adb` not listable as uid 2000 (expected; not evidence either way)
 
-`docs/fleet-targets.md` still says **Magisk** from the shalom 2026-08-29 SKU note. **This qodesh pass does not reconfirm it.** Hidden Magisk is possible in theory; there is no Magisk Manager, no visible `magiskd`, and AVB is green+locked. **Do not assume KernelSU** (Pixel 8 row). Do not assume root from `user/release-keys` + `uid=2000`.
+`docs/fleet-targets.md` still says **Magisk** from the win-host 2026-08-29 SKU note. **This mvp-host pass does not reconfirm it.** Hidden Magisk is possible in theory; there is no Magisk Manager, no visible `magiskd`, and AVB is green+locked. **Do not assume KernelSU** (Pixel 8 row). Do not assume root from `user/release-keys` + `uid=2000`.
 
 **Termux (present, old):**
 
@@ -147,7 +147,7 @@ Cannot confirm `nodejs` / `llama-server` inside Termux without `run-as` (will fa
 
 ---
 
-## 2. Windows path review (qodesh dogfood)
+## 2. Windows path review (mvp-host dogfood)
 
 Host facts: **Microsoft Windows 10 Home** build **19045** (CIM). Other local docs still say “Win11”; `[Environment]::OSVersion` is also `10.0.19045`. Treat this box as **Win10 22H2**, not 22000+.
 
@@ -161,16 +161,16 @@ Allowlist in `src/util.mjs`: `GRZ_ROOT`, `GRZ_EXE`, `HOME`, `GRZ_LLAMA`. Percent
 
 | var | value |
 |---|---|
-| `GRZ_ROOT` | `C:\Users\brian\Documents\green-roomz` |
+| `GRZ_ROOT` | `%USERPROFILE%\Documents\green-roomz` |
 | `GRZ_EXE` | `.exe` |
-| `GRZ_LLAMA` | `C:\Users\brian\Documents\green-roomz\runtime\llama-server.exe` |
-| `HOME` | **unset** in this PowerShell (USERPROFILE `C:\Users\brian` is **not** allowlisted) |
+| `GRZ_LLAMA` | `%USERPROFILE%\Documents\green-roomz\runtime\llama-server.exe` |
+| `HOME` | **unset** in this PowerShell (USERPROFILE `%USERPROFILE%` is **not** allowlisted) |
 
 `loadManifest(config/agents.windows-mvp.json)` resolved:
 
 | field | path | length |
 |---|---|---|
-| `runtimes.llama_server.command` | `C:\Users\brian\Documents\green-roomz\runtime\llama-server.exe` | 61 |
+| `runtimes.llama_server.command` | `%USERPROFILE%\Documents\green-roomz\runtime\llama-server.exe` | 61 |
 | nexus model | `...\models\Qwenstral-Small-3.1-0.5B.Q4_K_M.gguf` | 80 |
 | text model | `...\models\Qwen2.5-0.5B-Instruct-Q4_K_M.gguf` | 80 |
 | piper | `...\runtime\piper.exe` | 54 |
@@ -191,7 +191,7 @@ Spawn path (`src/process-manager.mjs`): `shell: false`, `windowsHide: true`, `cw
 
 ### CON / PRN / NUL
 
-No sanitizer. `path.join(GRZ_ROOT, 'models', 'NUL')` produces `C:\Users\brian\Documents\green-roomz\models\NUL`. Opening that on Win10 without `\\?\` talks to the **NUL device**, not a file. Same for CON/PRN/AUX/COM1/LPT1. Manifests do not use those names. Latent footgun if a model field is ever `NUL` / `con.txt`, not a current MVP break.
+No sanitizer. `path.join(GRZ_ROOT, 'models', 'NUL')` produces `%USERPROFILE%\Documents\green-roomz\models\NUL`. Opening that on Win10 without `\\?\` talks to the **NUL device**, not a file. Same for CON/PRN/AUX/COM1/LPT1. Manifests do not use those names. Latent footgun if a model field is ever `NUL` / `con.txt`, not a current MVP break.
 
 ### Patch decision
 
@@ -199,15 +199,15 @@ No sanitizer. `path.join(GRZ_ROOT, 'models', 'NUL')` produces `C:\Users\brian\Do
 
 ---
 
-## 3. Android sidecar vs Termux+gateway (Note 9)
+## 3. Android sidecar vs Termux+gateway (Android-legacy phone)
 
 `src/hosts/android.mjs` is a **client stub only**. Default endpoint **`http://127.0.0.1:8199`**, `POST/GET` `${endpoint}/v1/sidecar/handshake`, `Authorization: Bearer ${token}`. Requires `protocol_version === 1` and a `nonce`. `fingerprint()` is handshake JSON (`android_version`, `abi`, `soc`, `driver`, `runtime`, `thermal_policy`). Token compare is `secureEquals`.
 
 Selected from `bin/green-roomz.mjs` only when `GREEN_ROOMZ_ANDROID_SIDECAR` is set (then **replaces** `WindowsHostAdapter`). There is **no** sidecar binary/APK in this repo, **no** android host test file, and **no** listener was started.
 
-Loopback **127.0.0.1:8199** is **on-device**. Pointing qodesh’s Windows gateway at that URL would hit **qodesh**, not the phone, unless someone sets `adb reverse` (not done). The intended shape is: **gateway process on the phone** talking to a native sidecar on the same loopback.
+Loopback **127.0.0.1:8199** is **on-device**. Pointing mvp-host’s Windows gateway at that URL would hit **mvp-host**, not the phone, unless someone sets `adb reverse` (not done). The intended shape is: **gateway process on the phone** talking to a native sidecar on the same loopback.
 
-### Can Note 9 run Termux + gateway later?
+### Can Android-legacy phone run Termux + gateway later?
 
 **Yes — that is the path.** Constraints from this plug:
 
@@ -218,9 +218,9 @@ Loopback **127.0.0.1:8199** is **on-device**. Pointing qodesh’s Windows gatewa
 - SELinux Enforcing, uid 2000, non-debuggable Termux — copy via `adb push` to `/sdcard` then Termux `cp`, not `run-as`.
 - No confirmed Magisk: stay in **userland** (Termux app dir / shared storage). Do not plan `/data/adb` modules.
 
-### Can Note 9 run a native sidecar later?
+### Can Android-legacy phone run a native sidecar later?
 
-**Not with the current llama.android APK story.** Fleet already records llama.android **`minSdk 33` → Pixel 8 only**; Note 9 is API 29. The handshake adapter does not implement inference; a native sidecar would be a new Android service on `:8199` that this client can fingerprint. **Out of this dogfood.** CPU ELF via Termux does not need that sidecar.
+**Not with the current llama.android APK story.** Fleet already records llama.android **`minSdk 33` → Pixel 8 only**; Android-legacy phone is API 29. The handshake adapter does not implement inference; a native sidecar would be a new Android service on `:8199` that this client can fingerprint. **Out of this dogfood.** CPU ELF via Termux does not need that sidecar.
 
 Pixel 8 (KernelSU, 16K, Tensor/Mali) is a **different** USB device. This serial is SDM845 / Adreno / 4K / no visible KSU.
 
@@ -230,13 +230,13 @@ Pixel 8 (KernelSU, 16K, Tensor/Mali) is a **different** USB device. This serial 
 
 | question | answer |
 |---|---|
-| ADB authorized on qodesh? | **Yes** — `get-state=device`, RSA already allowed |
+| ADB authorized on mvp-host? | **Yes** — `get-state=device`, RSA already allowed |
 | SKU | **SM-N960U / SDM845 / Adreno 630 v2 / Android 10 API 29 / 5.7 GB** |
 | Magisk / KernelSU this pass | **Not visible.** Do not copy fleet Magisk or Pixel KernelSU onto this plug |
 | 0.5B Q4 worker | **Possible in Termux userland** after a quieter RAM picture and a usable Termux/Node; tok/s still **est 8–15** |
 | GPU worker | Not in the CPU pack. Later OpenCL/Vulkan on Adreno 630, max 710 MHz |
 | Native sidecar | Handshake stub only; APK minSdk 33 will not install here |
 | Windows MVP paths | **OK** on this tree (61–80 char paths, expand+normalize works, LongPaths disabled but unused). No code patch |
-| Do not | `adb push` / Termux copy until live agent gate on shalom/qodesh says so (`docs/fleet-targets.md`); do not NDK this session |
+| Do not | `adb push` / Termux copy until live agent gate on win-host/mvp-host says so (`docs/fleet-targets.md`); do not NDK this session |
 
 **Next (not this review):** refresh Termux from F-Droid when installing a worker; copy the existing arm64 CPU pack; `GRZ_ROOT=... node bin/green-roomz.mjs serve --manifest config/agents.android.json` **on the phone**. Measure tok/s before touching OpenCL.

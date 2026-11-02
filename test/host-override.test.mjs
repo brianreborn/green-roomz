@@ -10,20 +10,20 @@ import { execFileSync } from 'node:child_process';
 import { Gateway } from '../src/gateway.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const BASE = join(ROOT, 'config', 'agents.note9.json');
+const BASE = join(ROOT, 'config', 'agents.android-termux.json');
 const sha = (p) => createHash('sha256').update(readFileSync(p)).digest('hex');
 
 function home(override, { mode = 0o600, dirMode = 0o700 } = {}) {
   const h = mkdtempSync(join(tmpdir(), 'grz-ovr-')); const st = join(h, '.green-roomz-state');
   mkdirSync(st); chmodSync(st, dirMode);
-  const f = join(st, 'agents.note9.local.json');
+  const f = join(st, 'agents.android-legacy.local.json');
   if (override !== undefined) { writeFileSync(f, JSON.stringify(override)); chmodSync(f, mode); }
   return { h, st, f };
 }
 const refused = (fn, re) => assert.throws(fn, (e) => re.test(JSON.stringify(e.details ?? e.message)));
 
 test('OVR: path is $HOME/.green-roomz-state/<name>.local.json (outside the versioned folder)', () => {
-  assert.equal(hostOverridePath('/x/grz.current/tree/config/agents.note9.json', { HOME: '/h' }), '/h/.green-roomz-state/agents.note9.local.json');
+  assert.equal(hostOverridePath('/x/grz.current/tree/config/agents.android-termux.json', { HOME: '/h' }), '/h/.green-roomz-state/agents.android-legacy.local.json');
 });
 test('OVR: allowlisted port applies; verified base file sha unchanged', async () => {
   const { h } = home({ port: 8099, log_opt_in: false });
@@ -183,7 +183,7 @@ test('P-1: win32 skips the mode check (Node reports 0o666) but still requires th
 });
 test('P-1: win32 host override with mode 666 is accepted; POSIX refuses', () => {
   const h = mkdtempSync(join(tmpdir(), 'grz-p1o-')); const st = join(h, '.green-roomz-state'); mkdirSync(st, { mode: 0o700 });
-  const f = join(st, 'agents.note9.local.json'); writeFileSync(f, JSON.stringify({ port: 8099 })); chmodSync(f, 0o666);
+  const f = join(st, 'agents.android-legacy.local.json'); writeFileSync(f, JSON.stringify({ port: 8099 })); chmodSync(f, 0o666);
   try {
     _setPlatformForTest('linux'); assert.throws(() => readHostOverride(f, { HOME: h }), /host override refused/);
     _setPlatformForTest('win32', h); assert.equal(readHostOverride(f, { HOME: h }).port, 8099);
@@ -210,12 +210,12 @@ test('P-1a: win32 with HOME unset uses os.homedir() (C:\\Users\\X) for the overr
   const files = { 'c:\\users\\x': 'C:\\Users\\X', 'c:\\users\\x\\.green-roomz-state\\api.key': 'C:\\Users\\X\\.green-roomz-state\\api.key', 'c:\\users\\y\\api.key': 'C:\\Users\\Y\\api.key' };
   try {
     _setPlatformForTest('win32', 'C:\\Users\\X', WIN_FS(files));
-    assert.equal(hostOverridePath('config\\agents.note9.json', {}), 'C:\\Users\\X\\.green-roomz-state\\agents.note9.local.json');
+    assert.equal(hostOverridePath('config\\agents.android-termux.json', {}), 'C:\\Users\\X\\.green-roomz-state\\agents.android-legacy.local.json');
     assert.deepEqual(apiKeyFileIssues('C:\\Users\\X\\.green-roomz-state\\api.key', {}), []);
     assert.match(apiKeyFileIssues('C:\\Users\\Y\\api.key', {}).join(), /outside the user profile/);
     assert.deepEqual(validateHostOverride({ port: 8099, api_key_file: 'C:\\Users\\X\\.green-roomz-state\\api.key' }, {}).port, 8099);
     _setPlatformForTest('linux');
-    assert.equal(hostOverridePath('agents.note9.json', {}), null, 'POSIX still needs env.HOME');
+    assert.equal(hostOverridePath('agents.android-termux.json', {}), null, 'POSIX still needs env.HOME');
   } finally { _setPlatformForTest(null); }
 });
 test('P-1b: win32 compares lowercased path.win32 forms (drive-letter case, backslashes, sibling prefix)', () => {

@@ -1,4 +1,4 @@
-# Race review: warm specialists (qodesh Windows dogfood)
+# Race review: warm specialists (mvp-host Windows dogfood)
 
 Athlon II X2, 2 logical CPUs. `canSuspend` is false on Windows (no SIGSTOP); eviction already terminates. This note is what landed vs what stayed open.
 

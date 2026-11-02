@@ -6,17 +6,30 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+function Get-GrzSetting {
+    # Env var first, then the gitignored private override (KEY=VALUE lines), then default.
+    param([string]$Name, [string]$Default = '', [string]$File = (Join-Path $PSScriptRoot 'local.env'))
+    $v = [Environment]::GetEnvironmentVariable($Name)
+    if ($v) { return $v }
+    if ($File -and (Test-Path -LiteralPath $File)) {
+        foreach ($line in Get-Content -LiteralPath $File) {
+            if ($line -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$' -and $Matches[1] -eq $Name) { return $Matches[2] }
+        }
+    }
+    return $Default
+}
+
 $Root = 'C:\LocalAI'
 $GatewayRoot = Join-Path $Root 'android-pack\grz-termux'
 $Manifest = Join-Path $GatewayRoot 'config\agents.windows.json'
 $GatewayEntry = Join-Path $GatewayRoot 'bin\green-roomz.mjs'
 $BackendLauncher = Join-Path $Root 'native-engines.ps1'
 $SmokeTestEntry = Join-Path $GatewayRoot 'smoke-test.mjs'
-$LaunchLog = Join-Path $Root 'shalom-launch.log'
+$LaunchLog = Join-Path $Root 'win-host-launch.log'
 $GatewayOut = Join-Path $Root 'gateway.log'
 $GatewayErr = Join-Path $Root 'gateway.err'
-$BackendLaunchOut = Join-Path $Root 'shalom-backend-launch.log'
-$BackendLaunchErr = Join-Path $Root 'shalom-backend-launch.err'
+$BackendLaunchOut = Join-Path $Root 'win-host-backend-launch.log'
+$BackendLaunchErr = Join-Path $Root 'win-host-backend-launch.err'
 
 function Write-LaunchLine {
     param([string]$Message)
@@ -59,24 +72,29 @@ function Wait-Endpoint {
     throw "$Name did not become healthy at $Uri within $TimeoutSeconds seconds."
 }
 
-if ($env:COMPUTERNAME -ine 'SHALOM') {
-    throw "This launcher is for SHALOM, not $($env:COMPUTERNAME)."
+# The expected machine name is private: set GRZ_EXPECTED_COMPUTERNAME in the environment or in
+# the gitignored local.env next to this script (see local.env.example).
+$ExpectedComputer = Get-GrzSetting -Name 'GRZ_EXPECTED_COMPUTERNAME'
+if (-not $ExpectedComputer) {
+    Write-Warning 'GRZ_EXPECTED_COMPUTERNAME is not set; skipping the machine-name guard.'
+} elseif ($env:COMPUTERNAME -ine $ExpectedComputer) {
+    throw "This launcher is for $ExpectedComputer, not $($env:COMPUTERNAME)."
 }
 
 foreach ($requiredPath in @($GatewayRoot, $Manifest, $GatewayEntry, $BackendLauncher)) {
     if (-not (Test-Path -LiteralPath $requiredPath)) {
-        throw "Required Shalom artifact is missing: $requiredPath"
+        throw "Required Windows host artifact is missing: $requiredPath"
     }
 }
 
 [IO.File]::WriteAllText(
     $LaunchLog,
-    ('{0:o} Starting Green-Roomz on SHALOM.{1}' -f (Get-Date), [Environment]::NewLine),
+    ('{0:o} Starting Green-Roomz on WIN-HOST.{1}' -f (Get-Date), [Environment]::NewLine),
     [Text.UTF8Encoding]::new($false)
 )
 
 if (-not (Test-Listener -Port 8081)) {
-    Write-LaunchLine '[START] Native Shalom backend on 127.0.0.1:8081'
+    Write-LaunchLine '[START] Native Windows host backend on 127.0.0.1:8081'
     $backendProcess = Start-Process -FilePath 'powershell.exe' `
         -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $BackendLauncher) `
         -RedirectStandardOutput $BackendLaunchOut `
@@ -85,15 +103,15 @@ if (-not (Test-Listener -Port 8081)) {
         -Wait `
         -PassThru
     if ($backendProcess.ExitCode -ne 0) {
-        throw "Shalom backend launcher failed with exit code $($backendProcess.ExitCode). See $BackendLaunchErr"
+        throw "Windows host backend launcher failed with exit code $($backendProcess.ExitCode). See $BackendLaunchErr"
     }
 } else {
     Write-LaunchLine '[REUSE] Listener already present on 127.0.0.1:8081'
 }
-Wait-Endpoint -Name 'Shalom native backend' -Uri 'http://127.0.0.1:8081/v1/models' -TimeoutSeconds 75
+Wait-Endpoint -Name 'Windows host native backend' -Uri 'http://127.0.0.1:8081/v1/models' -TimeoutSeconds 75
 
 if (-not (Test-Listener -Port 8080)) {
-    Write-LaunchLine '[START] Green-Roomz Shalom gateway on 127.0.0.1:8080'
+    Write-LaunchLine '[START] Green-Roomz Windows host gateway on 127.0.0.1:8080'
     $node = (Get-Command node -ErrorAction Stop).Source
     Start-Process -FilePath $node `
         -ArgumentList @($GatewayEntry, 'serve', '--manifest', $Manifest) `
@@ -121,4 +139,4 @@ if (-not $NoBrowser) {
     Start-Process 'http://localhost:8080/'
 }
 
-Write-LaunchLine '[READY] Green-Roomz is running on SHALOM.'
+Write-LaunchLine '[READY] Green-Roomz is running on WIN-HOST.'

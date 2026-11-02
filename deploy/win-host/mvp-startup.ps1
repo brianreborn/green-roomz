@@ -1,14 +1,26 @@
-# qodesh-startup.ps1 - one-shot bootstrap with backoff guard. Run as Administrator.
+# mvp-startup.ps1 - one-shot bootstrap with backoff guard. Run as Administrator.
 function Write-Info   { param($m) Write-Host ("[INFO]  " + $m) -ForegroundColor Cyan }
 function Write-Ok     { param($m) Write-Host ("[OK]    " + $m) -ForegroundColor Green }
 function Write-ErrorM { param($m) Write-Host ("[ERROR] " + $m) -ForegroundColor Red }
+function Get-GrzSetting {
+    # Env var first, then the gitignored private override (KEY=VALUE lines), then default.
+    param([string]$Name, [string]$Default = '', [string]$File = (Join-Path $PSScriptRoot 'local.env'))
+    $v = [Environment]::GetEnvironmentVariable($Name)
+    if ($v) { return $v }
+    if ($File -and (Test-Path -LiteralPath $File)) {
+        foreach ($line in Get-Content -LiteralPath $File) {
+            if ($line -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$' -and $Matches[1] -eq $Name) { return $Matches[2] }
+        }
+    }
+    return $Default
+}
 
 $isWin = $IsWindows -or ($env:OS -eq "Windows_NT")
 if (-not $isWin) { Write-ErrorM "Windows OS required"; exit 1 }
-Write-Info "Starting qodesh bootstrap."
+Write-Info "Starting mvp-host bootstrap."
 
 # Check state for spinloop protection
-$stateFile = "C:\LocalAI\.qodesh_state.json"
+$stateFile = Get-GrzSetting -Name 'GRZ_STARTUP_STATE_FILE' -Default 'C:\LocalAI\.grz_mvp_state.json'
 $state = @{ Failures = 0; LastRun = (Get-Date) }
 if (Test-Path -LiteralPath $stateFile) {
     try {
@@ -62,7 +74,8 @@ $gw = "C:\LocalAI\android-pack\grz-termux\src\gateway.mjs"
 $gwDir = "C:\LocalAI\android-pack\grz-termux"
 if (-not (Test-Path -LiteralPath $gw)) { Write-ErrorM "Gateway not found"; exit 1 }
 Write-Info "Launching gateway..."
-$gwJob = Start-Job -Name QodeshGateway -ScriptBlock {
+$gwJobName = Get-GrzSetting -Name 'GRZ_GATEWAY_JOB_NAME' -Default 'GrzMvpGateway'
+$gwJob = Start-Job -Name $gwJobName -ScriptBlock {
     param($dir, $entry)
     Set-Location -LiteralPath $dir
     node $entry
@@ -78,14 +91,14 @@ if ($r -and $r.object -eq "list") {
     [IO.File]::WriteAllText($stateFile, ($state | ConvertTo-Json), [System.Text.UTF8Encoding]($false))
 } else {
     Write-ErrorM "Gateway not responding."
-    Get-Job -Name QodeshGateway -ErrorAction SilentlyContinue | Stop-Job -Force
+    Get-Job -Name $gwJobName -ErrorAction SilentlyContinue | Stop-Job -Force
     $state.Failures += 1
     [IO.File]::WriteAllText($stateFile, ($state | ConvertTo-Json), [System.Text.UTF8Encoding]($false))
     exit 1
 }
 
 # 6 - hourly scheduled task
-$task = "QodeshAutoHeal"
+$task = Get-GrzSetting -Name 'GRZ_AUTOHEAL_TASK' -Default 'GrzMvpAutoHeal'
 Get-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue |
     Unregister-ScheduledTask -Confirm:$false -ErrorAction SilentlyContinue
 $sp = $MyInvocation.MyCommand.Path

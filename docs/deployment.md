@@ -34,7 +34,7 @@ to hold every model at once.
 The canonical live tree is the **dev checkout**, not a separate copy:
 
 ```
-C:\Users\brian\Documents\green-roomz     <- run serve from here, on `main`
+C:\Users\user\Documents\green-roomz     <- run serve from here, on `main`
 C:\LocalAI                               <- model store only (*.gguf), NOT a source tree
 ```
 
@@ -45,7 +45,7 @@ and nothing you edit. Any `green-roomz` checkout under `C:\LocalAI\...` is legac
 ## Start it
 
 ```powershell
-# from C:\Users\brian\Documents\green-roomz
+# from C:\Users\user\Documents\green-roomz
 powershell -ExecutionPolicy Bypass -File .\scripts\start-green-roomz.ps1
 #   … or plainly:  node .\bin\green-roomz.mjs serve
 ```
@@ -109,9 +109,9 @@ manifest (e.g. `qwen2.5-coder-1.5b` instead of the 7B).
 The gateway answers loopback by default. To let **one** other host reach it:
 
 ```powershell
-# manifest: "gateway": { "host": "192.168.1.251", "allow_peers": ["192.168.1.88"] }
+# manifest: "gateway": { "host": "192.0.2.251", "allow_peers": ["192.0.2.88"] }
 #   or at launch:
-node .\bin\green-roomz.mjs serve --host 192.168.1.251 --allow-peer 192.168.1.88
+node .\bin\green-roomz.mjs serve --host 192.0.2.251 --allow-peer 192.0.2.88
 ```
 
 Every request from a non-loopback address not on `allow_peers` gets **403**.

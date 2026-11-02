@@ -12,6 +12,8 @@
     "validate": "node ./bin/green-roomz.mjs validate",
     "benchmark": "node ./bin/green-roomz.mjs benchmark",
     "test": "node --test",
+    "lint:privacy": "python3 scripts/lint_privacy.py",
+    "test:privacy": "python3 -B -m pytest -q -p no:cacheprovider test/test_lint_privacy.py",
     "uat": "node ./scripts/uat.mjs",
     "test:e2e": "node --test ./e2e/gateway.e2e.mjs",
     "verify": "node ./e2e/verify-models.mjs",
