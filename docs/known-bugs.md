@@ -27,7 +27,7 @@ Still open:
 ## Serve / ops
 
 - mvp-host `:8080` is **degraded** without Qwen3-4B; nexus `:8187` 0.5B CPU-only is the working piece.
-- HTTP `192.0.2.10:8765` must stay bound to LAN (not 127.0.0.1). Duplicate python listeners caused 404/335-byte fake GGUFs.
+- HTTP `192.0.2.10:<PORT>` must stay bound to LAN (not 127.0.0.1). Duplicate python listeners caused 404/335-byte fake GGUFs.
 - Grok Bot local-exec on both PCs can drop mid-command; reconnect and continue. Do not Shell two `machineId`s in one parent turn.
 - McAfee on win-host: no Add-Type/P/Invoke; long PowerShell here-strings abort; do not disable RTS.
 - **Android-legacy phone Termux cannot exec `/data/local/tmp`.** SELinux `untrusted_app`. Copy llama pack to `~/grz-runtime`. `/sdcard` is noexec; needs `termux-setup-storage` to read `Download/`.

@@ -21,5 +21,5 @@ Parent stack should keep this and apply even if the background worker only does 
 
 ## CUDA 6.5 (parallel, not routing)
 - win-host: C:\LocalAI\_tmp\cuda_6.5.19_windows_general_64.exe 1053974928 bytes md5 63575eee9cb5cbf3e84f9c4496060399
-- LAN: http://192.0.2.10:8765/_tmp/cuda_6.5.19_windows_general_64.exe
+- LAN: http://192.0.2.10:<PORT>/_tmp/cuda_6.5.19_windows_general_64.exe
 - do not install (Win11 + 8600 driver)

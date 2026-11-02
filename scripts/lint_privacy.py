@@ -12,6 +12,7 @@ status non-zero.  Checked classes:
   * private fleet hostnames
   * personal e-mail addresses and @localhost authors
   * MAC addresses outside the RFC 7042 documentation block
+  * a numeric port on any non-loopback address (use <PORT>)
 
 Allowed: loopback, the unspecified address, RFC 5737 documentation ranges,
 2001:db8::/32, and placeholder user names such as <user> or $USER.
@@ -106,6 +107,7 @@ def load_extra_hosts(root: Path) -> frozenset[str]:
 
 
 IPV4_RE = re.compile(r"(?<![\w.])(\d{1,3}(?:\.\d{1,3}){3})(?![\w]|\.\d)")
+_PORT_AFTER = re.compile(r":\d{1,5}(?!\d)")
 IPV6_RE = re.compile(r"(?<![\w:.])([0-9A-Fa-f]{0,4}(?::[0-9A-Fa-f]{0,4}){2,7}"
                      r"(?:%[\w.]+)?)(?![\w:])")
 
@@ -209,6 +211,11 @@ def scan_text(text: str, path: str = "<text>",
             c = _v4_class(ip)
             if c:
                 out.append(Finding(path, lineno, c, m.group(1)))
+            elif (not (ip.is_loopback or ip.is_unspecified)
+                  and _PORT_AFTER.match(line, m.end())):
+                # Even a documentation address must not pin a real LAN port.
+                out.append(Finding(path, lineno, "lan-port",
+                                   m.group(1) + _PORT_AFTER.match(line, m.end()).group(0)))
         for m in IPV6_RE.finditer(line):
             cand = m.group(1).split("%", 1)[0]
             if cand.count(":") < 2:
