@@ -1,6 +1,6 @@
 # mvp-host MVP parity battery results
 
-**Machine:** mvp-host (`19f2c19e-e100-49f0-8507-813d66727973`)  
+**Machine:** mvp-host (`<machine-id>`)  
 **When:** 2026-09-06 ~05:38–05:43 PM PT (reverify; first run ~08:38–08:46 AM PT)  
 **Tree:** `%USERPROFILE%\Documents\green-roomz`  
 **Gateway:** `http://127.0.0.1:8080`  

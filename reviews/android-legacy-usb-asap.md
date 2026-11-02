@@ -4,7 +4,7 @@
 
 ## Machine
 - label: mvp-host
-- machineId: 19f2c19e-e100-49f0-8507-813d66727973
+- machineId: <machine-id>
 
 ## adb
 - `%USERPROFILE%\AppData\Local\Microsoft\WinGet\Packages\Google.PlatformTools_Microsoft.Winget.Source_8wekyb3d8bbwe\platform-tools\adb.exe`

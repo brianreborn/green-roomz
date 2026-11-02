@@ -159,6 +159,12 @@ def test_allowlist_passes(addr):
     assert kinds(f"bind {addr}") == []
 
 
+def test_doc_address_with_numeric_port_fails_placeholder_passes():
+    assert kinds(f"http://{dot(192, 0, 2, 10)}:8765/x") == ["lan-port"]
+    assert kinds(f"http://{dot(192, 0, 2, 10)}:<PORT>/x") == []
+    assert kinds("http://127.0.0.1:8765/x") == []
+
+
 def test_doc_range_neighbours_fail():
     assert kinds(dot(192, 0, 3, 1)) == ["non-doc-ipv4"]
     assert kinds(dot(198, 51, 101, 1)) == ["non-doc-ipv4"]

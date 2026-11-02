@@ -1,6 +1,6 @@
 # mvp-host recovery report
 
-**Machine:** mvp-host (`19f2c19e-e100-49f0-8507-813d66727973`)  
+**Machine:** mvp-host (`<machine-id>`)  
 **Checked:** 2026-09-06 ~8:05–8:10 AM PT  
 **Constraints honored:** no GGUF load on 8600 GT; no Afterburner clock changes; CPU llama only for green-roomz (official CPU zip, not LocalAI vulkan copy).
 

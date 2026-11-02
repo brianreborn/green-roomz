@@ -3,8 +3,8 @@
 Pickup file for the next turn. Local-exec dropped workers mid-edit. Do not re-download CUDA 6.5 on win-host (already hashed). Grok CLI: grok-4.6 reasoning **low**.
 
 ## Machines
-- win-host 801f51e6-fe6a-4bad-b878-e4aa3de1127c — Ryzen 5 7520U, Vulkan APU, live GRZ
-- mvp-host 19f2c19e-e100-49f0-8507-813d66727973 — Athlon II X2, 8600 GT 224MB sm_1.1, 16GB DDR3
+- win-host <machine-id> — Ryzen 5 7520U, Vulkan APU, live GRZ
+- mvp-host <machine-id> — Athlon II X2, 8600 GT 224MB sm_1.1, 16GB DDR3
 - Do not Shell both machineIds in the same parent turn (target-change abort).
 - Local-exec can vanish mid-command; treat as crash, reconnect, continue.
 
@@ -13,7 +13,7 @@ Pickup file for the next turn. Local-exec dropped workers mid-edit. Do not re-do
 - Live serve cwd: %USERPROFILE%\Documents\Codex\2026-08-28\files-pasted-by-the-user-1\outputs\green-roomz
 - Serve http://127.0.0.1:8080  nexus :8187 CPU 0.5B resident
 - llama-server: C:\LocalAI\llama-b10665-bin-win-vulkan-x64\llama-server.exe
-- Models: C:\LocalAI  HTTP file server 192.0.2.10:8765 (keep alive; python eagle3-venv bind 192.0.2.10 cwd C:\LocalAI)
+- Models: C:\LocalAI  HTTP file server 192.0.2.10:<PORT> (keep alive; python eagle3-venv bind 192.0.2.10 cwd C:\LocalAI)
 - Patched both trees: slash map, /auto unlocks client pin+session, vision-without-image / audio-without-audio rejected, json_schema, ESC/CRLF strip on reasons, HANDOFF suggest allowlist, USER fenced, first JSON only, slash ignored in fences
 - Last /route 8/8 aliases (pinned general-text-speculator):
   1 cpp -> qwenstral-code-speculator
@@ -65,7 +65,7 @@ Copy onto mvp-host too: %USERPROFILE%\Documents\green-roomz\src\
 - Windows host HAS installer: C:\LocalAI\_tmp\cuda_6.5.19_windows_general_64.exe
   bytes 1053974928  md5 63575eee9cb5cbf3e84f9c4496060399
   URL https://developer.download.nvidia.com/compute/cuda/6_5/rel/installers/cuda_6.5.19_windows_general_64.exe
-- LAN: http://192.0.2.10:8765/_tmp/cuda_6.5.19_windows_general_64.exe
+- LAN: http://192.0.2.10:<PORT>/_tmp/cuda_6.5.19_windows_general_64.exe
 - Do NOT run installer (Win11 + 8600 driver risk). Do NOT replace NVIDIA driver.
 - mvp-host: git yes; Python/CMake/Ninja were MISSING; winget was in-flight (first --id style failed). VS2013 (needed for CUDA 6.5 nvcc) NOT installed. vswhere missing. Do not install VS2022 as a fake.
 - mvp-host CUDA WAN curl may have a partial file; prefer LAN copy from win-host and verify md5.

@@ -1,6 +1,6 @@
 # mvp-host Windows MVP smoke prep
 
-**Machine:** mvp-host (`19f2c19e-e100-49f0-8507-813d66727973`)  
+**Machine:** mvp-host (`<machine-id>`)  
 **When:** 2026-09-06 ~08:14–08:23 AM PT  
 **Tree:** `%USERPROFILE%\Documents\green-roomz`  
 **Constraints honored:** never GGUF on 8600 GT; no Afterburner; CPU llama only; prefer cmd.exe under Documents; no git push; no LocalAI vulkan as primary llama; live `:8080` not bounced.

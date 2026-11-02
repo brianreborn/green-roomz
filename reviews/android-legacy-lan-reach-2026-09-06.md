@@ -2,7 +2,7 @@
 
 **Status: NOT FOUND**
 
-Checked from machine **mvp-host** (`19f2c19e-e100-49f0-8507-813d66727973`) at ~18:34 PT (2026-09-06). Constraints honored: no Knox trip, no root, no wipe/reboot, no Afterburner, no green-roomz deploy; read-only probes only; cmd under Documents preferred.
+Checked from machine **mvp-host** (`<machine-id>`) at ~18:34 PT (2026-09-06). Constraints honored: no Knox trip, no root, no wipe/reboot, no Afterburner, no green-roomz deploy; read-only probes only; cmd under Documents preferred.
 
 ## Summary
 

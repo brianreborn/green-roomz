@@ -1,6 +1,6 @@
 # mvp-host MVP reverify — 2026-09-06
 
-**Agent summary for follow-on work.** Machine: mvp-host (`19f2c19e-e100-49f0-8507-813d66727973`). Tree: `%USERPROFILE%\Documents\green-roomz`.
+**Agent summary for follow-on work.** Machine: mvp-host (`<machine-id>`). Tree: `%USERPROFILE%\Documents\green-roomz`.
 
 ## Verdict
 
