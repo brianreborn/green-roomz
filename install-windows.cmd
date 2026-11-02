@@ -1,7 +1,7 @@
 @echo off
 setlocal EnableExtensions DisableDelayedExpansion
 rem Green-Roomz beta-0.4 no-admin per-user installer (CPU llama only; MVP fetch: scripts\fetch-tiny-instruct.cmd).
-rem Operator: Brian. Hosts: qodesh (Win11/Firefox), shalom (Win).
+rem Operator: Brian. Hosts: mvp-host (Win11/Firefox), win-host (Win).
 rem No UAC, no Program Files, no HKLM, no self-signed cert, no icacls.
 rem Never vulkan/cuda. Never load GGUFs on the 8600 GT.
 
@@ -150,7 +150,7 @@ set "RC=1" & goto :grz_exit
 rem no vulkan, no CUDA, no C:\LocalAI fallback from this installer
 
 rem --- Start Menu shortcut: same .lnk path every run (idempotent, no elevation) ---
-rem .lnk via cscript/WScript.Shell so Firefox on qodesh does not hijack a .url.
+rem .lnk via cscript/WScript.Shell so Firefox on mvp-host does not hijack a .url.
 if exist "%SM%\Green-Roomz.url" del /q "%SM%\Green-Roomz.url"
 set "LNK=%SM%\Green-Roomz.lnk"
 set "VBS=%GRZ_TMP%\shortcut.vbs"

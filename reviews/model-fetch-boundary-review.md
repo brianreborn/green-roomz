@@ -22,7 +22,7 @@ Attackers:
 
 Fetch helpers: `scripts/fetch-tiny-instruct.cmd` (HF → `models\`), `data/download-qwen3-4b.ps1` (HF → `C:\LocalAI\…`, pinned), pack `start.cmd` / `install-windows.cmd` (GitHub llama CPU zip → `runtime\`), `deploy-android.sh` (GitHub android tar → stage then adb).
 
-Termux already uses `ln -sf` for the nexus GGUF (`termux-start.sh:42`; `scripts/note9-termux-setup.sh:50`).
+Termux already uses `ln -sf` for the nexus GGUF (`termux-start.sh:42`; `scripts/termux-setup.sh:50`).
 
 ---
 
@@ -128,8 +128,8 @@ Trees: `src/util.mjs` / `src/config.mjs` match between git and e2e-fresh. Live p
 | ID | Delta |
 |---|---|
 | **MF2** | Also `install-windows.cmd:35-50` — `tar -xf` of sibling `green-roomz.zip` / `green-roomz-slim.zip` into `%TEMP%\grz-unpack-*` then robocopy into `%LOCALAPPDATA%\Green-Roomz` with no member checks. Same zip-slip class as the llama CPU zip. |
-| **MF9** | LAN pull helpers `scripts/pull-localai-from-shalom.ps1` / `scripts/copy-localai-to-d.ps1` robocopy `*.gguf` + runtime into `C:\LocalAI` / `D:\LocalAI` with **no** digest. Feeds `agents.windows.json` absolute paths. Severity Low–Medium (host-overlay, not pack start). Fix: optional digest manifest; restrict source host. |
-| **Inventory** | `agents.windows.json` (git only): **no** `missing-*` — all `C:\LocalAI\...`. Android/note9: `${HOME}/grz-runtime/missing/<name>` directory style (`whisper-server`, `piper`, `sd-server`, `vision.gguf`, `whisper.bin`, `code.gguf`, `text.gguf`, `embed.gguf`, `rerank.gguf`, `guard.gguf`, `voice.onnx`, `sd.gguf`). |
+| **MF9** | LAN pull helpers `scripts/pull-localai-from-lan.ps1` / `scripts/copy-localai-to-d.ps1` robocopy `*.gguf` + runtime into `C:\LocalAI` / `D:\LocalAI` with **no** digest. Feeds `agents.windows.json` absolute paths. Severity Low–Medium (host-overlay, not pack start). Fix: optional digest manifest; restrict source host. |
+| **Inventory** | `agents.windows.json` (git only): **no** `missing-*` — all `C:\LocalAI\...`. Android/android-legacy: `${HOME}/grz-runtime/missing/<name>` directory style (`whisper-server`, `piper`, `sd-server`, `vision.gguf`, `whisper.bin`, `code.gguf`, `text.gguf`, `embed.gguf`, `rerank.gguf`, `guard.gguf`, `voice.onnx`, `sd.gguf`). |
 | **MF6 demo** | Relative `../../tmp/evil.gguf` via `resolveManifestPath` resolves outside pack (`path.resolve(dirname(manifest),'..', candidate)`). Confirmed class, not a new hole. |
 
 ### Still OK

@@ -1,4 +1,4 @@
-# Windows smoke checklist (beta-0.2, qodesh / shalom)
+# Windows smoke checklist (beta-0.2, mvp-host / win-host)
 
 No admin. Per-user install. CPU llama only. Do not stop the Linux cursor serve.
 
@@ -30,7 +30,7 @@ curl.exe -sS http://127.0.0.1:8080/health
 
 - [ ] HTTP 200. JSON has `"product": "Green-Roomz"` and `"status": "ok"` or `"degraded"` (degraded is normal if specialists are cold).
 - [ ] Optional: `curl.exe -sS http://127.0.0.1:8080/v1/models`
-- [ ] qodesh: llama stays CPU (`--device none --n-gpu-layers 0`). Do not load GGUFs on the 8600 GT.
+- [ ] mvp-host: llama stays CPU (`--device none --n-gpu-layers 0`). Do not load GGUFs on the 8600 GT.
 
 ## 4. Stop
 
@@ -57,7 +57,7 @@ dir "%ProgramFiles(x86)%\Green-Roomz"
 - [ ] No `Program Files\Green-Roomz` (this installer never created one).
 - [ ] Optional read-only: `reg query HKLM\Software\Microsoft\Windows\CurrentVersion\Uninstall /s /f Green-Roomz` — expect no key. Do not write HKLM.
 
-## 6. Windows MVP chat (qodesh, after install)
+## 6. Windows MVP chat (mvp-host, after install)
 
 CPU only. Never load GGUFs on the 8600 GT. Do not stop the Linux cursor serve.
 

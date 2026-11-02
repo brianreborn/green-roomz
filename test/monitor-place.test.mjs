@@ -10,7 +10,7 @@ import {
   bind,
   PLACE_CALLS,
   FLOOR,
-  QODESH,
+  MVP_HOST,
   FORBIDDEN_CUDA_KERNELS,
   LAYOUT,
 } from '../src/monitor/place.mjs';
@@ -19,10 +19,10 @@ test('bind then yield', () => {
   const place = createPlace();
   assert.deepEqual(Object.keys(place).sort(), ['bind', 'yield']);
   assert.deepEqual([...PLACE_CALLS], ['bind', 'yield']);
-  assert.equal(QODESH.layout, '1+1');
-  assert.equal(QODESH.extraSlots, 1);
-  assert.equal(QODESH.cores, 2);
-  assert.equal(QODESH.replicas, 1);
+  assert.equal(MVP_HOST.layout, '1+1');
+  assert.equal(MVP_HOST.extraSlots, 1);
+  assert.equal(MVP_HOST.cores, 2);
+  assert.equal(MVP_HOST.replicas, 1);
   assert.equal(FLOOR.includes('llama'), true);
   assert.equal(LAYOUT.hostSide, true);
   assert.equal(LAYOUT.cudaLaunch, false);

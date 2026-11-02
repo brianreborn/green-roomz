@@ -10,10 +10,10 @@ Defense-only. Tests assert constants, stripping, and refusals. Do not add payloa
 |---|---|---|
 | Timing | `sanitizeCompletionJson` drops `timings` (`src/proxy.mjs:30`). Stream path skips sanitize (`proxy.mjs:80`). SSE in `handoff.mjs` flushes as tokens arrive. `Mailbox.push` stamps `Date.now()` (`mailbox.mjs:115`). Health `uptime_ms` is continuous (`gateway.mjs:423`). | `src/timing-quant.mjs` (new); call from proxy/handoff/mailbox |
 | Mailbox size | Variable `payload` until 256 chars then sha256 (`mailbox.mjs:31-38`). `stats()` exports `size/pushed/dropped` (`mailbox.mjs:89-98`). `/health` and `/v1/monitor/recent` return those (`gateway.mjs:359-365, 426`). `packSlot` is 16 bytes seq+ticket only (`monitor/ids.mjs:7,97-106`). | `clonePayload` + `publicStats` + pack full envelope |
-| `cache_prompt` | Client body is forwarded almost whole (`prepareInferenceBody`, `gateway.mjs:176-191`). Prime sets `cache_prompt: true` (`bin/green-roomz.mjs:280`). Serve launch adds `--cache-idle-slots` when a checkpoint dir exists (`process-manager.mjs:346-350`). `stop()` writes alias-global `on-stop` KV (`process-manager.mjs:497-502`). Identity is only `authenticated` vs `loopback-dev` (`gateway.mjs:35-43`). `--parallel 1` (cursor/android/windows/note9). | Strip on live hops; no idle-slot spill of user KV |
+| `cache_prompt` | Client body is forwarded almost whole (`prepareInferenceBody`, `gateway.mjs:176-191`). Prime sets `cache_prompt: true` (`bin/green-roomz.mjs:280`). Serve launch adds `--cache-idle-slots` when a checkpoint dir exists (`process-manager.mjs:346-350`). `stop()` writes alias-global `on-stop` KV (`process-manager.mjs:497-502`). Identity is only `authenticated` vs `loopback-dev` (`gateway.mjs:35-43`). `--parallel 1` (cursor/android/windows/android-legacy). | Strip on live hops; no idle-slot spill of user KV |
 | Output tags | `stripEscapes` removes CSI/OSC/C0-C1 only (`util.mjs:137-141`). No ZWSP, bidi, or language-tag chars. | Extend `stripEscapes`; reuse in sanitize |
 | CPU pins | `applyPriority` nice-level only (`hosts/windows.mjs:40-47`). No affinity. Cursor nexus **and** specialists are `cpu-4` (fallback `cpu-6`). | `CpuSetAllocator`; **nexus stays 4**; refuse oversubscribe |
-| Idle poll | `--poll 0` only in `config/agents.cursor.json:38-39`. Android/windows/note9 llama `base_args` omit it. `buildLaunch` does not inject it. | Enforce in `buildLaunch` |
+| Idle poll | `--poll 0` only in `config/agents.cursor.json:38-39`. Android/windows/android-legacy llama `base_args` omit it. `buildLaunch` does not inject it. | Enforce in `buildLaunch` |
 | Image/audio | `decodeDataUrl` is bytes+mime (`gateway.mjs:253-259`). Whisper/SD get the blob with no scan (`nativeRequestInit`, `gateway.mjs:263-271`). Policies `policies/vision-layout.md`, `audio-transcription.md`, `image-generation.md` have no scan SHALL. | `src/media-scan.mjs` + policy lines |
 
 ---
@@ -293,7 +293,7 @@ applyAffinity(child, cpus) {
 }
 ```
 
-Android sidecar: no-op with `applied: false` (no AID_ROOT). Document that Note9 skips pins.
+Android sidecar: no-op with `applied: false` (no AID_ROOT). Document that Android-legacy phone skips pins.
 
 **Tests** (`test/cpu-set.test.mjs`):
 
@@ -348,7 +348,7 @@ function forcePoll0(args) {
 
 Call for `runtime.kind === 'llama-server'` only.
 
-Also add `"--poll", "0"` to android/windows/note9 `runtimes.llama_server.base_args` so config matches the enforcer.
+Also add `"--poll", "0"` to android/windows/android-legacy `runtimes.llama_server.base_args` so config matches the enforcer.
 
 **Tests:** `buildLaunch` for cpu-4, vulkan-all, and a profile that passes `--poll 99` all end with poll value `0`. Cursor manifest already has it; config test can assert all four manifests after load: llama base_args poll is 0.
 
@@ -452,7 +452,7 @@ Policy files — one line each:
 | `src/process-manager.mjs` | poll 0, default threads 4, no cache-idle-slots, affinity |
 | `src/hosts/windows.mjs` | `applyAffinity` |
 | `src/constants.mjs` | `QUANT_MS`, `FRAME_BYTES`, `DEFAULT_THREADS` (optional re-export) |
-| `config/agents.{android,windows,note9}.json` | `"--poll","0"` in llama base_args |
+| `config/agents.{android,windows,android-legacy}.json` | `"--poll","0"` in llama base_args |
 | `policies/{vision-layout,audio-transcription,image-generation}.md` | scan SHALL |
 | `test/timing-quant.test.mjs` | new |
 | `test/cpu-set.test.mjs` | new |
@@ -479,7 +479,7 @@ Source: `/workspace/reviews/covert-review.md` (same bytes as `covert-channel-rev
 | CC-8 slot-0 KV residue | H | F3 `cache_prompt:false` | **F13** restore prime-only after each live hop |
 | CC-9 forwarded slot fields | H | F3 deletes `cache_prompt` | **F8** allowlist, not denylist |
 | CC-10 loopback llama-server | H | no | **F14** `--no-webui`, no `--metrics`, **gate `/slots`**, refuse `0.0.0.0` (no API-key product) |
-| CC-11 LLC / no affinity | H | F5 | Pin whisper/piper/sd too; android/note9 `max_warm_specialists: 1` |
+| CC-11 LLC / no affinity | H | F5 | Pin whisper/piper/sd too; android/android-legacy `max_warm_specialists: 1` |
 | CC-12 council `ms` + jsonl | H | no | **F15** |
 | CC-13 disk KV / idle slots | H | F3 | — |
 | CC-14 route headers | M | no | **F16** |
@@ -681,9 +681,9 @@ Do not export rejects via HTTP recent (F11).
 
 ---
 
-## 23. Android / Note9 warm cap (CC-11 layout)
+## 23. Android / Android-legacy phone warm cap (CC-11 layout)
 
-Unset `max_warm_specialists` admits up to 7 llama-servers. Set `max_warm_specialists: 1` on `config/agents.android.json` and `agents.note9.json` (match cursor/windows). Allocator then pins nexus **4** + specialist only if remaining CPUs ≥ specialist threads (else empty set, no spawn).
+Unset `max_warm_specialists` admits up to 7 llama-servers. Set `max_warm_specialists: 1` on `config/agents.android.json` and `agents.android-termux.json` (match cursor/windows). Allocator then pins nexus **4** + specialist only if remaining CPUs ≥ specialist threads (else empty set, no spawn).
 
 Also run `applyAffinity` for whisper/piper/sd children (1 CPU each if no `--threads`).
 
@@ -757,5 +757,5 @@ When Researcher applies P0 (do not patch this turn):
 | `src/monitor/logger.mjs` | chain cap |
 | `src/benchmark.mjs` | omit tps |
 | `src/serve-console.mjs` | drop tok/s lines |
-| `config/agents.{android,note9}.json` | `max_warm_specialists: 1` |
+| `config/agents.{android,android-legacy}.json` | `max_warm_specialists: 1` |
 | `test/gateway.test.mjs` / `test/proxy.test.mjs` / `test/monitor-*.test.mjs` | extend |

@@ -1,6 +1,6 @@
 # Covert-channel checkpoint (2026-09-07)
 
-Reviewer: Covert Channel Reviewer. Host: qodesh (Win11 Athlon II X2, 16 GB, 8600 GT display-only). Scope: `src/timing-quant.mjs`, `src/mailbox.mjs`, `src/monitor/ipc.mjs`, gateway hop `holdMs`, plus local docs. No production patch. No exploit recipe. Grok Bot’s `/workspace/reviews/covert-checkpoint-2026-09-07.md` is not on this disk.
+Reviewer: Covert Channel Reviewer. Host: mvp-host (Win11 Athlon II X2, 16 GB, 8600 GT display-only). Scope: `src/timing-quant.mjs`, `src/mailbox.mjs`, `src/monitor/ipc.mjs`, gateway hop `holdMs`, plus local docs. No production patch. No exploit recipe. Grok Bot’s `/workspace/reviews/covert-checkpoint-2026-09-07.md` is not on this disk.
 
 Covert Fixer is limited to `src/timing-quant.mjs` only.
 
@@ -10,7 +10,7 @@ Hop padding exists (`QUANT_MS = 50`, `holdMs` after PolicyGate release on counci
 
 ## tok/s / latency vs nexus peek (bug)
 
-Measured floor: qodesh CPU llama **3.0 tok/s** (`docs/fleet-targets.md`, Direct 8187 8-tok). One generated token ≈ **333 ms**. Nexus consult is a **non-stream** JSON completion, `NEXUS_MAX_TOKENS = 96`, abort `NEXUS_CONSULT_TIMEOUT_MS = 25_000`. Specialist hops use `peekSpecialist` (SSE until `HANDOFF_PEEK_CHARS = 48` or keep), then `deliverPeek` for the rest of the stream. `MAX_SPECIALIST_HOPS = 3`.
+Measured floor: mvp-host CPU llama **3.0 tok/s** (`docs/fleet-targets.md`, Direct 8187 8-tok). One generated token ≈ **333 ms**. Nexus consult is a **non-stream** JSON completion, `NEXUS_MAX_TOKENS = 96`, abort `NEXUS_CONSULT_TIMEOUT_MS = 25_000`. Specialist hops use `peekSpecialist` (SSE until `HANDOFF_PEEK_CHARS = 48` or keep), then `deliverPeek` for the rest of the stream. `MAX_SPECIALIST_HOPS = 3`.
 
 Classes a local observer can already tell apart by wall time (HTTP TTFB / total, PolicyGate occupancy, CPU):
 
@@ -52,7 +52,7 @@ Timing:
 
 `process-manager.mjs`: `canSuspend = gateway.suspend_evicted === true && process.platform !== 'win32'`. Default is off even on POSIX. `suspendImpl` is `SIGSTOP`; `resumeImpl` is `SIGCONT`. Comments: POSIX-only; Windows terminates; GPU-pinned VRAM is never freed by suspend; PF7 forbids SIGSTOP of a bound LISTEN llama-server.
 
-On qodesh:
+On mvp-host:
 
 - There is **no suspend covert** (no freeze/thaw of a loaded GGUF as a signal).
 - Eviction is terminate + later cold `ensure`. That is a **load-time** channel (seconds, disk, RAM), not a pause channel.

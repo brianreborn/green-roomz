@@ -37,7 +37,7 @@ Empty CORS (F-B7) already forces a preflight for cross-origin; JSON CT is the bo
 
 ### F-B7 Empty default CORS
 
-**Files:** `config/agents.windows.json:16-19`, `config/agents.cursor.json:16-19`, `config/agents.android.json`, `config/agents.note9.json`; `src/gateway.mjs:140-148`
+**Files:** `config/agents.windows.json:16-19`, `config/agents.cursor.json:16-19`, `config/agents.android.json`, `config/agents.android-termux.json`; `src/gateway.mjs:140-148`
 
 - Default `cors_origins` to `[]`. Same-origin only.
 - If a console origin is needed, list it **with port** (`http://127.0.0.1:8080` is same-origin and does not need CORS).

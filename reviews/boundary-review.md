@@ -65,7 +65,7 @@ Attackers:
 
 ### B7. Default CORS allowlist trusts port-80 `http://localhost` / `http://127.0.0.1`
 
-- **file:** `src/gateway.mjs:140-148`; `config/agents.windows.json:16-19` (android/note9/cursor the same)
+- **file:** `src/gateway.mjs:140-148`; `config/agents.windows.json:16-19` (android/android-legacy/cursor the same)
 - **attacker:** H — a page served from port 80 on the same machine
 - **impact:** CORS is **not** `*`, does not set `Access-Control-Allow-Credentials`, and only reflects allowlisted origins (good vs wildcard). The shipped list is `http://localhost` and `http://127.0.0.1` **without a port** (port 80). That is a different origin from `:8080`. A page on `:80` can **read** `/v1/monitor/recent`, `/metrics`, `/props`, and completion bodies. `authorization` and `x-session-id` are in allow-headers, so once an API key exists that page can also send it.
 - **fix:** Default `cors_origins` to empty (same-origin only), or to the exact console origin including port. Never list bare `http://localhost` / `http://127.0.0.1`. Do not put `*` in the list.
@@ -114,7 +114,7 @@ Attackers:
 
 ### B14. Unrestricted `${}` expansion; empty-var path collapse; spawn retarget
 
-- **file:** `src/util.mjs:32-34`; `src/config.mjs:93`; pack `config/agents.cursor.json:26,43`; `config/agents.android.json:21`; `config/agents.note9.json:21,25`; `src/process-manager.mjs:361,426-430`
+- **file:** `src/util.mjs:32-34`; `src/config.mjs:93`; pack `config/agents.cursor.json:26,43`; `config/agents.android.json:21`; `config/agents.android-termux.json:21,25`; `src/process-manager.mjs:361,426-430`
 - **attacker:** E (inherited env; untrusted manifest if `--manifest` or `config/` is attacker-writable). **Not** H — HTTP cannot change `--manifest` or drive expansion.
 - **impact:** Every string in the parsed manifest is rewritten from `process.env` (and the env object’s prototype). Missing vars become `""`, so `${GRZ_ROOT}/runtime/llama-server${GRZ_EXE}` becomes `/runtime/llama-server`. `GRZ_EXE` is concatenated onto the filename. Spawn uses `shell: false` (no metacharacters), but the binary path and `LD_LIBRARY_PATH` are still chosen by expansion. Regex is `/gi` (any identifier). `env[key]` is not `Object.hasOwn`, so `${constructor}` resolves on the prototype. No allowlist. `runtime.command` / `runtime.env` are not passed through `resolveManifestPath`.
 - **fix:** Allowlist substitution keys; reject empty/relative-after-expand results for command/model/env paths; `Object.hasOwn(env, key)` only; require command/lib paths to stay under pack root; map `GRZ_EXE` to `""` vs `".exe"` rather than concatenating. Fail closed if `GRZ_ROOT`/`HOME` unset when the manifest uses them.
@@ -215,7 +215,7 @@ Attackers:
 - **Slash `/text` `/code` `/image` `/auto` are chat-body commands, not HTTP paths.** `GET/POST /text` 404. Parser requires the whole unfenced latest user text to match `^/([a-z]+)…$`; unknown tokens return `null`. No extra-path or method confusion into a different slash token.
 - **Body size.** `readBody` counts bytes, destroys on overflow, throws `ValidationError`. Default 16 MiB. Non-object JSON rejected. Prototype pollution via `JSON.parse` + spread did not pollute `Object.prototype` on this Node.
 - **HTTP cannot invoke monitor verbs.** `EXPLICIT_ROUTES` has no lockdown/reboot. `GET /v1/monitor/recent` and `security-monitor-agent` only **read**. Gateway mask is `CAP.POST | CAP.OBSERVE | CAP.SNAPSHOT`, role `'green-roomz'`.
-- **`respond.mjs` matches policy:** 8080/SAD/worker/logger denied; missing cap rejects; uncallable returns reject, never executes; Note9/no `AID_ROOT` rejects `secure_reboot`; `halt(machine)` v1-illegal; `replicaCount = 1`.
+- **`respond.mjs` matches policy:** 8080/SAD/worker/logger denied; missing cap rejects; uncallable returns reject, never executes; Android-legacy phone/no `AID_ROOT` rejects `secure_reboot`; `halt(machine)` v1-illegal; `replicaCount = 1`.
 - **`MonitorIpc.push`:** missing cap bit → reject; `kind:'vote'` with the bit → uncallable reject; non-allowlisted upcall (`op: 'secure_reboot'`) rejected.
 - **HTTP cannot load a manifest or drive expansion.** `loadManifest` is CLI-only. Gateway has no reload/config path. Request JSON is not passed to `expandEnvironment`.
 - **Pack launchers pin loopback and ignore extra argv.** `start.sh` / `start.cmd` exec `node ... --host 127.0.0.1 --port 8080` (no `"$@"`). Spawn is `shell: false`. TTS is `execFile` + stdin of **H** text, 4000-char cap, not M.
@@ -236,7 +236,7 @@ Attackers:
 | `createRespond().lockdown()` | Reject envelope | Role + cap + uncallable |
 | `createNetwork().lockdown('machine')` | Throw | Only if mask set; no role |
 | `createPolicy().check(grade stop/wipe)` | `ok:true` + `verb` advertised | Only if cap list set |
-| `createIsolate().lockdown()` | Throw | **No** (except Note9 `secure_reboot` via apply) |
+| `createIsolate().lockdown()` | Throw | **No** (except Android-legacy phone `secure_reboot` via apply) |
 
 ## API-first fix order
 

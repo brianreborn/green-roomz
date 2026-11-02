@@ -8,7 +8,7 @@
  * encrypt-volumes is out_of_v1. lockdown / reboot / secure_reboot stay uncallable
  * (reject envelope). Do not wipe swap/RAM. Missing capability => reject, never no-op.
  *
- * Note 9 / no AID_ROOT: map / wipe / secure_reboot reject with capability missing.
+ * Android-legacy phone / no AID_ROOT: map / wipe / secure_reboot reject with capability missing.
  * No 3-replica vote. No mapped-host GPU ring.
  */
 
@@ -105,7 +105,8 @@ function hasAidRoot(opts, options) {
   if (explicit === true) return true;
   if (explicit === false) return false;
   const platform = String(opts.platform ?? options.platform ?? '').toLowerCase();
-  if (platform === 'note9' || platform === 'android' || platform === 'stock-note9') return false;
+  // Android family (stock or legacy phones): platform 'android', 'stock-android' or 'android-<model>'.
+  if (platform === 'android' || platform === 'stock-android' || platform.startsWith('android-')) return false;
   return true;
 }
 

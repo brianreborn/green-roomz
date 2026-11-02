@@ -45,7 +45,7 @@ Tests land with each item. No exploit steps, no PoCs, no stego recipes.
 | **Fuzz-4 / B12 / RF7** mailbox kinds | `src/mailbox.mjs:108-132`; `src/gateway.mjs:448-468` | `push({kind:'lockdown'\|'reboot'\|'vote'})` → `{ok:false}`; hop kinds still enqueue; drain snapshots before listeners (no livelock) |
 | **Fuzz-3 / F-B30 / LIVE-H2** GET-only | `src/gateway.mjs:341-385` | POST/PUT/DELETE `/health` `/v1/models` `/metrics` `/props` `/v1/monitor/recent` → **405**; GET still 200 |
 | **F-B2 / Fuzz-6** JSON CT | `src/gateway.mjs:386-395` | missing / `text/plain` / empty CT on POST mutating → **400** even if body is JSON |
-| **F-B7** CORS empty + OPTIONS peer | `config/agents.{cursor,windows,android,note9}.json:16-19`; `src/gateway.mjs:140-148,:341-344` | default `cors_origins: []`; `Origin: http://localhost` not reflected; OPTIONS from denied peer **403** not 204; no `*` |
+| **F-B7** CORS empty + OPTIONS peer | `config/agents.{cursor,windows,android,android-legacy}.json:16-19`; `src/gateway.mjs:140-148,:341-344` | default `cors_origins: []`; `Origin: http://localhost` not reflected; OPTIONS from denied peer **403** not 204; no `*` |
 | **F-B8** hashed tickets + patch allowlist | `src/gateway.mjs:448-455,:359-365`; `src/sessions.mjs:39-46` | `/v1/monitor/recent` has no UUID-shaped `ticket`; `patch({identity,id,expiresAt})` ignored |
 | **RF5 / F27** publish after body | `src/gateway.mjs:503-520,:1096-1101,:1125-1129`; `src/proxy.mjs:70-126`; `src/handoff.mjs:167-227` | fake 504 → last hop `kind !== 'success'`; peek abort → alias once; next hop waits `is_processing===false` |
 | **F1 stream timings** | `src/proxy.mjs:30,80,107-110`; `src/handoff.mjs` SSE | client stream chunks have **no** `timings`; `holdMs` runs **after** PolicyGate `release` |
@@ -82,7 +82,7 @@ Tests land with each item. No exploit steps, no PoCs, no stego recipes.
 
 - **F-B1 API-key product** — demoted. Loopback is the v1 trust boundary. Non-loopback fail closed. No default-on bearer mint unless operator reopens this.
 - Homoglyph residual of CC-2 after F4 (do not fold confusables).
-- F12 `/metrics` strip PIDs/RAM; F15 council `ms`; F16 route headers enum; F17 delete proxied `usage`; F20 `serve.log` tok/s filter; F21 benchmark omit tps; F23 android/note9 `max_warm_specialists: 1`.
+- F12 `/metrics` strip PIDs/RAM; F15 council `ms`; F16 route headers enum; F17 delete proxied `usage`; F20 `serve.log` tok/s filter; F21 benchmark omit tps; F23 android/android-legacy `max_warm_specialists: 1`.
 - F-B15 path confinement; F-B17 pack SHA-256 extract pin; F-B22 CIDR `/0` reject.
 - Copy-only JS rings stay; no SAB/CUDA lock-free port this cut.
 - Vote TTL: never default forever; `hrtime` expiry (LIVE-NTP1). No NTP module in v1.

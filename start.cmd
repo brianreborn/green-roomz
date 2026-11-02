@@ -58,7 +58,7 @@ if not exist "%GRZ_ROOT%\runtime\llama-server.exe" (
   exit /b 1
 )
 
-rem Prefer Windows MVP manifest on this .cmd launcher (qodesh). Override: set GRZ_MANIFEST=...
+rem Prefer Windows MVP manifest on this .cmd launcher (mvp-host). Override: set GRZ_MANIFEST=...
 if not defined GRZ_MANIFEST (
   if exist "%GRZ_ROOT%\config\agents.windows-mvp.json" (
     set "GRZ_MANIFEST=%GRZ_ROOT%\config\agents.windows-mvp.json"

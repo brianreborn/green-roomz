@@ -1,13 +1,13 @@
 # Green-Roomz Windows install (beta-0.4, no admin)
 
-Operator: **Brian**. Hosts: **qodesh** (Win11, Firefox, `C:\Users\brian`, Athlon II + 8600 GT) and **shalom** (Win).
+Operator: **Brian**. Hosts: **mvp-host** (Win11, Firefox, `%USERPROFILE%`, Athlon II + 8600 GT) and **win-host** (Win).
 
 The `.cmd` **is** the installer for v1. No `.exe`, no `.msi`, no signtool, no UAC, no self-signed cert, no `icacls`.
 
 ## What it does
 
 - Copies this portable pack to `%LOCALAPPDATA%\Green-Roomz` (per-user; not Program Files).
-- Writes a Start Menu shortcut under `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Green-Roomz`. Primary is a `.lnk` via `cscript` / WScript.Shell (no elevation, working directory set). Same path every run — re-run does not duplicate. If `cscript` fails, a `.url` is written instead (Firefox on qodesh may open that in the browser; prefer the `.lnk`).
+- Writes a Start Menu shortcut under `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Green-Roomz`. Primary is a `.lnk` via `cscript` / WScript.Shell (no elevation, working directory set). Same path every run — re-run does not duplicate. If `cscript` fails, a `.url` is written instead (Firefox on mvp-host may open that in the browser; prefer the `.lnk`).
 - If `runtime\llama-server.exe` is missing, fetches the official **CPU** zip to `%TEMP%` and expands into `runtime\`:
   `https://github.com/ggml-org/llama.cpp/releases/download/b10702/llama-b10702-bin-win-cpu-x64.zip`
   Never vulkan. Never CUDA. This installer does **not** copy `C:\LocalAI\llama-b10665-bin-win-vulkan-x64`.
@@ -25,7 +25,7 @@ Install yourself, then open a **new** cmd window so PATH updates:
 
 Pick the Windows x64 **LTS MSI**. `package.json` engines says `>=22`. Node 20 has been used successfully on this pack.
 
-## CPU llama only (qodesh 8600 GT)
+## CPU llama only (mvp-host 8600 GT)
 
 - Pack llama is **CPU**. Official zip name: `llama-b10702-bin-win-cpu-x64.zip`.
 - **Never load GGUFs on the 8600 GT** (224 MB, sm_1.1). Display only. The 0.5B Q4 is CPU mmap. Manifest stays `--device none --n-gpu-layers 0`.
@@ -72,7 +72,7 @@ Removes `%LOCALAPPDATA%\Green-Roomz` and the Start Menu `Green-Roomz` folder onl
 
 ## Windows MVP chat (beta-0.4 path)
 
-Goal on **qodesh**: basic ChatGPT-style API (multi-turn, stream, stop via abort, model alias) on CPU llama — not a SPA, not an API-key product.
+Goal on **mvp-host**: basic ChatGPT-style API (multi-turn, stream, stop via abort, model alias) on CPU llama — not a SPA, not an API-key product.
 
 1. After install, fetch the tiny Instruct GGUF (CPU only, ~0.40 GB):
 
@@ -84,7 +84,7 @@ Default URL (verified):
 `https://huggingface.co/bartowski/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf`  
 → `models\Qwen2.5-0.5B-Instruct-Q4_K_M.gguf`
 
-2. Prefer MVP manifest on qodesh:
+2. Prefer MVP manifest on mvp-host:
 
 ```bat
 cd /d "%LOCALAPPDATA%\Green-Roomz"

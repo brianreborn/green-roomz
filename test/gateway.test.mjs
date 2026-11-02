@@ -1322,8 +1322,8 @@ test('bind-all needs the override; a specific LAN host needs allow_peers or a ke
   delete process.env.GREEN_ROOMZ_ALLOW_PUBLIC;
 
   assert.throws(() => mk().bindAddress('0.0.0.0'), /all interfaces/);
-  assert.throws(() => mk().bindAddress('192.168.1.5'), /allow_peers/);
-  assert.equal(mk({ allow_peers: ['192.168.1.42'] }).bindAddress('192.168.1.5'), '192.168.1.5');
+  assert.throws(() => mk().bindAddress('192.0.2.5'), /allow_peers/);
+  assert.equal(mk({ allow_peers: ['192.0.2.42'] }).bindAddress('192.0.2.5'), '192.0.2.5');
   assert.equal(mk().bindAddress('127.0.0.1'), '127.0.0.1');
 });
 
@@ -1332,12 +1332,12 @@ test('peerAllowed gates non-loopback clients against the allowlist', async () =>
   assert.equal(peerAllowed('127.0.0.1', []), true);
   assert.equal(peerAllowed('::1', []), true);
   assert.equal(peerAllowed('::ffff:127.0.0.1', []), true);
-  assert.equal(normalizeAddr('::ffff:192.168.1.42'), '192.168.1.42');
-  assert.equal(peerAllowed('192.168.1.42', ['192.168.1.42']), true);
-  assert.equal(peerAllowed('::ffff:192.168.1.42', ['192.168.1.42']), true);
-  assert.equal(peerAllowed('192.168.1.43', ['192.168.1.42']), false);
-  assert.equal(peerAllowed('192.168.1.99', ['192.168.1.0/24']), true);
-  assert.equal(peerAllowed('10.0.0.1', ['192.168.1.0/24']), false);
+  assert.equal(normalizeAddr('::ffff:192.0.2.42'), '192.0.2.42');
+  assert.equal(peerAllowed('192.0.2.42', ['192.0.2.42']), true);
+  assert.equal(peerAllowed('::ffff:192.0.2.42', ['192.0.2.42']), true);
+  assert.equal(peerAllowed('192.0.2.43', ['192.0.2.42']), false);
+  assert.equal(peerAllowed('192.0.2.99', ['192.0.2.0/24']), true);
+  assert.equal(peerAllowed('198.51.100.1', ['192.0.2.0/24']), false);
 });
 
 test('council: /council on sets a session default that fans out later turns', async (t) => {
@@ -1838,7 +1838,7 @@ for (const flag of [{ routable: false }, { internal: true }]) {
   ]) {
     test(`BLOCKER: ${label} to a ${JSON.stringify(flag)} agent is never pinned and never reached`, async () => {
       const registry = new AgentRegistry(manifestWithInternal(flag));
-      registry.setStatus('pentest-agent', state, state === 'unavailable' ? { missing: ['model:/home/box/secret/pentest.gguf'] } : {});
+      registry.setStatus('pentest-agent', state, state === 'unavailable' ? { missing: ['model:/home/user/secret/pentest.gguf'] } : {});
       const routed = hardRuleRoute({ ...pinBody, messages: [{ role: 'user', content: 'hi' }] }, registry);
       assert.equal(routed.effectiveAlias, null);
       assert.equal(routed.reason, 'nexus');
@@ -1880,7 +1880,7 @@ test('pin-503 body carries a generic reason and no local paths', async (t) => {
     stubEnsure: true,
     fetchImpl: async () => { throw new Error('must not go upstream'); },
   });
-  registry.setStatus('qwenstral-code-speculator', 'unavailable', { missing: ['model:/home/box/models/secret-qwenstral.gguf', 'impractical:RAM C:\\Users\\brian\\x.gguf'] });
+  registry.setStatus('qwenstral-code-speculator', 'unavailable', { missing: ['model:/home/user/models/secret-qwenstral.gguf', 'impractical:RAM C:\\Users\\user\\x.gguf'] });
   const result = await request(server, { path: '/v1/chat/completions', method: 'POST', headers: { 'content-type': 'application/json' }, body: { model: 'qwenstral-code-speculator', messages: [{ role: 'user', content: 'hi' }] } });
   assert.equal(result.status, 503);
   assert.deepEqual(result.body.error.details, { reason: 'pinned_agent_unavailable' });
@@ -1965,7 +1965,7 @@ for (const kind of ['guardian', 'pentest', 'defender', 'monitor']) {
 
 test('shipped manifests mark security-monitor-agent internal and it is never pinnable', async () => {
   const { loadManifest } = await import('../src/config.mjs');
-  for (const name of ['android', 'cursor', 'linux-try', 'note9', 'windows-mvp', 'windows']) {
+  for (const name of ['android', 'android-termux', 'cursor', 'linux-try', 'windows-mvp', 'windows']) {
     const manifest = await loadManifest(new URL(`../config/agents.${name}.json`, import.meta.url));
     const monitor = manifest.agents.find((agent) => agent.alias === 'security-monitor-agent');
     assert.equal(monitor.internal, true, name);

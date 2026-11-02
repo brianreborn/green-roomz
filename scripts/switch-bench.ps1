@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 $base = 'http://127.0.0.1:8080/v1/chat/completions'
-$dir = 'C:\Users\brian\Documents\Codex\2026-08-28\files-pasted-by-the-user-1\outputs\green-roomz\data'
+$dir = Join-Path (Split-Path -Parent $PSScriptRoot) '\data'
 New-Item -ItemType Directory -Force -Path $dir | Out-Null
 
 function Invoke-Grz([string]$Name, [string]$Json) {

@@ -99,7 +99,7 @@ human-review or fine-tune set.
 
 ## Ideas not yet built
 
-- **Cross-host council** — fan out to note9 + qodesh + shalom variants over the
+- **Cross-host council** — fan out to android-legacy + mvp-host + win-host variants over the
   peer allowlist. Needs the host bring-ups (issues #2–#5).
 - **Cascade / escalate** — try the cheap variant alone; only convene the council
   when its `/confidence` is low or its JSON fails the schema.

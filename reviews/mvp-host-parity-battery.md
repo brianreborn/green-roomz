@@ -1,8 +1,8 @@
-# qodesh MVP parity battery results
+# mvp-host MVP parity battery results
 
-**Machine:** qodesh (`19f2c19e-e100-49f0-8507-813d66727973`)  
+**Machine:** mvp-host (`19f2c19e-e100-49f0-8507-813d66727973`)  
 **When:** 2026-09-06 ~05:38–05:43 PM PT (reverify; first run ~08:38–08:46 AM PT)  
-**Tree:** `C:\Users\brian\Documents\green-roomz`  
+**Tree:** `%USERPROFILE%\Documents\green-roomz`  
 **Gateway:** `http://127.0.0.1:8080`  
 **Manifest:** `config\agents.windows-mvp.json` (`--threads` / `--threads-batch` **1**)  
 **Runner:** `scripts\mvp-parity-battery-locked.cmd` → `mvp-parity-battery.cmd` → `mvp-parity-battery.ps1`  
@@ -73,7 +73,7 @@ No GGUF on 8600 GT observed. Runtime: `runtime\llama-b10702-bin-win-cpu-x64\llam
 
 ## Follow-ups
 
-- [x] Reconnect qodesh; bounce onto threads=1 MVP; re-run battery
+- [x] Reconnect mvp-host; bounce onto threads=1 MVP; re-run battery
 - [x] Case E PASS with SSE after stream fix + threads=1
 - [ ] Optional: assert `x-green-roomz-effective-alias: general-text-speculator` in a future runner revision (surface currently OK via resident_fallback SSE too)
-- [ ] Local-tool shell on qodesh often double-invokes commands — prefer lock/detached Start-Process for long batteries
+- [ ] Local-tool shell on mvp-host often double-invokes commands — prefer lock/detached Start-Process for long batteries

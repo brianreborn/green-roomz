@@ -1,5 +1,5 @@
 $ErrorActionPreference = 'Continue'
-$root = 'C:\Users\brian\Documents\Codex\2026-08-28\files-pasted-by-the-user-1\outputs\green-roomz'
+$root = Split-Path -Parent $PSScriptRoot
 $node = 'C:\Program Files\nodejs\node.exe'
 Set-Location $root
 

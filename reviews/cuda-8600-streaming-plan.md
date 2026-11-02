@@ -1,10 +1,10 @@
-# CUDA 8600 GT streaming plan (qodesh) — copy/compute overlap, LLM on CPU
+# CUDA 8600 GT streaming plan (mvp-host) — copy/compute overlap, LLM on CPU
 
 **Status:** architecture plan (docs only). Do **not** install drivers, do **not** stop live box serve, do **not** run long GPU stress, no Afterburner, no clock loops.  
-**Card:** NVIDIA GeForce **8600 GT**, G84, **sm_1.1**, **224 MB**, Win32 CUDA **6.5** on **qodesh**.  
+**Card:** NVIDIA GeForce **8600 GT**, G84, **sm_1.1**, **224 MB**, Win32 CUDA **6.5** on **mvp-host**.  
 **Locked split:** GGUF / llama-server stay **CPU** (`--device none`). GPU is a **conv/GEMM + stream mailbox** coprocessor, never a weight home.
 
-Companions: [`/workspace/cuda-research/qodesh-sm11.md`](../cuda-research/qodesh-sm11.md), [`8600gt-best-fit.md`](../cuda-research/8600gt-best-fit.md), [`fruitful-path.md`](../cuda-research/fruitful-path.md), [`security-monitor-requirements.md`](../cuda-research/security-monitor-requirements.md), live gate comments in [`green-roomz/src/monitor/gate.mjs`](../green-roomz/src/monitor/gate.mjs), Tesla-portable slot layout in [`green-roomz/src/monitor/ids.mjs`](../green-roomz/src/monitor/ids.mjs) (`SLOT_BYTES=16`, `packSlot` / `unpackSlot`), stub [`green-roomz/docs/gpu-mailbox-sm11.md`](../green-roomz/docs/gpu-mailbox-sm11.md).
+Companions: [`/workspace/cuda-research/mvp-host-sm11.md`](../cuda-research/mvp-host-sm11.md), [`8600gt-best-fit.md`](../cuda-research/8600gt-best-fit.md), [`fruitful-path.md`](../cuda-research/fruitful-path.md), [`security-monitor-requirements.md`](../cuda-research/security-monitor-requirements.md), live gate comments in [`green-roomz/src/monitor/gate.mjs`](../green-roomz/src/monitor/gate.mjs), Tesla-portable slot layout in [`green-roomz/src/monitor/ids.mjs`](../green-roomz/src/monitor/ids.mjs) (`SLOT_BYTES=16`, `packSlot` / `unpackSlot`), stub [`green-roomz/docs/gpu-mailbox-sm11.md`](../green-roomz/docs/gpu-mailbox-sm11.md).
 
 Live serve (do not stop): box `e2e-fresh/green-roomz` node `:8080` + llama `:8187` CPU 0.5B — see [`cuda-research/LIVE.txt`](../cuda-research/LIVE.txt).
 
@@ -190,18 +190,18 @@ Llama and GPU pipelines are **independent**. Do not stall llama waiting on GPU o
 | Mailbox copies via the async copy engine | Steals the only overlap resource; `copyEngineMailbox: false` |
 | Concurrent-kernel designs / CUDA graphs / UVM / CDP | Need SM ≥ 2.0 / 3.0 / 3.5 |
 | Afterburner / manual clocks / open stress loops | Thermal + TDR abuse; user lock |
-| Vulkan / ggml-vulkan | Policy: CUDA only on qodesh |
+| Vulkan / ggml-vulkan | Policy: CUDA only on mvp-host |
 | Driver / toolkit upgrades past 6.5-era stack | sm_1.1 removed in CUDA 7+ |
 | Stopping live `:8080` / `:8187` to “free” the GPU | Explicit: live box serve must not be stopped |
 
 ---
 
-## 6. Sample inventory (box research tree + qodesh status)
+## 6. Sample inventory (box research tree + mvp-host status)
 
 Research dir: **`/workspace/cuda-research`** (plans + build `.cmd` helpers).  
-On-disk CUDA 6.5 samples (qodesh): `C:\LocalAI\_tmp\cuda65\CUDASamples\` and/or `C:\ProgramData\NVIDIA Corporation\CUDA Samples\v6.5\`.
+On-disk CUDA 6.5 samples (mvp-host): `C:\LocalAI\_tmp\cuda65\CUDASamples\` and/or `C:\ProgramData\NVIDIA Corporation\CUDA Samples\v6.5\`.
 
-| Sample | Tree status | qodesh run status (from HUD / research) | Role in this plan |
+| Sample | Tree status | mvp-host run status (from HUD / research) | Role in this plan |
 | --- | --- | --- | --- |
 | **deviceQuery** | Present (`1_Utilities`); `build-deviceQuery.cmd` | **PASS** 2026-08-28 PT — 8600 GT, sm_1.1, CUDA 6.5, ~256 MB reported, 32 cores | Sanity only; do not re-stress |
 | **vectorAdd** | Present under `0_Simple` (SM 1.1 on 6.5 tree) | Not ranked; not required for overlap proof | Optional tiny compute smoke; weak on copy overlap |
@@ -211,7 +211,7 @@ On-disk CUDA 6.5 samples (qodesh): `C:\LocalAI\_tmp\cuda65\CUDASamples\` and/or 
 | simpleMultiCopy | In `build-cuda-cycle.cmd` | Cycle script exists; multi-copy may need &gt;1 copy engine — **verify** `asyncEngineCount` before relying | Secondary; 8600 often has **one** copy engine |
 | bandwidthTest | Present | Not run in HUD | Explains PCIe tax; optional later |
 
-No separate `/workspace` checkout of NVIDIA sample **sources** beyond research docs; binaries live on qodesh’s CUDA Samples install/extract tree.
+No separate `/workspace` checkout of NVIDIA sample **sources** beyond research docs; binaries live on mvp-host’s CUDA Samples install/extract tree.
 
 ---
 
@@ -266,6 +266,6 @@ No separate `/workspace` checkout of NVIDIA sample **sources** beyond research d
 | Slot layout (source of truth) | `/workspace/green-roomz/src/monitor/ids.mjs` |
 | Gate / forbidden list | `/workspace/green-roomz/src/monitor/gate.mjs` |
 
-## Measured (2026-09-06 qodesh)
+## Measured (2026-09-06 mvp-host)
 
 `simpleStreams.exe` Win32 Release one-shot: memcopy 47.11 ms | kernel 65.77 | non-streamed 112.98 | 4 streams **80.05** → copy∥compute overlap. deviceQuery: Concurrent copy and kernel execution Yes, **1** copy engine. Toolkit V6.5.16.

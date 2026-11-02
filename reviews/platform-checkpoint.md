@@ -19,7 +19,7 @@ Date: 2026-09-07 ~PT. Trigger: Researcher CHECKPOINT NOW (~89% usage). **Paused.
 ### Top residuals (do not lose)
 
 1. **PF-M1 / cursor bind:** cursor still names `missing-qwen-instruct.gguf`; Instruct bytes exist; this box has a **hardlink** (same inode) so local cursor works — pack/Win must not rely on hardlinks; prefer real HF basename in manifest.
-2. **LocalAI:** `agents.windows.json` + README default language + pull/copy scripts — do not use as qodesh/MVP fill target.
+2. **LocalAI:** `agents.windows.json` + README default language + pull/copy scripts — do not use as mvp-host/MVP fill target.
 3. **`${GRZ_EXE}`** missing on whisper/piper/sd stubs.
 4. **Termux:** no `$HOME/grz-runtime/missing/` mkdir; deploy/termux copy nexus-only; never final under `/data/local/tmp`.
 5. **NEW:** `${HOME}` empty-collapse → `/grz-runtime/…` not fail-closed (PF-M8).
@@ -42,5 +42,5 @@ When usage recovers / Researcher asks: apply or re-cite PF-M pack; optional pass
 ## Researcher ack (checkpoint window)
 
 - PLAT-M / PF-M noted; integrate when fill resumes.
-- Note9 USB unauthorized on qodesh — operator Allow pending (not platform action).
+- Android-legacy phone USB unauthorized on mvp-host — operator Allow pending (not platform action).
 - Still paused.

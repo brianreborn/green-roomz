@@ -1,6 +1,6 @@
 ﻿# Green-Roomz Windows MVP parity battery - capability surface vs basic ChatGPT/Grok.
 # Hits localhost gateway only. CPU chat path. Never loads GGUFs on 8600 GT.
-# Operator: Brian. Host: qodesh (Athlon-friendly; short prompts).
+# Operator: Brian. Host: mvp-host (Athlon-friendly; short prompts).
 # Usage: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\mvp-parity-battery.ps1
 # Env: GRZ_BASE_URL (default http://127.0.0.1:8080), GRZ_MODEL (default general-text-speculator)
 
@@ -305,7 +305,7 @@ $overall = if ($failN -gt 0 -or $failClosed) { "FAIL" } else { "PASS" }
 $result = [pscustomobject]@{
   schema = "green-roomz.mvp-parity-battery.v1"
   product = "Green-Roomz"
-  host_hint = "qodesh-windows-mvp"
+  host_hint = "mvp-host-windows-mvp"
   base_url = $BaseUrl
   model = $Model
   started_utc = $started.ToString("o")

@@ -16,7 +16,7 @@ This is the first executable implementation. It includes:
 
 ## Try it (open image)
 
-CPU-only container — no qodesh GPU required. Details: [packaging/README.md](packaging/README.md).
+CPU-only container — no mvp-host GPU required. Details: [packaging/README.md](packaging/README.md).
 
 ```bash
 docker pull ghcr.io/brianreborn/green-roomz:try
@@ -242,7 +242,7 @@ Artifacts for all ten aliases now live under `C:\LocalAI` (including `Qwen3-4B-e
 
 `tool-router-agent` is a resident CPU nexus (0.5B on :8187, `--device none --threads 2`) pre-warmed at serve start and kept loaded. Each chat turn POSTs the latest user message to that live kernel; specialists HANDOFF after a few tokens if the job is not theirs. Regex intent over the transcript is not the production router.
 
-## sm11 GPU assist (optional, qodesh 8600 GT)
+## sm11 GPU assist (optional, mvp-host 8600 GT)
 
 Optional CUDA 6.5 / sm_11 mailbox + monitor hot-path assists. Details: [native/sm11-monitor/README.md](native/sm11-monitor/README.md). CPU fallback always remains.
 
@@ -254,8 +254,8 @@ Optional CUDA 6.5 / sm_11 mailbox + monitor hot-path assists. Details: [native/s
 
 **`preferRing` default:** when sm11 is on and `sm11_monitor.exe` is present, assist opens a persistent `--serve` session and **`preferRing` defaults on**. Hot path then prefers ring assists (enqueue → `assistRingPush`, drop/clear → `assistRingScrub`, drain → `assistRingDrain`, wait → `assistRingVerify`) and falls back to seq/scrub/batch (CPU twin OK) if ring fails. Also: mailbox stub/invalid reject and MonitorIpc reject-cache hits → `onReject`/`assistSeq`. Optional ring index mirror assists: `assistRingSyncMeta` / `assistRingDumpMeta` (host-authoritative `{head,tail,count}` H2D/D2H — not CUDA-owned; see `native/sm11-monitor/README.md`). Vote/lockdown/quarantine/clear-all are not separate CUDA hooks (stubs reject on host; quarantine is policy; no clear-all API — drain already scrubs). Override with `{ preferRing: false }` or `serve: false`. Without the exe, hot path uses the probe assists only (no serve session).
 
-## McAfee on shalom
+## McAfee on win-host
 
-McAfee Premium Real-Time Scanning false-positives operator PowerShell (serve bounce, elevated `netsh`). Do not disable it. Exclude `C:\LocalAI`, both Green-Roomz trees, and `C:\Program Files\nodejs`. Full click-path and the WLAN autoconfig fix: [docs/mcafee-shalom.md](docs/mcafee-shalom.md).
+McAfee Premium Real-Time Scanning false-positives operator PowerShell (serve bounce, elevated `netsh`). Do not disable it. Exclude `C:\LocalAI`, both Green-Roomz trees, and `C:\Program Files\nodejs`. Full click-path and the WLAN autoconfig fix: [docs/mcafee-win-host.md](docs/mcafee-win-host.md).
 
 Android support currently defines the host/sidecar protocol and fingerprint boundary. The recommended mobile deployment places the gateway in Termux or a container and exposes accelerator-backed inference through a native Android sidecar.

@@ -69,7 +69,7 @@ Audience legend: **HTTP client** = anyone who can hit gateway `:8080` (loopback 
 - file: `src/process-manager.mjs:20-27`, `:275-277`, `:301-312`, `:426-447`; `src/hosts/windows.mjs:40-47`; `src/monitor/place.mjs:5-8`, `:32-38`, `:211-234`
 - leaks: architectural — two or more llama-server processes on one machine share LLC. No `taskset`, `--cpumask`, or `sched_setaffinity`. `applyPriority` is `PRIORITY_BELOW_NORMAL` only. `place.mjs` is an in-memory 1+1 slice binder, not OS pinning.
 - to: any other co-resident agent/process on the same box (including the other llama-server)
-- notes: per-process `--parallel 1` means they do **not** share one llama-server slot table; they still share the host. Cursor/windows: typically **2** live llama-server (`max_warm_specialists: 1` + resident nexus). Android/note9: warm cap unset → up to **7**. Whisper + piper + stable-diffusion + logical monitor are the same host.
+- notes: per-process `--parallel 1` means they do **not** share one llama-server slot table; they still share the host. Cursor/windows: typically **2** live llama-server (`max_warm_specialists: 1` + resident nexus). Android/android-legacy: warm cap unset → up to **7**. Whisper + piper + stable-diffusion + logical monitor are the same host.
 
 ### CC-12 Council JSONL: per-alias `ms` + prompt/answers (opt-in)
 - file: `src/gateway.mjs:299`, `:623-638`, `:659-674`, `:742-763`; `src/council.mjs:5`
@@ -188,6 +188,6 @@ Audience legend: **HTTP client** = anyone who can hit gateway `:8080` (loopback 
 |---|---|---|---|
 | `config/agents.cursor.json` (both trees) | resident `tool-router-agent` + 1 specialist | cpu-4 `--threads 4` | `max_warm_specialists: 1` → **2** |
 | `config/agents.windows.json` (git tree only) | same cap | nexus cpu-2 `--threads 2`; vision/code/text vulkan threads 4–6 | **1** → **2** |
-| `config/agents.android.json` / `agents.note9.json` | resident + specialists | android nexus 2 / spec 4; note9 all 4 | unset → up to **7** |
+| `config/agents.android.json` / `agents.android-termux.json` | resident + specialists | android nexus 2 / spec 4; android-legacy all 4 | unset → up to **7** |
 
 One gateway process; `process-manager` spawns per-alias children. Runtimes on the same host, no CPU mask: `llama_server` + `whisper` + `piper` + `stable_diffusion` + logical monitor.

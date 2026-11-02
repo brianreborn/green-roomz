@@ -45,7 +45,7 @@ GitHub Actions (`.github/workflows/try-vm.yml`) builds **`green-roomz-vm-kit.tar
 - First boot pulls `ghcr.io/brianreborn/green-roomz:try` and serves **:8080**
 - ssh `grz` / `greenroomz` — see [packaging/vm/README.md](vm/README.md)
 
-qodesh cannot bake the kit (no QEMU); CI does.
+mvp-host cannot bake the kit (no QEMU); CI does.
 
 ## What is inside
 

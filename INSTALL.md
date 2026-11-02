@@ -35,7 +35,7 @@ Stop: `./stop.sh` or Ctrl-C in the serve terminal. Optional board: `./console.sh
 | Path | When | Entry |
 |------|------|--------|
 | Windows | Win host, no admin, CPU only | [INSTALL-WINDOWS.md](INSTALL-WINDOWS.md) → `install-windows.cmd` / `start.cmd` |
-| Android | adb device + Termux | `./deploy-android.sh` then `termux-start.sh` — [docs/note9-termux.md](docs/note9-termux.md) |
+| Android | adb device + Termux | `./deploy-android.sh` then `termux-start.sh` — [docs/android-legacy-termux.md](docs/android-legacy-termux.md) |
 | Docker try | no local models / no pack | [packaging/README.md](packaging/README.md) — `docker pull …:try` |
 | FreeBSD / macOS | pack ELF is Linux-only | install system `llama-server`, then `./start.sh` |
 | GrapheneOS G2 (AVF) | Debian aarch64 guest | `scripts/fetch-linux-aarch64.sh` then `./start.sh` — [docs/grapheneos.md](docs/grapheneos.md) |

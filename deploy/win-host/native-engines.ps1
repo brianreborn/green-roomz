@@ -12,8 +12,8 @@ $LocalModel = Join-Path $Root 'qwen2.5-coder-1.5b-instruct-q4_k_m.gguf'
 $Port = 8081
 $HealthUri = "http://127.0.0.1:$Port/v1/models"
 $ChatUri = "http://127.0.0.1:$Port/v1/chat/completions"
-$RunLog = Join-Path $Root 'shalom-backend-native.log'
-$RunErr = Join-Path $Root 'shalom-backend-native.err'
+$RunLog = Join-Path $Root 'win-host-backend-native.log'
+$RunErr = Join-Path $Root 'win-host-backend-native.err'
 
 function Test-HealthyBackend {
     try {
@@ -34,7 +34,7 @@ function Test-ChatBackend {
 function Stop-OwnedProcess {
     param([System.Diagnostics.Process]$Process)
     if ($Process -and -not $Process.HasExited) {
-        Write-Host "[WARN] Stopping failed Shalom backend process $($Process.Id)." -ForegroundColor Yellow
+        Write-Host "[WARN] Stopping failed Windows host backend process $($Process.Id)." -ForegroundColor Yellow
         Stop-Process -Id $Process.Id -Force -ErrorAction SilentlyContinue
         $Process.WaitForExit(5000)
     }
@@ -47,7 +47,7 @@ function Start-BackendAttempt {
         '--n-gpu-layers', "$GpuLayers", '--threads', '6',
         '--batch-size', '512', '--ubatch-size', '512', '--split-mode', 'none'
     )
-    Write-Host "[START] Shalom native backend ($Name; GPU layers=$GpuLayers)" -ForegroundColor Yellow
+    Write-Host "[START] Windows host native backend ($Name; GPU layers=$GpuLayers)" -ForegroundColor Yellow
     $process = Start-Process -FilePath $BinaryPath -ArgumentList $serverArgs -WorkingDirectory $Root `
         -RedirectStandardOutput $RunLog -RedirectStandardError $RunErr -WindowStyle Hidden -PassThru
     $deadline = (Get-Date).AddSeconds($StartupTimeoutSeconds)
@@ -57,7 +57,7 @@ function Start-BackendAttempt {
             return $false
         }
         if ((Test-HealthyBackend) -and (Test-ChatBackend)) {
-            Write-Host "[OK] Local engine live on Shalom ($Name)." -ForegroundColor Green
+            Write-Host "[OK] Local engine live on Windows host ($Name)." -ForegroundColor Green
             return $true
         }
         Start-Sleep -Milliseconds 500
@@ -68,10 +68,10 @@ function Start-BackendAttempt {
 }
 
 Write-Host '=============================================' -ForegroundColor Cyan
-Write-Host 'RUNNING NATIVE LOCALAI PLATFORM ON SHALOM' -ForegroundColor Cyan
+Write-Host 'RUNNING NATIVE LOCALAI PLATFORM ON WIN-HOST' -ForegroundColor Cyan
 Write-Host '=============================================' -ForegroundColor Cyan
-if (-not (Test-Path -LiteralPath $BinaryPath)) { throw "Shalom backend binary is missing: $BinaryPath" }
-if (-not (Test-Path -LiteralPath $LocalModel)) { throw "Shalom model is missing: $LocalModel" }
+if (-not (Test-Path -LiteralPath $BinaryPath)) { throw "Windows host backend binary is missing: $BinaryPath" }
+if (-not (Test-Path -LiteralPath $LocalModel)) { throw "Windows host model is missing: $LocalModel" }
 
 # Reuse only a backend that proves it can serve a request. A stale listener is
 # not killed because it may belong to another local service.
@@ -87,10 +87,10 @@ if ($ExistingPort) {
 $ready = $false
 if ($Mode -in @('auto', 'gpu')) { $ready = Start-BackendAttempt -Name 'GPU' -GpuLayers 99 }
 if (-not $ready -and $Mode -in @('auto', 'cpu')) {
-    Write-Host '[FALLBACK] Retrying Shalom backend in CPU mode after native startup failure.' -ForegroundColor Yellow
+    Write-Host '[FALLBACK] Retrying Windows host backend in CPU mode after native startup failure.' -ForegroundColor Yellow
     $ready = Start-BackendAttempt -Name 'CPU fallback' -GpuLayers 0
 }
-if (-not $ready) { throw "Shalom native backend failed health checks in $Mode mode. See $RunLog and $RunErr" }
+if (-not $ready) { throw "Windows host native backend failed health checks in $Mode mode. See $RunLog and $RunErr" }
 
 Write-Host '=============================================' -ForegroundColor Cyan
 exit 0

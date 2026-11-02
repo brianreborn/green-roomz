@@ -1,6 +1,6 @@
-# qodesh recovery report
+# mvp-host recovery report
 
-**Machine:** qodesh (`19f2c19e-e100-49f0-8507-813d66727973`)  
+**Machine:** mvp-host (`19f2c19e-e100-49f0-8507-813d66727973`)  
 **Checked:** 2026-09-06 ~8:05–8:10 AM PT  
 **Constraints honored:** no GGUF load on 8600 GT; no Afterburner clock changes; CPU llama only for green-roomz (official CPU zip, not LocalAI vulkan copy).
 
@@ -10,7 +10,7 @@
 
 | Item | Result |
 |------|--------|
-| Path | `C:\Users\brian\Documents\green-roomz` — **present** |
+| Path | `%USERPROFILE%\Documents\green-roomz` — **present** |
 | Health | `GET http://127.0.0.1:8080/health` → **200** |
 | Status | `degraded` (uptime ~3h at check; no restart needed) |
 | Start script | `scripts\start-green-roomz.ps1` present; **not run** (already listening) |
@@ -41,13 +41,13 @@
 | LocalAI only | Vulkan pack at `C:\LocalAI\llama-b10665-bin-win-vulkan-x64` (not used as primary) |
 | Action | Fetched official zip → `%TEMP%\llama-b10702-bin-win-cpu-x64.zip` (18,145,543 bytes) |
 | URL | `https://github.com/ggml-org/llama.cpp/releases/download/b10702/llama-b10702-bin-win-cpu-x64.zip` |
-| Expanded to | `C:\Users\brian\Documents\green-roomz\runtime\llama-b10702-bin-win-cpu-x64\` |
+| Expanded to | `%USERPROFILE%\Documents\green-roomz\runtime\llama-b10702-bin-win-cpu-x64\` |
 | `llama-server.exe` | present at that folder (CPU build + ggml-cpu-*.dlls) |
 
 **Config note (not changed this pass):** `config\agents.windows.json` still points `llama_server.command` at  
 `C:\LocalAI\llama-b10665-bin-win-vulkan-x64\llama-server.exe` with `GGML_VULKAN=1`.  
 For CPU-only GRZ, point that command at  
-`C:\Users\brian\Documents\green-roomz\runtime\llama-b10702-bin-win-cpu-x64\llama-server.exe` and use `--device none` / cpu-* profiles (no Vulkan0 on 8600).
+`%USERPROFILE%\Documents\green-roomz\runtime\llama-b10702-bin-win-cpu-x64\llama-server.exe` and use `--device none` / cpu-* profiles (no Vulkan0 on 8600).
 
 Gate-B history (`data\gate-b-llama-server.err.log`) shows a prior successful load of coder 7B+1.5B draft on `127.0.0.1:8183` (historical; not re-stressed).
 
@@ -107,7 +107,7 @@ Gate-B history (`data\gate-b-llama-server.err.log`) shows a prior successful loa
 
 ### Packs drop path (for later CopyFromBox)
 
-**Created / ready:** `C:\Users\brian\Documents\green-roomz-packs\`  
+**Created / ready:** `%USERPROFILE%\Documents\green-roomz-packs\`  
 Good zip drop target for parent CopyFromBox jobs.
 
 ---
@@ -118,7 +118,7 @@ Good zip drop target for parent CopyFromBox jobs.
 2. Downloaded + expanded official CPU llama **b10702** into `Documents\green-roomz\runtime\llama-b10702-bin-win-cpu-x64\`.
 3. Inventoried CUDA 6.5 / cl / nvcc / deviceQuery (no GPU stress).
 4. Inventoried LocalAI, models, ADB (absent), Afterburner (present, untouched).
-5. Ensured `C:\Users\brian\Documents\green-roomz-packs\` exists.
+5. Ensured `%USERPROFILE%\Documents\green-roomz-packs\` exists.
 
 ## 6. Suggested next steps (parent / later)
 
@@ -127,4 +127,4 @@ Good zip drop target for parent CopyFromBox jobs.
 3. Restore `whisper-server.exe` and `sd-server.exe` (or retarget config).
 4. Re-download `qwen3-reranker-0.6b-q8_0.gguf` (15-byte stub) and optional eagle3 draft.
 5. Reinstall platform-tools / ADB if needed.
-6. Copy packs into `C:\Users\brian\Documents\green-roomz-packs\`.
+6. Copy packs into `%USERPROFILE%\Documents\green-roomz-packs\`.

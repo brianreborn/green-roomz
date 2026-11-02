@@ -1,6 +1,6 @@
 # Cross-compile llama.cpp CLI (llama-server/cli/bench) for arm64-v8a.
 # Toolchain: Japanglify SDK + llama.android NDK 29.0.13113456 / CMake 3.31.6.
-# CPU-only, GGML_CPU_ALL_VARIANTS so one ELF covers Note 9 (API 28, 4K pages)
+# CPU-only, GGML_CPU_ALL_VARIANTS so one ELF covers Android-legacy phone (API 28, 4K pages)
 # and Pixel 8 (16K pages via flexible page sizes). No GPU backend in this pack.
 $ErrorActionPreference = 'Stop'
 $Sdk = $env:ANDROID_SDK_ROOT

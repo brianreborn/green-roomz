@@ -148,8 +148,8 @@ shopt -u nullglob
 adb push "$GRZ_ROOT/policies" "$DEST/green-roomz/policies"
 adb push "$GRZ_ROOT/package.json" "$DEST/green-roomz/package.json"
 adb push "$GRZ_ROOT/termux-start.sh" "$DEST/termux-start.sh"
-if [[ -f "$GRZ_ROOT/scripts/note9-termux-setup.sh" ]]; then
-  adb push "$GRZ_ROOT/scripts/note9-termux-setup.sh" "$DEST/setup.sh"
+if [[ -f "$GRZ_ROOT/scripts/termux-setup.sh" ]]; then
+  adb push "$GRZ_ROOT/scripts/termux-setup.sh" "$DEST/setup.sh"
 fi
 adb push "$GRZ_ROOT/docs" "$DEST/green-roomz/docs" 2>/dev/null || true
 # docs are not hashed: termux-start.sh copies only SHA256SUMS-listed files (docs stay in the drop zone).

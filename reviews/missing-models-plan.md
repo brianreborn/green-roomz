@@ -15,16 +15,16 @@ Operator: **ALL models must work on ALL platforms even if slow.**
 | P | Artifact | Bytes (verified) | Dest (cursor e2e-fresh) | Wire | Platforms |
 |---|----------|-----------------:|-------------------------|------|-----------|
 | 0 | Qwen2.5-0.5B-Instruct-Q4_K_M.gguf | 397808192 | `models/` + link/copy as `missing-qwen-instruct.gguf` **or** retarget cursor/mvp manifests | general-text + code | all |
-| 1 | Re-fetch `qwen3-reranker-0.6b-q8_0.gguf` | 639150304 (dean2155) | qodesh `C:\LocalAI\` (replace **15 B stub**) | rerank | Win first; then mirror |
+| 1 | Re-fetch `qwen3-reranker-0.6b-q8_0.gguf` | 639150304 (dean2155) | mvp-host `C:\LocalAI\` (replace **15 B stub**) | rerank | Win first; then mirror |
 | 2 | `qwen3-embedding-0.6b-q8_0.gguf` | 639150592 | cursor `models/missing-embed.gguf` via copy/symlink | embed | all |
 | 3 | `qwen3guard-gen-0.6b-q4_k_m.gguf` | 484219904 | `missing-guard.gguf` | guard | all |
 | 4 | `ggml-small.bin` | 487601967 | `missing-whisper.bin` + whisper-server binary | whisper | all |
 | 5 | `en_US-lessac-medium.onnx` (+ json 4885) | 63201294 | `missing-voice.onnx` + piper bin | piper | all |
 | 6 | `qwen2.5-vl-3b-instruct-q4_k_m.gguf` (+ mmproj optional 1338428128) | 1929901056 | `missing-vision.gguf` | vision | all (slow/sequential on phones) |
 | 7 | `sd15-q4_0.gguf` | 1747190784 | `missing-sd.gguf` + sd-server | sd | all |
-| 8 | Full Win extras already on qodesh LocalAI | Qwen3-4B 2497280256; coder-7B 4683073536 | keep LocalAI paths for `agents.windows.json` | windows.json | Win; optional copy elsewhere |
+| 8 | Full Win extras already on mvp-host LocalAI | Qwen3-4B 2497280256; coder-7B 4683073536 | keep LocalAI paths for `agents.windows.json` | windows.json | Win; optional copy elsewhere |
 
-Nexus **already present** cursor+qodesh: 460616064. Monitor logical: ready.
+Nexus **already present** cursor+mvp-host: 460616064. Monitor logical: ready.
 
 ---
 
@@ -35,11 +35,11 @@ Nexus **already present** cursor+qodesh: 460616064. Monitor logical: ready.
 | Instruct 0.5B Q4_K_M | `https://huggingface.co/bartowski/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf` |
 | Embed Q8_0 | `https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/resolve/main/Qwen3-Embedding-0.6B-Q8_0.gguf` |
 | Rerank Q8_0 | `https://huggingface.co/dean2155/Qwen3-Reranker-0.6B-Q8_0-GGUF/resolve/main/qwen3-reranker-0.6b-q8_0.gguf` |
-| Guard Q4_K_M | Use LocalAI copy on qodesh **or** QuantFactory `Qwen3Guard-Gen-0.6B.Q4_K_M.gguf` (484219904) |
+| Guard Q4_K_M | Use LocalAI copy on mvp-host **or** QuantFactory `Qwen3Guard-Gen-0.6B.Q4_K_M.gguf` (484219904) |
 | Whisper small | `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin` |
 | Piper voice | `https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx` |
 | VL 3B | `https://huggingface.co/lmstudio-community/Qwen2.5-VL-3B-Instruct-GGUF/resolve/main/Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf` |
-| SD15 Q4_0 (gpustack-sized) | Prefer copy from qodesh LocalAI `sd15-q4_0.gguf` (1747190784) over second-state pruned (1566768416) |
+| SD15 Q4_0 (gpustack-sized) | Prefer copy from mvp-host LocalAI `sd15-q4_0.gguf` (1747190784) over second-state pruned (1566768416) |
 
 Script: `scripts/fetch-tiny-instruct.cmd` for Instruct on Windows. Linux: `curl -L --fail -o …partial && mv` with size gate ≥100000000 for Instruct.
 
@@ -48,7 +48,7 @@ Script: `scripts/fetch-tiny-instruct.cmd` for Instruct on Windows. Linux: `curl 
 ## Coordination
 
 - **Instruct:** another executor may already be fetching — check for `*.partial` / curl before starting. Owner of active download wins; Release Driver wires after file lands.
-- **qodesh LocalAI:** prefer robocopy/copy of verified files to Documents\green-roomz\models and to box via CopyToBox when needed (don’t re-download 7B/VL if LocalAI good).
+- **mvp-host LocalAI:** prefer robocopy/copy of verified files to Documents\green-roomz\models and to box via CopyToBox when needed (don’t re-download 7B/VL if LocalAI good).
 - **Rerank 15 B stub:** delete/replace before any health claim.
 
 ## Bounce policy
@@ -61,7 +61,7 @@ Script: `scripts/fetch-tiny-instruct.cmd` for Instruct on Windows. Linux: `curl 
 
 1. `stat` sizes match table.  
 2. `/health` reasons clear for each wired alias after bounce.  
-3. qodesh MVP battery still 7/7 with CPU threads=1.  
+3. mvp-host MVP battery still 7/7 with CPU threads=1.  
 4. Size board + this plan updated; readiness deltas noted.
 
 ## Pack notes
@@ -78,9 +78,9 @@ Instruct **397808192** now on disk at cursor `models/Qwen2.5-0.5B-Instruct-Q4_K_
 
 ---
 
-## Note9 ops policy (operator, 2026-09-06 ~11:35 PM PT)
+## Android-legacy phone ops policy (operator, 2026-09-06 ~11:35 PM PT)
 
-- Plug **USB into qodesh** with **Wi-Fi OFF** (local-only).
+- Plug **USB into mvp-host** with **Wi-Fi OFF** (local-only).
 - Prefer **USB ADB** over wireless.
 - After device appears, optional enforce: `adb shell svc wifi disable` (leave airplane/Wi-Fi off).
 - **No Knox**, no root wipe / secure_reboot / map abuse.
@@ -98,8 +98,8 @@ Operator ~89% usage — **stop heavy loops**. No new long fetches/sprints until 
 - Live `/health` still lists instruct missing until **PF bounce** (not done)
 - Size board: `/workspace/reviews/models-install-size-by-platform.md`
 - Fetch plan: `/workspace/reviews/missing-models-plan.md`
-- Note9 USB/qodesh Wi-Fi-off policy on docs + boards; local git commit blocked (no author identity)
-- qodesh rerank LocalAI was **15 B corrupt**; replacement may be incomplete
+- Android-legacy phone USB/mvp-host Wi-Fi-off policy on docs + boards; local git commit blocked (no author identity)
+- mvp-host rerank LocalAI was **15 B corrupt**; replacement may be incomplete
 - Partial left on disk: `models/ggml-small.bin.partial` (incomplete whisper — delete or resume later)
 - Remaining gaps: vision, whisper-server+bin, embed, rerank, guard, piper+voice, sd-server+sd
 
@@ -107,4 +107,4 @@ Resume later: continue plan priorities; no duplicate Instruct download; PF bounc
 
 
 ## RESUME (2026-09-06 ~11:41 PM PT)
-Researcher: Instruct lane owned by models-fill executor — do not fight. Resume full-set: **embed / guard / rerank** next; PF-M wire from Platform when ready. Note9 USB unauthorized on qodesh awaiting Allow.
+Researcher: Instruct lane owned by models-fill executor — do not fight. Resume full-set: **embed / guard / rerank** next; PF-M wire from Platform when ready. Android-legacy phone USB unauthorized on mvp-host awaiting Allow.
