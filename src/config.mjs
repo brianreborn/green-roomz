@@ -17,7 +17,7 @@ import {
 import { ValidationError } from './errors.mjs';
 import { TIMING_PRIVACY_INSTALL_HINT, resolveTimingPrivacy } from './timing-quant.mjs';
 import { digestObject, expandEnvironment, resolveManifestPath, nfcPath } from './util.mjs';
-import { readFileSync, existsSync, lstatSync } from 'node:fs';
+import { readFileSync, existsSync, lstatSync, realpathSync, statSync } from 'node:fs';
 import { assertNexusKernelText, kernelBindingIssues } from './kernel-text.mjs';
 
 export { assertNexusKernelText, kernelBindingIssues };
@@ -216,11 +216,50 @@ export function readHostOverride(file, env = process.env) {
     if (typeof process.getuid === 'function' && st.uid !== process.getuid()) issues.push(`override ${file} owned by uid ${st.uid}, not ${process.getuid()}`);
   }
   if (issues.length) throw new ValidationError('host override refused', { issues });
+  if (st.size > HOST_OVERRIDE_MAX_BYTES) throw new ValidationError('host override refused', { issues: [`override ${file} is ${st.size} bytes (cap ${HOST_OVERRIDE_MAX_BYTES})`] });
+  const raw = readFileSync(file, 'utf8');
+  if (Buffer.byteLength(raw) > HOST_OVERRIDE_MAX_BYTES) throw new ValidationError('host override refused', { issues: [`override ${file} exceeds ${HOST_OVERRIDE_MAX_BYTES} bytes`] });
+  const seen = new Set(); const dups = [];
+  for (const m of raw.matchAll(/"((?:[^"\\]|\\.)*)"\s*:/g)) { if (seen.has(m[1])) dups.push(m[1]); seen.add(m[1]); }
+  if (dups.length) throw new ValidationError('host override refused', { issues: [`override ${file} has duplicate keys: ${[...new Set(dups)].join(', ')}`] });
   let data;
-  try { data = JSON.parse(readFileSync(file, 'utf8')); } catch (err) { throw new ValidationError('host override refused', { issues: [`override ${file}: ${err.message}`] }); }
+  try { data = JSON.parse(raw); } catch (err) { throw new ValidationError('host override refused', { issues: [`override ${file}: ${err.message}`] }); }
   return validateHostOverride(data, env);
 }
 
+const SHARED_PREFIX_FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'config', 'shared-storage-prefixes.txt');
+let sharedPrefixCache = null;
+/** Shared-storage prefixes (config/shared-storage-prefixes.txt; same list the note9 scripts use). */
+export function sharedStoragePrefixes() {
+  if (!sharedPrefixCache) {
+    sharedPrefixCache = Object.freeze(readFileSync(SHARED_PREFIX_FILE, 'utf8').split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#')));
+  }
+  return sharedPrefixCache;
+}
+export function isSharedStorage(resolved) {
+  return sharedStoragePrefixes().some((pre) => { const b = pre.replace(/\/+$/, ''); return resolved === b || resolved.startsWith(b + '/'); });
+}
+
+/** SD-21: api key file must resolve under realpath($HOME), final component not a symlink,
+ * regular file, mode 600/400, owned by us, not on shared storage (after realpath). */
+export function apiKeyFileIssues(file, env = process.env) {
+  const issues = [];
+  let homeReal; let real; let st;
+  try { homeReal = realpathSync(env.HOME); } catch { return [`api_key_file: HOME ${env.HOME} does not resolve`]; }
+  try { st = lstatSync(file); } catch { return [`api_key_file ${file} does not exist`]; }
+  if (st.isSymbolicLink()) return [`api_key_file ${file} is a symlink; refusing`];
+  try { real = realpathSync(file); } catch { return [`api_key_file ${file} does not resolve`]; }
+  if (isSharedStorage(real)) issues.push(`api_key_file ${real} is on shared storage; refusing`);
+  if (!real.startsWith(homeReal + path.sep)) issues.push(`api_key_file ${real} is outside $HOME (${homeReal})`);
+  const fst = statSync(real);
+  if (!fst.isFile()) issues.push(`api_key_file ${real} is not a regular file`);
+  const mode = fst.mode & 0o777;
+  if (mode !== 0o600 && mode !== 0o400) issues.push(`api_key_file ${real} mode ${mode.toString(8)} must be 600 or 400`);
+  if (typeof process.getuid === 'function' && fst.uid !== process.getuid()) issues.push(`api_key_file ${real} not owned by uid ${process.getuid()}`);
+  return issues;
+}
+
+export const HOST_OVERRIDE_MAX_BYTES = 4096;
 export function validateHostOverride(data, env = process.env) {
   const issues = [];
   if (!data || typeof data !== 'object' || Array.isArray(data)) throw new ValidationError('host override refused', { issues: ['override must be a JSON object'] });
@@ -232,15 +271,11 @@ export function validateHostOverride(data, env = process.env) {
     if (typeof v === 'string' && v.includes('${')) { issues.push(`override ${k}: \${} expansion not allowed`); continue; }
     if (k === 'port' && (!Number.isInteger(v) || v < 1024 || v > 65535)) issues.push('override port must be an integer 1024-65535');
     if (k === 'log_opt_in' && typeof v !== 'boolean') issues.push('override log_opt_in must be boolean');
+    if (v !== null && typeof v === 'object') { issues.push(`override ${k} must be a scalar`); continue; }
     if (k === 'api_key_file') {
-      const home = env?.HOME;
       if (typeof v !== 'string' || !path.isAbsolute(v) || /[\0\n]/.test(v)) issues.push('override api_key_file must be an absolute path');
-      else if (!home) issues.push('override api_key_file needs HOME');
-      else {
-        const r = path.resolve(v); const h = path.resolve(home);
-        if (!r.startsWith(h + path.sep)) issues.push(`override api_key_file ${r} is outside $HOME`);
-        else if (/^\/(data\/local\/tmp|sdcard|storage|mnt\/sdcard)\//.test(r)) issues.push(`override api_key_file ${r} is on shared storage`);
-      }
+      else if (!env?.HOME) issues.push('override api_key_file needs HOME');
+      else issues.push(...apiKeyFileIssues(v, env));
     }
   }
   if (issues.length) throw new ValidationError('host override refused', { issues });
@@ -257,6 +292,7 @@ export async function loadManifest(input = DEFAULT_MANIFEST, env = process.env) 
   const override = readHostOverride(hostOverridePath(manifestPath, effectiveEnv), effectiveEnv);
   const manifest = expandEnvironment(parsed, effectiveEnv);
   // Applied after expansion: override values are literals, never expanded.
+  if (override) process.stderr.write(`green-roomz: host override accepted keys: ${Object.keys(override).sort().join(', ') || '(none)'}\n`);
   if (override?.port !== undefined && manifest.gateway) manifest.gateway.port = override.port;
   assertRuntimeCommands(manifest);
   validateManifest(manifest, effectiveEnv);

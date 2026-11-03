@@ -6,16 +6,22 @@ if [[ -n ${PREFIX:-} && -x ${PREFIX}/bin/realpath ]]; then REALPATH=$PREFIX/bin/
 GRZ_CUR="$HOME/grz.current"
 GRZ_STATE="$HOME/.green-roomz-state"
 
+# shellcheck source=note9-shared-storage.sh
+. "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/note9-shared-storage.sh"
+
+# N5: Android host iff $TERMUX_VERSION is set or `uname -o` says Android ($PREFIX is not a signal).
+grz_is_android() { [[ -n ${TERMUX_VERSION:-} || $(uname -o 2>/dev/null) == Android ]]; }
+
 # Android 9 (API 28) minimum. getprop present: must print a number >= 28. getprop missing:
-# refuse on Android/Termux ($PREFIX or $TERMUX_VERSION set); skip only on non-Android hosts.
+# refuse on an Android host (grz_is_android); skip only on non-Android hosts.
 grz_sdk_check() {
   local sdk
   if command -v getprop >/dev/null 2>&1; then
     sdk=$(getprop ro.build.version.sdk 2>/dev/null | tr -d '[:space:]')
     [[ $sdk =~ ^[0-9]+$ ]] || { echo "ERROR: getprop ro.build.version.sdk returned '${sdk}' (empty/non-numeric); cannot confirm Android 9 (API 28) or later; refusing" >&2; return 1; }
     (( sdk >= 28 )) || { echo "ERROR: Android SDK $sdk detected; this build needs Android 9 (API 28) or later" >&2; return 1; }
-  elif [[ -n ${PREFIX:-} || -n ${TERMUX_VERSION:-} ]]; then
-    echo "ERROR: getprop not found but this looks like Termux (PREFIX/TERMUX_VERSION set); cannot confirm Android 9 (API 28) or later; refusing" >&2; return 1
+  elif grz_is_android; then
+    echo "ERROR: getprop not found but this is Android (TERMUX_VERSION set or uname -o = Android); cannot confirm Android 9 (API 28) or later; refusing" >&2; return 1
   fi
   return 0
 }

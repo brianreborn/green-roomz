@@ -11,6 +11,8 @@ SELF_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 # Android 9 (API 28) minimum (NDK API 28 build). See grz_sdk_check: refuses on empty/non-numeric
 # getprop, or missing getprop under Termux; skipped only on non-Android hosts.
 grz_sdk_check || exit 1
+HOME_REAL=$("$REALPATH" -e -- "$HOME") || { echo "ERROR: HOME missing" >&2; exit 1; }
+if grz_is_shared_storage "$HOME_REAL"; then echo "ERROR: HOME $HOME_REAL is on shared storage; refusing" >&2; exit 1; fi
 SD=/sdcard/Download/grz   # staged-tree fallback location only; nothing is ever written there
 SRC_TMP=/data/local/tmp/grz
 grz_state_init || exit 1

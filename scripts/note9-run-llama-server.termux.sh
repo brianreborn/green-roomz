@@ -11,20 +11,20 @@ set -eu
 : "${LANG:=C.UTF-8}"; export LANG
 die() { echo "ERROR: $*" >&2; exit 1; }
 # Android 9 (API 28) minimum. getprop present: must print a number >= 28 (empty/non-numeric
-# refuses). getprop missing: refuse under Termux ($PREFIX/$TERMUX_VERSION); skip on non-Android.
+# refuses). getprop missing: refuse on Android; skip on non-Android.
+# N5: Android iff $TERMUX_VERSION is set or `uname -o` = Android ($PREFIX is not a signal).
+is_android=0
+if [ -n "${TERMUX_VERSION:-}" ] || [ "$(uname -o 2>/dev/null)" = Android ]; then is_android=1; fi
 if command -v getprop >/dev/null 2>&1; then
   sdk=$(getprop ro.build.version.sdk 2>/dev/null | tr -d '[:space:]')
   case "$sdk" in
     ''|*[!0-9]*) die "getprop ro.build.version.sdk returned '$sdk' (empty/non-numeric); cannot confirm Android 9 (API 28) or later; refusing" ;;
     *) [ "$sdk" -ge 28 ] || die "Android SDK $sdk detected; this build needs Android 9 (API 28) or later" ;;
   esac
-elif [ -n "${PREFIX:-}" ] || [ -n "${TERMUX_VERSION:-}" ]; then
-  die "getprop not found but this looks like Termux (PREFIX/TERMUX_VERSION set); cannot confirm Android 9 (API 28) or later; refusing"
+elif [ "$is_android" = 1 ]; then
+  die "getprop not found but this is Android (TERMUX_VERSION set or uname -o = Android); cannot confirm Android 9 (API 28) or later; refusing"
 fi
-is_termux=0
-[ -n "${TERMUX_VERSION:-}" ] && is_termux=1
-case "${PREFIX:-}" in */files/usr) is_termux=1 ;; esac
-if [ "$is_termux" = 1 ]; then
+if [ "$is_android" = 1 ]; then
   # Release runner: no GRZ_RUNTIME_DIR/GRZ_TREE_DIR overrides. The only symlink allowed is
   # $HOME/grz.current; its realpath must be $HOME/grz.<64hex> and that hex must equal
   # .verified, sha256(manifest) and GRZ_MANIFEST_SHA256.
@@ -35,6 +35,10 @@ if [ "$is_termux" = 1 ]; then
   D=$("$REALPATH" -e -- "$CUR") || die "$CUR is dangling; refusing"
   hex=${D#"$HOME_REAL"/grz.}
   [[ $D == "$HOME_REAL"/grz.* && $hex =~ ^[0-9a-f]{64}$ ]] || die "$CUR resolves to $D, not $HOME_REAL/grz.<sha256>; refusing"
+  # SD-21: shared prefix list (config/shared-storage-prefixes.txt) via the one helper.
+  # shellcheck source=note9-shared-storage.sh
+  . "$D/tree/scripts/note9-shared-storage.sh" || die "shared-storage helper missing in $D/tree; refusing"
+  if grz_is_shared_storage "$D"; then die "$D is on shared storage; refusing"; fi
   RT=$D/runtime
   MAN=$D/tree/config/note9-runtime.SHA256SUMS
   if [ -n "${PREFIX:-}" ] && [ -x "$PREFIX/bin/find" ]; then FIND=$PREFIX/bin/find; else FIND="find"; fi

@@ -45,6 +45,15 @@ const UNICORN_PAGE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..
 /** 8080 may post/observe hops. No vote / lockdown / reboot / respond rights. */
 export const GATEWAY_IPC_RIGHTS = (CAP.POST | CAP.OBSERVE | CAP.SNAPSHOT) >>> 0;
 
+// SD-23: api_key_file from the validated host override (config.mjs checked path/mode/owner).
+function readOverrideApiKey(manifest) {
+  const file = manifest?._meta?.hostOverride?.api_key_file;
+  if (!file) return '';
+  const key = readFileSync(file, 'utf8').trim();
+  if (!key) throw new ValidationError(`api_key_file ${file} is empty`);
+  return key;
+}
+
 function identityFrom(request, apiKey) {
   const header = request.headers.authorization ?? '';
   const remote = normalizeAddr(request.socket?.remoteAddress);
@@ -384,7 +393,7 @@ export class Gateway {
     this.policy = policy;
     this.hostAdapter = hostAdapter;
     this.fetchImpl = fetchImpl ?? fetch;
-    this.apiKey = process.env.GREEN_ROOMZ_API_KEY || '';
+    this.apiKey = process.env.GREEN_ROOMZ_API_KEY || readOverrideApiKey(manifest);
     this.startedAt = Date.now();
     this.mailbox = mailbox ?? new Mailbox();
     this.ipc = ipc ?? new MonitorIpc({

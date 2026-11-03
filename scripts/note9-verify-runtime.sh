@@ -13,14 +13,22 @@
 #   verified inside the temp dir. Plain entries are relative to runtime/ (bin/llama-server,
 #   bin/libggml.so, models/x.gguf); "tree/" entries are relative to tree/.
 # Trust anchor: GRZ_MANIFEST_SHA256 (operator-supplied out of band) must equal sha256(manifest).
-# Startup sweeps $HOME/.grz-verify.* and *.old.* leftovers; after the flip, grz.* folders other
-# than current and one previous are removed.
+# Install lock: mkdir $HOME/.grz-install.lock (SD-24); a lock whose pid is dead is taken over.
+# Startup sweep (SD-20): only real dirs named grz.<64hex>.old.<n> or .grz-verify.XXXXXX (ours);
+#   never a bare *.old.*, never a symlink.
+# Same sha already current and intact (SD-25): no copy, no flip.
+# After the flip: keep current + the previous one named by the install record
+#   $HOME/.green-roomz-state/install-history (SD-24; never by mtime); other grz.* dirs removed.
+# $HOME (realpath) on Android shared storage is refused (SD-21, scripts/note9-shared-storage.sh).
 # Aborts on: unlisted or symlinked staged file, missing/empty manifest, copy failure, hash
 # mismatch, non-symlink grz.current, or non-GNU realpath/find/mv ahead in PATH.
 # Only escape: GRZ_ALLOW_UNVERIFIED_RUNTIME=1 (loud warning; folder grz.unverified.*, no
 # .verified, the runner still refuses unless it is given the same escape).
 set -euo pipefail
 umask 077
+_grz_vdir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=note9-shared-storage.sh
+source "$_grz_vdir/note9-shared-storage.sh"
 STAGE=${1:?stage root}; TSRC=${2:?tree src}
 MAN_REL=config/note9-runtime.SHA256SUMS
 die() { echo "ERROR: $*" >&2; exit 1; }
@@ -65,17 +73,38 @@ CUR=$HOME_REAL/grz.current
 if [[ -e $CUR || -L $CUR ]]; then
   [[ -L $CUR ]] || die "$CUR exists and is not a symlink; refusing"
 fi
-# Sweep leftovers from a crashed earlier run: temp work dirs and rename-aside folders.
+grz_is_shared_storage "$HOME_REAL" && die "HOME $HOME_REAL is on shared storage; refusing"
+STATE=$HOME_REAL/.green-roomz-state
+[[ -L $STATE ]] && die "$STATE is a symlink; refusing"
+[[ -d $STATE ]] || mkdir -m 700 -- "$STATE" || die "cannot create $STATE"
+HIST=$STATE/install-history
+# SD-24: one install at a time.
+LOCK=$HOME_REAL/.grz-install.lock
+if ! mkdir -m 700 -- "$LOCK" 2>/dev/null; then
+  [[ -L $LOCK ]] && die "$LOCK is a symlink; refusing"
+  owner=$(cat -- "$LOCK/pid" 2>/dev/null || true)
+  if [[ $owner =~ ^[0-9]+$ ]] && kill -0 "$owner" 2>/dev/null; then
+    die "another install (pid $owner) holds $LOCK; refusing"
+  fi
+  echo "taking over stale lock $LOCK (pid ${owner:-?} gone)" >&2
+  rm -rf -- "$LOCK"; mkdir -m 700 -- "$LOCK" || die "cannot take $LOCK"
+fi
+echo $$ > "$LOCK/pid"
+WORK=""
+# shellcheck disable=SC2329 # invoked via trap
+cleanup() { if [[ -n ${WORK:-} ]]; then rm -rf -- "$WORK"; fi; rm -rf -- "$LOCK"; }
+trap cleanup EXIT
+# SD-20: sweep only our own leftovers, real dirs only.
 shopt -s nullglob
-for stale in "$HOME_REAL"/.grz-verify.* "$HOME_REAL"/*.old.* "$HOME_REAL"/.grz-current.tmp.*; do
+for stale in "$HOME_REAL"/grz.*.old.* "$HOME_REAL"/.grz-verify.*; do
+  n=${stale##*/}
+  [[ -d $stale && ! -L $stale ]] || continue
+  [[ $n =~ ^grz\.[0-9a-f]{64}\.old\.[0-9]+$ || $n =~ ^\.grz-verify\.[A-Za-z0-9]{6}$ ]] || continue
   echo "sweeping stale $stale" >&2; rm -rf -- "$stale"
 done
 shopt -u nullglob
 WORK=$(mktemp -d "$HOME_REAL/.grz-verify.XXXXXX") || die "mktemp under $HOME failed"
 chmod 700 "$WORK"
-# shellcheck disable=SC2329 # invoked via trap
-cleanup() { if [[ -n ${WORK:-} ]]; then rm -rf -- "$WORK"; fi; }
-trap cleanup EXIT
 NRT=$WORK/runtime; NTREE=$WORK/tree
 mkdir -p "$NRT/bin" "$NRT/lib" "$NRT/models" "$NTREE/config"
 
@@ -109,6 +138,30 @@ else
     listed[$p]=1
   done < "$SUMS"
   (( ${#listed[@]} > 0 )) || unverified "manifest $SUMS has no entries (manifest sha256=$ACTUAL)"
+fi
+
+# SD-25: same verified sha already live and intact -> nothing to copy or flip.
+if [[ $UNVERIFIED == 0 && -L $CUR && $(readlink -- "$CUR") == "grz.$ACTUAL" ]]; then
+  LIVE=$HOME_REAL/grz.$ACTUAL
+  if [[ -d $LIVE && ! -L $LIVE && $(cat -- "$LIVE/.verified" 2>/dev/null) == "$ACTUAL" ]]; then
+    ok=1
+    for p in "${!listed[@]}"; do
+      if [[ $p == tree/* ]]; then dst=$LIVE/tree/${p#tree/}; else dst=$LIVE/runtime/$p; fi
+      want=$(awk -v p="$p" '($2==p||$2=="*"p)&&$1!~/^#/{print $1; exit}' "$SUMS")
+      [[ ! -L $dst && $(sha256sum -- "$dst" 2>/dev/null | cut -d' ' -f1) == "$want" ]] || { ok=0; break; }
+    done
+    # Nothing unlisted, no symlinks, exec bits intact.
+    nlive=$("$FIND" "$LIVE/runtime" "$LIVE/tree" \( -type f -o -type l \) -not -path "$LIVE/tree/$MAN_REL" -printf x | wc -c)
+    [[ $nlive == "${#listed[@]}" ]] || ok=0
+    for b in "$LIVE"/runtime/bin/llama-server "$LIVE"/runtime/bin/llama-cli "$LIVE"/runtime/bin/llama-bench "$LIVE"/tree/scripts/note9-run-llama-server.termux.sh; do
+      [[ ! -f $b || $(stat -c %a -- "$b") == 755 ]] || ok=0
+    done
+    if [[ $ok == 1 ]]; then
+      echo "grz.$ACTUAL already current and intact; skipping copy and flip"
+      exit 0
+    fi
+    echo "grz.$ACTUAL is current but does not re-verify; reinstalling" >&2
+  fi
 fi
 
 n=0
@@ -155,19 +208,18 @@ TMPL=$HOME_REAL/.grz-current.tmp.$$
 ln -s -- "$NAME" "$TMPL" || die "ln -s $TMPL failed"
 "$MV" -T -- "$TMPL" "$CUR" || { rm -f -- "$TMPL"; die "flip of $CUR failed; previous current kept"; }
 rm -rf -- "$DEST.old.$$"
-# Keep current + one previous (newest by mtime). Only grz.<64hex> / grz.unverified.* match.
-prev=""
-while IFS= read -r d; do
-  [[ $d == "$DEST" ]] && continue
-  if [[ -z $prev ]]; then prev=$d; continue; fi
-  echo "sweeping old $d" >&2; rm -rf -- "$d"
-done < <(
-  for c in "$HOME_REAL"/grz.*; do
-    n=${c##*/}
-    [[ -d $c && ! -L $c ]] || continue
-    [[ $n =~ ^grz\.([0-9a-f]{64}|unverified\.[0-9]+\.[0-9]+)$ ]] || continue
-    printf '%s %s\n' "$(stat -c %Y -- "$c")" "$c"
-  done | sort -rn | cut -d' ' -f2-
-)
+# SD-24: record the install, keep current + the previous recorded name; never mtime.
+[[ -L $HIST ]] && die "$HIST is a symlink; refusing"
+printf '%s\n' "$NAME" >> "$HIST"; chmod 600 "$HIST"
+prev=$(awk -v cur="$NAME" '$0!=cur{p=$0} END{print p}' "$HIST")
+for c in "$HOME_REAL"/grz.*; do
+  n=${c##*/}
+  [[ -d $c && ! -L $c ]] || continue
+  [[ $n =~ ^grz\.([0-9a-f]{64}|unverified\.[0-9]+\.[0-9]+)$ ]] || continue
+  [[ $n == "$NAME" || ( -n $prev && $n == "$prev" ) ]] && continue
+  echo "sweeping old $c" >&2; rm -rf -- "$c"
+done
+# Trim the record to its last 20 lines (tmp + rename in the 700 state dir).
+tail -n 20 -- "$HIST" > "$HIST.tmp.$$" && chmod 600 "$HIST.tmp.$$" && "$MV" -T -- "$HIST.tmp.$$" "$HIST"
 echo "installed $DEST; $CUR -> $NAME"
 exit 0
