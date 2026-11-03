@@ -8,9 +8,18 @@
 #   line counts (bin/lib/model/tree).
 set -euo pipefail
 ALLOW_NO_MODEL=0
-if [[ ${1:-} == --allow-no-model ]]; then ALLOW_NO_MODEL=1; shift; fi
-STAGE=${1:?stage root}; TSRC=${2:?tree src}; OUT=${3:?out file}
 die() { echo "ERROR: $*" >&2; exit 1; }
+# --allow-no-model is accepted in any position; any other --option is refused.
+POS=()
+for a in "$@"; do
+  case "$a" in
+    --allow-no-model) ALLOW_NO_MODEL=1 ;;
+    --*) die "unknown option $a" ;;
+    *) POS+=("$a") ;;
+  esac
+done
+(( ${#POS[@]} == 3 )) || die "usage: note9-gen-manifest.sh [--allow-no-model] <stage_root> <tree_src> <out_file> (flag in any position)"
+STAGE=${POS[0]}; TSRC=${POS[1]}; OUT=${POS[2]}
 [[ -d $STAGE ]] || die "stage root $STAGE missing"
 [[ -d $TSRC ]] || die "tree src $TSRC missing"
 nm=$(cd "$TSRC" && find . -name node_modules -not -path './.git/*' -print -quit)

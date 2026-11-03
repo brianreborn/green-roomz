@@ -17,6 +17,11 @@ if grz_is_shared_storage "$HOME_REAL"; then echo "ERROR: HOME $HOME_REAL is on s
 # (note9-pack-release.sh), extracted under $HOME; never from shared/adb-writable storage.
 SELF_REAL=$("$REALPATH" -e -- "$SELF_DIR")
 if grz_is_shared_storage "$SELF_REAL"; then echo "ERROR: setup is running from $SELF_REAL (shared/adb-writable storage); extract the sha-checked release tarball under \$HOME and run it from there; refusing" >&2; exit 1; fi
+# SD-31: the extracted release folder holds regular files only (see note9-extract-release.sh).
+REL_ROOT=$(dirname -- "$SELF_REAL")
+if [[ -n ${PREFIX:-} && -x ${PREFIX}/bin/find ]]; then FIND=$PREFIX/bin/find; else FIND="find"; fi
+badrel=$("$FIND" "$REL_ROOT" -path "$REL_ROOT/.git" -prune -o -mindepth 1 ! -type f ! -type d -print -quit 2>/dev/null)
+if [[ -n $badrel ]]; then echo "ERROR: non-regular entry $badrel in the release folder; re-extract with note9-extract-release.sh; refusing" >&2; exit 1; fi
 SD=/sdcard/Download/grz   # staged-tree fallback location only; nothing is ever written there
 SRC_TMP=/data/local/tmp/grz
 grz_state_init || exit 1
@@ -68,7 +73,7 @@ if [[ -d $SRC_TMP/green-roomz ]]; then TREE_SRC=$SRC_TMP/green-roomz
 elif [[ -d $SD/green-roomz ]]; then TREE_SRC=$SD/green-roomz
 else echo "ERROR: no green-roomz tree"; exit 1; fi
 # npm-deps: none. Setup never runs npm; a node_modules dir in the staged tree is refused.
-nm=$(find "$TREE_SRC" -name node_modules -not -path '*/.git/*' -print -quit 2>/dev/null)
+nm=$("$FIND" "$TREE_SRC" -name node_modules -not -path '*/.git/*' -print -quit 2>/dev/null)
 if [[ -n $nm ]]; then echo "ERROR: node_modules present in staged tree ($nm); package.json has no runtime deps (npm-deps: none); refusing" >&2; exit 1; fi
 
 echo "=== copy + verify native runtime into \$HOME (never executed from $SRC_TMP) ==="
@@ -91,9 +96,12 @@ MAN="$HOME_GRZ/config/agents.note9.json"
 PORT=${GRZ_PORT:-8080}
 [[ $PORT =~ ^[0-9]+$ ]] || { echo "ERROR: GRZ_PORT must be numeric"; exit 1; }
 OVR="$STATE/agents.note9.local.json"
-GRZ_OVR_PORT=$PORT GRZ_OVR_LOG="$LOG_OPT_IN" GRZ_OVR_OUT="$OVR" node -e '
+# API key (always required, loopback included): 0600 key in the state dir, generated if absent.
+KEYF="$STATE/api.key"
+grz_key_generate "$KEYF" || { echo "ERROR: generating $KEYF failed"; exit 1; }
+GRZ_OVR_PORT=$PORT GRZ_OVR_LOG="$LOG_OPT_IN" GRZ_OVR_OUT="$OVR" GRZ_OVR_KEY="$KEYF" node -e '
 const fs = require("fs");
-const o = { port: Number(process.env.GRZ_OVR_PORT), log_opt_in: process.env.GRZ_OVR_LOG === "1" };
+const o = { port: Number(process.env.GRZ_OVR_PORT), log_opt_in: process.env.GRZ_OVR_LOG === "1", api_key_file: process.env.GRZ_OVR_KEY };
 const out = process.env.GRZ_OVR_OUT, tmp = out + ".tmp." + process.pid;
 fs.writeFileSync(tmp, JSON.stringify(o, null, 2) + "\n", { mode: 0o600, flag: "wx" });
 fs.chmodSync(tmp, 0o600);
@@ -116,13 +124,17 @@ node ./bin/green-roomz.mjs validate --manifest ./config/agents.note9.json | tee 
 . "$GRZ_TREE/scripts/note9-serve-pid.sh"
 grz_stop_serve
 
+echo "=== api key ==="
+KEYSRC=$(grz_key_check "$GRZ_TREE") || { echo "ERROR: no valid API key; not starting the gateway"; exit 1; }
+echo "api key: ${KEYSRC/#$HOME/\~} (required on every bind, loopback included)"
+
 echo "=== serve ==="
 grz_serve_start "$PORT" "$LOG_OPT_IN"
 echo "serve_pid=$GRZ_SERVE_PID"
 
 ok=0
 for _ in $(seq 1 90); do
-  if node -e "fetch('http://127.0.0.1:$PORT/v1/models').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"; then
+  if grz_probe "http://127.0.0.1:$PORT/v1/models" "$KEYSRC"; then
     ok=1
     break
   fi
@@ -131,6 +143,6 @@ done
 
 echo "gateway_ready=$ok"
 if [[ "$ok" -eq 1 ]]; then
-  node -e "fetch('http://127.0.0.1:$PORT/v1/models').then(async r=>console.log(await r.text())).catch(e=>console.error(e))" || true
+  grz_probe "http://127.0.0.1:$PORT/v1/models" "$KEYSRC" 1 || true
 fi
 echo "=== DONE ok=$ok ==="

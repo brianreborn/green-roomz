@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, symlinkSync, statSync, lstatSync, readlinkSync, readdirSync, chmodSync, renameSync, utimesSync, unlinkSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, symlinkSync, statSync, lstatSync, readlinkSync, readdirSync, chmodSync, renameSync, utimesSync, unlinkSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -280,9 +280,9 @@ function realTree(extra = {}) {
   for (const n of ['note9-verify-runtime.sh', 'note9-common.sh', 'note9-serve-pid.sh', 'note9-restart-serve.sh', 'note9-refresh-src.sh', 'note9-run-llama-server.termux.sh', 'note9-shared-storage.sh']) tree[`scripts/${n}`] = readFileSync(join(SCRIPTS, n), 'utf8');
   tree['config/shared-storage-prefixes.txt'] = readFileSync(join(REPO, 'config', 'shared-storage-prefixes.txt'), 'utf8');
   for (const rel of spawnSync('bash', ['-c', 'cd src && find . -type f -name "*.mjs" -printf "%P\\n"'], { cwd: REPO, encoding: 'utf8' }).stdout.trim().split('\n')) tree[`src/${rel}`] = readFileSync(join(REPO, 'src', rel), 'utf8');
-  return fixture({ files: { 'bin/llama-server': 'ELF', 'bin/libggml.so': 'SO' }, tree });
+  return fixture({ files: { 'bin/llama-server': 'ELF', 'bin/libggml.so': 'SO', 'models/m.gguf': 'GGUF' }, tree });
 }
-const envFor = (f, extra = {}) => ({ PATH: process.env.PATH, HOME: f.home, GRZ_MANIFEST_SHA256: f.manSha, GRZ_RESTART_NO_PROBE: '1', ...extra });
+const envFor = (f, extra = {}) => ({ PATH: process.env.PATH, HOME: f.home, GRZ_MANIFEST_SHA256: f.manSha, GRZ_RESTART_NO_PROBE: '1', GREEN_ROOMZ_API_KEY: 'test-key-0123456789abcdef', ...extra });
 test('REFRESH: goes through verify + flip from the verified tree; bad anchor leaves grz.current unchanged; no cp into tree', { skip: !hasBash }, () => {
   const f = realTree(); assert.equal(run(f).code, 0);
   const g = realTree({ 'src/new.mjs': 'export {};\n' });
@@ -438,23 +438,68 @@ test('SD-22 (= N5a): on Android, empty / non-numeric / missing getprop refused i
   }
 });
 
-test('PACK: release tarball is deterministic, holds setup+verifier+helpers+manifest, prints both shas; setup uses its own verifier', { skip: !hasBash }, () => {
-  const t = mkdtempSync(join(tmpdir(), 'grz-pack-'));
-  const pack = join(SCRIPTS, 'note9-pack-release.sh');
+function packRepo() {
+  // Pack = git archive of HEAD: build a throwaway clean repo holding the packed files.
+  const t = mkdtempSync(join(tmpdir(), 'grz-pack-')); const g = join(t, 'repo');
+  const files = ['config/note9-runtime.SHA256SUMS', 'config/shared-storage-prefixes.txt', 'scripts/note9-common.sh', 'scripts/note9-shared-storage.sh', 'scripts/note9-termux-setup.sh', 'scripts/note9-verify-runtime.sh', 'scripts/note9-extract-release.sh', 'scripts/note9-pack-release.sh'];
+  for (const f of files) { mkdirSync(dirname(join(g, f)), { recursive: true }); writeFileSync(join(g, f), readFileSync(join(REPO, f))); }
+  const gi = (...a) => spawnSync('git', ['-C', g, ...a], { encoding: 'utf8', env: { ...process.env, GIT_AUTHOR_DATE: '@0 +0000', GIT_COMMITTER_DATE: '@0 +0000', GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } });
+  gi('init', '-q'); gi('add', '-A'); gi('commit', '-qm', 'x');
+  return { t, g, pack: join(g, 'scripts', 'note9-pack-release.sh') };
+}
+test('PACK: git archive of HEAD, deterministic, holds setup+verifier+extract+helpers+manifest, prints both shas; dirty tree refused', { skip: !hasBash }, () => {
+  const { t, g, pack } = packRepo();
   const a = spawnSync('bash', [pack, join(t, 'a.tar.gz')], { encoding: 'utf8' });
   assert.equal(a.status, 0, a.stderr);
   const b = spawnSync('bash', [pack, join(t, 'b.tar.gz')], { encoding: 'utf8', env: { ...process.env, TZ: 'Asia/Tokyo', LC_ALL: 'C' } });
+  assert.equal(b.status, 0, b.stderr);
   assert.equal(readFileSync(join(t, 'a.tar.gz')).equals(readFileSync(join(t, 'b.tar.gz'))), true, 'byte-identical');
   const tsha = sha(readFileSync(join(t, 'a.tar.gz')));
   assert.match(a.stdout, new RegExp(`tarball  sha256=${tsha}`));
   assert.match(a.stdout, new RegExp(`manifest sha256=${sha(readFileSync(join(REPO, 'config', 'note9-runtime.SHA256SUMS')))}`));
-  const list = spawnSync('tar', ['tzvf', join(t, 'a.tar.gz')], { encoding: 'utf8' }).stdout.trim().split('\n');
-  assert.deepEqual(list.map((l) => l.split(/\s+/).pop()), ['config/note9-runtime.SHA256SUMS', 'config/shared-storage-prefixes.txt', 'scripts/note9-common.sh', 'scripts/note9-shared-storage.sh', 'scripts/note9-termux-setup.sh', 'scripts/note9-verify-runtime.sh']);
-  for (const l of list) assert.match(l, /^-rw-r--r-- 0\/0 /);
-  assert.equal(readFileSync(join(t, 'a.tar.gz'))[4] | readFileSync(join(t, 'a.tar.gz'))[5] | readFileSync(join(t, 'a.tar.gz'))[6] | readFileSync(join(t, 'a.tar.gz'))[7], 0, 'gzip -n: no mtime');
+  const list = spawnSync('tar', ['tzf', join(t, 'a.tar.gz')], { encoding: 'utf8' }).stdout.trim().split('\n').filter((l) => !l.endsWith('/'));
+  assert.deepEqual(list, ['config/note9-runtime.SHA256SUMS', 'config/shared-storage-prefixes.txt', 'scripts/note9-common.sh', 'scripts/note9-extract-release.sh', 'scripts/note9-shared-storage.sh', 'scripts/note9-termux-setup.sh', 'scripts/note9-verify-runtime.sh']);
+  const buf = readFileSync(join(t, 'a.tar.gz')); assert.equal(buf[4] | buf[5] | buf[6] | buf[7], 0, 'gzip -n: no mtime');
+  assert.match(readFileSync(pack, 'utf8'), /git -C "\$ROOT" -c tar\.umask=0022 archive --format=tar HEAD/);
+  writeFileSync(join(g, 'scripts', 'note9-common.sh'), '# dirty\n');
+  const d = spawnSync('bash', [pack, join(t, 'c.tar.gz')], { encoding: 'utf8' });
+  assert.notEqual(d.status, 0); assert.match(d.stderr, /working tree is dirty/); assert.equal(existsSync(join(t, 'c.tar.gz')), false);
   const setup = readFileSync(SETUP, 'utf8');
   assert.match(setup, /bash "\$SELF_DIR\/note9-verify-runtime\.sh"/);
   assert.doesNotMatch(setup, /\$TREE_SRC\/scripts\/note9-verify-runtime/);
+});
+const EXTRACT = join(SCRIPTS, 'note9-extract-release.sh');
+test('SD-31: extract lists first (GNU tar only), refuses .., absolute, symlink/hardlink/dev entries; fresh 0700 dest; --no-same-owner', { skip: !hasBash }, () => {
+  const { t, pack } = packRepo();
+  assert.equal(spawnSync('bash', [pack, join(t, 'ok.tar.gz')], { encoding: 'utf8' }).status, 0);
+  const ex = (tb, dest, env = {}) => spawnSync('bash', [EXTRACT, tb, dest], { encoding: 'utf8', env: { PATH: process.env.PATH, ...env } });
+  let r = ex(join(t, 'ok.tar.gz'), join(t, 'out')); assert.equal(r.status, 0, r.stderr);
+  assert.equal(statSync(join(t, 'out')).mode & 0o777, 0o700); assert.ok(existsSync(join(t, 'out', 'scripts', 'note9-termux-setup.sh')));
+  r = ex(join(t, 'ok.tar.gz'), join(t, 'out')); assert.notEqual(r.status, 0); assert.match(r.stderr, /already exists; extract into a fresh folder/);
+  const mk = (name, script) => { const w = join(t, `w-${name}`); mkdirSync(w); spawnSync('bash', ['-c', `cd "${w}" && ${script}`]); return join(t, `${name}.tar.gz`); };
+  const bad = {
+    dotdot: mk('dotdot', `mkdir a && echo x > x && tar -czf ../dotdot.tar.gz --transform='s,^x$,a/../../evil,' x`),
+    abs: mk('abs', `echo x > x && tar -czf ../abs.tar.gz --transform='s,^x$,/tmp/evil,' -P x`),
+    sym: mk('sym', `ln -s /etc/passwd s && tar -czf ../sym.tar.gz s`),
+    hard: mk('hard', `echo x > a && ln a b && tar -czf ../hard.tar.gz a b`),
+    fifo: mk('fifo', `mkfifo p && tar -czf ../fifo.tar.gz p`),
+  };
+  for (const [k, tb] of Object.entries(bad)) {
+    r = ex(tb, join(t, `o-${k}`)); assert.notEqual(r.status, 0, k); assert.match(r.stderr, /refusing/, k); assert.equal(existsSync(join(t, `o-${k}`)), false, k);
+  }
+  const toy = join(t, 'toy', 'bin'); mkdirSync(toy, { recursive: true }); writeFileSync(join(toy, 'tar'), '#!/bin/sh\necho "toybox 0.8.9"\n', { mode: 0o755 });
+  r = ex(join(t, 'ok.tar.gz'), join(t, 'o-toy'), { PREFIX: join(t, 'toy') }); assert.notEqual(r.status, 0); assert.match(r.stderr, /not GNU tar \(toybox\/busybox refused\)/);
+  const ext = readFileSync(EXTRACT, 'utf8'); assert.match(ext, /TAR=\$PREFIX\/bin\/tar/); assert.match(ext, /--no-same-owner/); assert.match(ext, /mkdir -m 700/);
+  const doc = readFileSync(join(REPO, 'docs', 'note9-termux.md'), 'utf8'); assert.match(doc, /TAR=\$PREFIX\/bin\/tar/); assert.match(doc, /\$TAR -tvzf "\$T"/); assert.match(doc, /--no-same-owner/); assert.match(doc, /mkdir -m 700/);
+});
+test('SD-31: setup refuses a release folder containing a symlink; setup uses $PREFIX/bin/find', { skip: !hasBash }, () => {
+  const s = readFileSync(SETUP, 'utf8');
+  assert.match(s, /FIND=\$PREFIX\/bin\/find/); assert.match(s, /nm=\$\("\$FIND" "\$TREE_SRC"/); assert.doesNotMatch(s, /\$\(find /);
+  const { t, pack } = packRepo(); spawnSync('bash', [pack, join(t, 'ok.tar.gz')]);
+  const rel = join(t, 'rel'); assert.equal(spawnSync('bash', [EXTRACT, join(t, 'ok.tar.gz'), rel]).status, 0);
+  symlinkSync('/etc/passwd', join(rel, 'config', 'evil'));
+  const r = spawnSync('bash', [join(rel, 'scripts', 'note9-termux-setup.sh')], { encoding: 'utf8', env: { PATH: stubGetprop(join(t, 'gp'), 28), HOME: t, TERMUX_VERSION: '0.118' } });
+  assert.notEqual(r.status, 0); assert.match(r.stdout + r.stderr, /non-regular entry .*evil in the release folder; .*refusing/);
 });
 
 // --- gen-manifest / npm-deps none / SD-26 / unverified .old sweep / stage root ----------------
@@ -529,4 +574,95 @@ test('SETUP:83: setup refuses to run from shared/adb storage (must run from the 
   const root = mkdtempSync(join(tmpdir(), 'grz-s83-')); const pre = join(root, 'p.txt'); writeFileSync(pre, `${SCRIPTS}\n`);
   const r = spawnSync('bash', [SETUP], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: root, GRZ_SHARED_PREFIXES_EXTRA: pre } });
   assert.notEqual(r.status, 0); assert.match(r.stderr, /shared\/adb-writable storage.*release tarball/);
+});
+
+// KEY: Brian 2026-11-02 — phones always require an API key, loopback included.
+function keyed() {
+  const f = fixture({ files: { 'bin/llama-server': '#!/bin/sh\necho "ARGV=$*"\n', 'bin/libggml.so': 'SO', 'models/m.gguf': 'GGUF' } });
+  const r = run(f); assert.equal(r.code, 0, r.out);
+  mkdirSync(join(f.cur, 'tree', 'src'), { recursive: true });
+  for (const m of readdirSync(join(REPO, 'src'))) if (m.endsWith('.mjs')) writeFileSync(join(f.cur, 'tree', 'src', m), readFileSync(join(REPO, 'src', m)));
+  const st = join(f.root, 'home', '.green-roomz-state'); mkdirSync(st, { recursive: true, mode: 0o700 }); chmodSync(st, 0o700);
+  return { f, st };
+}
+const runSrv = (f, env = {}, args = ['--host', '127.0.0.1', '--port', '8081']) => {
+  const r = spawnSync('bash', [RUNNER, ...args], { encoding: 'utf8', env: { PATH: stubGetprop(join(f.root, 'gpk'), 28), HOME: join(f.root, 'home'), TERMUX_VERSION: '0.118', GRZ_MANIFEST_SHA256: f.manSha, ...env } });
+  return { code: r.status, out: r.stdout + r.stderr };
+};
+test('KEY: runner refuses to start llama-server on loopback without a key; --version probe still allowed', { skip: !hasBash }, () => {
+  const { f } = keyed();
+  let r = runSrv(f); assert.notEqual(r.code, 0); assert.match(r.out, /no API key .*loopback included; refusing/); assert.doesNotMatch(r.out, /ARGV=/);
+  r = runSrv(f, {}, ['--version']); assert.equal(r.code, 0, r.out); assert.match(r.out, /ARGV=--version$/m);
+});
+test('KEY: GREEN_ROOMZ_API_KEY -> 0600 file passed via --api-key-file; key never in argv', { skip: !hasBash }, () => {
+  const { f, st } = keyed(); const secret = 'sekrit-' + 'a'.repeat(20);
+  const r = runSrv(f, { GREEN_ROOMZ_API_KEY: secret }); assert.equal(r.code, 0, r.out);
+  const kf = join(st, 'llama-server.key');
+  assert.match(r.out, new RegExp(`ARGV=--host 127\\.0\\.0\\.1 --port 8081 --api-key-file ${kf.replace(/[.]/g, '\\.')}$`, 'm'));
+  assert.ok(!r.out.includes(secret)); assert.equal(statSync(kf).mode & 0o777, 0o600); assert.equal(readFileSync(kf, 'utf8').trim(), secret);
+});
+test('KEY: override api_key_file is validated and passed; bad mode or caller --api-key refused', { skip: !hasBash }, () => {
+  const { f, st } = keyed(); const kf = join(f.root, 'home', 'k.key');
+  writeFileSync(kf, 'k'.repeat(32) + '\n', { mode: 0o600 });
+  writeFileSync(join(st, 'agents.note9.local.json'), JSON.stringify({ api_key_file: kf }), { mode: 0o600 });
+  let r = runSrv(f); assert.equal(r.code, 0, r.out); assert.match(r.out, new RegExp(`--api-key-file ${kf.replace(/[.]/g, '\\.')}$`, 'm'));
+  r = runSrv(f, {}, ['--api-key', 'x']); assert.notEqual(r.code, 0); assert.match(r.out, /caller passed --api-key/);
+  r = runSrv(f, {}, ['--api-key-file=/tmp/x']); assert.notEqual(r.code, 0); assert.match(r.out, /caller passed --api-key-file/);
+  chmodSync(kf, 0o644); r = runSrv(f, { GREEN_ROOMZ_API_KEY: 'fallback-not-used' }); assert.notEqual(r.code, 0); assert.match(r.out, /api_key_file refused/);
+});
+test('KEY: grz_key_generate makes a 0600 64-hex key once; grz_key_check refuses with no key', { skip: !hasBash }, () => {
+  const root = mkdtempSync(join(tmpdir(), 'grz-key-')); const kf = join(root, 'api.key');
+  const COMMON = join(REPO, 'scripts', 'note9-common.sh');
+  let r = spawnSync('bash', ['-c', `. "${COMMON}"; grz_key_generate "${kf}" && grz_key_generate "${kf}"`], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: root } });
+  assert.equal(r.status, 0, r.stderr); const k = readFileSync(kf, 'utf8'); assert.match(k, /^[0-9a-f]{64}$/); assert.equal(statSync(kf).mode & 0o777, 0o600);
+  r = spawnSync('bash', ['-c', `. "${COMMON}"; grz_key_generate "${kf}"; cat "${kf}"`], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: root } });
+  assert.equal(r.stdout, k, 'existing key is not overwritten');
+  r = spawnSync('bash', ['-c', `. "${COMMON}"; grz_key_check "${REPO}"`], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: root } });
+  assert.notEqual(r.status, 0); assert.match(r.stderr, /no API key.*loopback included; refusing/);
+  r = spawnSync('bash', ['-c', `. "${COMMON}"; grz_key_check "${REPO}"`], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: root, GREEN_ROOMZ_API_KEY: 'x'.repeat(24) } });
+  assert.equal(r.status, 0, r.stderr); assert.equal(r.stdout, 'env');
+});
+test('KEY: setup and restart wire the key (generate, override api_key_file, check before serve, bearer probe)', () => {
+  const s = readFileSync(SETUP, 'utf8'); const rs = readFileSync(join(REPO, 'scripts', 'note9-restart-serve.sh'), 'utf8');
+  assert.match(s, /grz_key_generate "\$KEYF"/); assert.match(s, /api_key_file: process\.env\.GRZ_OVR_KEY/);
+  assert.ok(s.indexOf('grz_key_check') < s.indexOf('grz_serve_start "$PORT"')); assert.doesNotMatch(s, /fetch\('http/);
+  assert.ok(rs.indexOf('grz_key_check') < rs.indexOf('grz_stop_serve\n')); assert.doesNotMatch(rs, /fetch\('http/);
+});
+test('GEN: --allow-no-model accepted in any position; unknown options and wrong arity refused', { skip: !hasBash }, () => {
+  for (const pos of [1, 2, 3]) {
+    const g = genStage({ model: false }); const a = [g.st, g.tr, g.out]; a.splice(pos, 0, '--allow-no-model');
+    const r = spawnSync('bash', [GEN, ...a], { encoding: 'utf8' }); assert.equal(r.status, 0, r.stderr); assert.match(readFileSync(g.out, 'utf8'), /^# DRYRUN/);
+  }
+  const g = genStage();
+  let r = spawnSync('bash', [GEN, g.st, '--bogus', g.tr, g.out], { encoding: 'utf8' }); assert.notEqual(r.status, 0); assert.match(r.stderr, /unknown option --bogus/);
+  r = spawnSync('bash', [GEN, g.st, g.tr], { encoding: 'utf8' }); assert.notEqual(r.status, 0); assert.match(r.stderr, /usage:/);
+});
+
+test('SD-29: verifier refuses a DRYRUN manifest or one with no models/ line, even with a matching anchor', { skip: !hasBash }, () => {
+  let f = fixture({ files: { 'bin/llama-server': 'ELF', 'bin/libggml.so': 'SO' } });
+  let r = run(f); assert.notEqual(r.code, 0); assert.match(r.out, /has no models\/ line; refusing/); assert.equal(existsSync(f.cur), false);
+  r = run(f, { GRZ_ALLOW_UNVERIFIED_RUNTIME: '1' }); assert.notEqual(r.code, 0); assert.match(r.out, /no models\/ line/);
+  f = fixture({ manifest: ['# DRYRUN: no model line (--allow-no-model); not a release manifest', `${sha('ELF')}  bin/llama-server`, `${sha('GGUF')}  models/m.gguf`] });
+  r = run(f); assert.notEqual(r.code, 0); assert.match(r.out, /DRYRUN manifest .*refusing/);
+});
+test('SD-29: runner refuses a DRYRUN / model-less manifest in an installed tree', { skip: !hasBash }, () => {
+  const f = installed(); const man = join(f.cur, 'tree', 'config', 'note9-runtime.SHA256SUMS');
+  const orig = readFileSync(man, 'utf8');
+  const restamp = (text) => { chmodSync(man, 0o644); writeFileSync(man, text); const h = sha(text); writeFileSync(join(f.cur, '.verified'), h); return h; };
+  // rename the install dir to match the new sha so only SD-29 can refuse
+  const reinstall = (text) => { const h = restamp(text); const nd = join(f.home, `grz.${h}`); renameSync(realpathSync(f.cur), nd); unlinkSync(f.cur); symlinkSync(nd, f.cur); return h; };
+  let h = reinstall('# DRYRUN\n' + orig);
+  let r = runRunner(f, { GRZ_MANIFEST_SHA256: h }); assert.notEqual(r.code, 0); assert.match(r.out, /DRYRUN manifest; refusing to start/);
+  h = reinstall(orig.split('\n').filter((l) => !/ models\//.test(l)).join('\n'));
+  r = runRunner(f, { GRZ_MANIFEST_SHA256: h }); assert.notEqual(r.code, 0); assert.match(r.out, /no models\/ line; refusing to start/);
+});
+test('SD-30: stale-lock takeover aborts if the moved lock pid differs from the dead pid read earlier', { skip: !hasBash }, () => {
+  const f = fixture(); mkdirSync(f.home, { recursive: true });
+  const lock = join(f.home, '.grz-install.lock'); mkdirSync(lock); writeFileSync(join(lock, 'pid'), '999999999');
+  const bin = join(f.root, 'mvstub'); mkdirSync(bin);
+  const realMv = spawnSync('bash', ['-c', 'command -v mv'], { encoding: 'utf8' }).stdout.trim();
+  writeFileSync(join(bin, 'mv'), `#!/bin/bash\n"${realMv}" "$@"; rc=$?\nfor a in "$@"; do last=$a; done\ncase "$last" in *.grz-install.lock.stale.*) echo 424242 > "$last/pid";; esac\nexit $rc\n`, { mode: 0o755 });
+  const r = run(f, { PATH: `${bin}:${process.env.PATH}` });
+  assert.notEqual(r.code, 0); assert.match(r.out, /lock changed hands during takeover \(pid '999999999' -> '424242'\); refusing/);
+  assert.equal(readFileSync(join(lock, 'pid'), 'utf8').trim(), '424242', 'moved lock put back, not deleted');
 });

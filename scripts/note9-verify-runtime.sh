@@ -96,6 +96,12 @@ if ! mkdir -m 700 -- "$LOCK" 2>/dev/null; then
   kill -0 "$owner" 2>/dev/null && die "another install (pid $owner) holds $LOCK; refusing"
   ASIDE=$HOME_REAL/.grz-install.lock.stale.$$
   "$MV" -T -- "$LOCK" "$ASIDE" 2>/dev/null || die "lost the race to take over $LOCK; refusing"
+  # SD-30: the dir we moved must still be the dead owner's lock (not one re-taken in between).
+  moved=$(cat -- "$ASIDE/pid" 2>/dev/null || true)
+  if [[ $moved != "$owner" ]]; then
+    "$MV" -T -- "$ASIDE" "$LOCK" 2>/dev/null || true
+    die "lock changed hands during takeover (pid '$owner' -> '$moved'); refusing"
+  fi
   echo "taking over stale lock $LOCK (pid $owner gone)" >&2
   rm -rf -- "$ASIDE"
   mkdir -m 700 -- "$LOCK" 2>/dev/null || die "another install took $LOCK first; refusing"
@@ -136,6 +142,12 @@ if [[ -z $SUMS ]]; then
 else
   ACTUAL=$(sha256sum < "$SUMS" | cut -d' ' -f1)
   echo "manifest $SUMS sha256=$ACTUAL"
+  # SD-29 (before the anchor, no escape hatch): a DRYRUN manifest or one without a models/ line
+  # is never installed.
+  grep -q '^# DRYRUN' -- "$SUMS" && die "manifest $SUMS is a DRYRUN manifest (gen-manifest --allow-no-model); refusing"
+  if grep -qE '^[0-9a-f]{64} [ *]?[^#]' -- "$SUMS"; then
+    grep -qE '^[0-9a-f]{64} [ *]?\*?models/' -- "$SUMS" || die "manifest $SUMS has no models/ line; refusing"
+  fi
   if [[ -z ${GRZ_MANIFEST_SHA256:-} ]]; then
     unverified "GRZ_MANIFEST_SHA256 unset (manifest sha256=$ACTUAL)"
   elif [[ ${GRZ_MANIFEST_SHA256,,} != "$ACTUAL" ]]; then

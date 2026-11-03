@@ -16,10 +16,11 @@ grz_resolve_current || exit 1
 . "$GRZ_TREE/scripts/note9-serve-pid.sh"
 OPTIN=$(grz_log_opt_in "$GRZ_TREE") || { echo "ERROR: host override refused" >&2; exit 1; }
 PORT=$(grz_port "$GRZ_TREE") || exit 1
+KEYSRC=$(grz_key_check "$GRZ_TREE") || { echo "ERROR: no valid API key; not (re)starting the gateway" >&2; exit 1; }
 grz_stop_serve
 grz_serve_start "$PORT" "$OPTIN"
 echo "serve_pid=$GRZ_SERVE_PID tree=$GRZ_TREE logs=$([[ $OPTIN == 1 ]] && echo "$GRZ_STATE/logs" || echo off)"
 [[ ${GRZ_RESTART_NO_PROBE:-0} == 1 ]] && exit 0
 sleep 10
-node -e "fetch('http://127.0.0.1:$PORT/v1/models').then(async r=>console.log((await r.text()).slice(0,800)))" || true
+grz_probe "http://127.0.0.1:$PORT/v1/models" "$KEYSRC" 1 || true
 echo RESTART_DONE

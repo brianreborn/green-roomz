@@ -122,18 +122,36 @@ Build host:
     #   refuses zero tree/ lines, a missing model line (--allow-no-model = DRYRUN header, dry runs
     #   only) and node_modules; prints: manifest ... sha256=<M>  bin=N lib=N model=N tree=N
     bash scripts/note9-pack-release.sh             # dist/grz-note9-release.tar.gz
-    #   deterministic (sorted, mtime 0, uid 0, gzip -n): setup, verifier, common + shared-storage
-    #   helpers, prefix list, manifest. Prints tarball sha256=<T> and manifest sha256=<M>.
+    #   git archive of HEAD (refuses a dirty tree), gzip -n: setup, verifier, extract script,
+    #   common + shared-storage helpers, prefix list, manifest. Prints tarball sha256=<T> and manifest sha256=<M>.
 
 Publish **T and M together** (out of band). Nothing is uploaded or pushed by these scripts.
 
 ### Release tarball (Brian, on the phone, before running anything)
 
     sha256sum /data/local/tmp/grz/grz-note9-release.tar.gz     # must equal T; stop if not
-    mkdir -p ~/grz-release && tar -xzf /data/local/tmp/grz/grz-note9-release.tar.gz -C ~/grz-release
+    T=/data/local/tmp/grz/grz-note9-release.tar.gz; TAR=$PREFIX/bin/tar   # GNU tar (pkg install tar)
+    $TAR --version | head -1 | grep -q 'GNU tar' || echo "STOP: not GNU tar (toybox refused)"
+    $TAR -tvzf "$T"      # SD-31: LIST FIRST. Stop on any absolute path, any '..', or any line not
+                         # starting with '-' (regular file) or 'd' (git archive's parent dirs).
+    rm -rf ~/grz-release && (umask 077; mkdir -m 700 ~/grz-release) \
+      && $TAR -xzf "$T" -C ~/grz-release --no-same-owner --no-same-permissions
     GRZ_MANIFEST_SHA256=<M> bash ~/grz-release/scripts/note9-termux-setup.sh
 
+Later updates: `bash ~/grz-release/scripts/note9-extract-release.sh <tarball> <fresh dir>` does
+the same checks (GNU `$PREFIX/bin/tar` only, list first, fresh 0700 folder, `--no-same-owner`).
+Setup refuses a release folder containing anything but regular files and directories.
+
 T covers every script that runs before verification; M anchors everything they copy.
+
+**SD-29:** the verifier and the runner refuse a manifest with a `# DRYRUN` line or without a
+`models/` line (no escape hatch; checked before the anchor).
+
+**API key (always required, loopback included):** setup creates `~/.green-roomz-state/api.key`
+(0600, 64 hex) if absent and sets `api_key_file` in the override. Setup/restart refuse to start
+the gateway, and the runner refuses to start llama-server, without a valid key
+(`api_key_file` or `GREEN_ROOMZ_API_KEY`). llama-server gets `--api-key-file` (never the key in
+argv); the readiness probe sends `Authorization: Bearer`.
 
 **Escape hatch:** `GRZ_ALLOW_UNVERIFIED_RUNTIME=1` skips verification with a loud warning.
 Use only with Brian's per-host OK.

@@ -73,6 +73,37 @@ grz_serve_start() {
   grz_write_pid "$GRZ_SERVE_PID"
 }
 
+# Brian 2026-11-02: phones ALWAYS require an API key, loopback included.
+# grz_key_generate <file>: 0600 random key (64 hex) if <file> does not exist yet.
+grz_key_generate() {
+  local f=$1 tmp
+  [[ -e $f || -L $f ]] && return 0
+  tmp=$f.tmp.$$
+  ( umask 077; head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' > "$tmp" ) || return 1
+  chmod 600 "$tmp" && mv -f -- "$tmp" "$f"
+}
+# grz_key_check <tree>: prints the validated key file path (override api_key_file, read via one
+# O_NOFOLLOW fd), or "env" when only GREEN_ROOMZ_API_KEY is set. Fails when neither is valid.
+grz_key_check() {
+  GRZ_OVR_TREE=${1:?tree} node --input-type=module -e '
+    const { readHostOverride, hostOverridePath, readApiKeyFile } = await import(process.env.GRZ_OVR_TREE + "/src/config.mjs");
+    try {
+      const o = readHostOverride(hostOverridePath("agents.note9.json", process.env), process.env);
+      if (o?.api_key_file) { readApiKeyFile(o.api_key_file, process.env); process.stdout.write(o.api_key_file); process.exit(0); }
+    } catch (e) { console.error("ERROR: api key: " + (e.details ? JSON.stringify(e.details) : e.message)); process.exit(1); }
+    if ((process.env.GREEN_ROOMZ_API_KEY ?? "").trim()) { process.stdout.write("env"); process.exit(0); }
+    console.error("ERROR: no API key: set api_key_file in the host override (setup generates one) or GREEN_ROOMZ_API_KEY; phones always require a key, loopback included; refusing");
+    process.exit(1);'
+}
+# grz_probe <url> <keysrc> [print]: GET with Authorization: Bearer (key read inside node).
+grz_probe() {
+  GRZ_PROBE_URL=$1 GRZ_PROBE_KEY=$2 GRZ_PROBE_PRINT=${3:-0} node -e '
+    const k = process.env.GRZ_PROBE_KEY === "env" ? process.env.GREEN_ROOMZ_API_KEY.trim() : require("fs").readFileSync(process.env.GRZ_PROBE_KEY, "utf8").trim();
+    fetch(process.env.GRZ_PROBE_URL, { headers: { authorization: "Bearer " + k } })
+      .then(async (r) => { if (process.env.GRZ_PROBE_PRINT === "1") console.log((await r.text()).slice(0, 800)); process.exit(r.ok ? 0 : 1); })
+      .catch(() => process.exit(1));'
+}
+
 # Port from the validated override, else 8080.
 grz_port() {
   GRZ_OVR_TREE=${1:?tree} node --input-type=module -e '

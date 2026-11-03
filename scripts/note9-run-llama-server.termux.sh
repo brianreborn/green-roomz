@@ -61,6 +61,9 @@ if [ "$is_android" = 1 ]; then
   elif [ "${GRZ_MANIFEST_SHA256,,}" != "$stamp" ]; then
     die "$D/.verified ($stamp) does not match GRZ_MANIFEST_SHA256; refusing"
   fi
+  # SD-29: never start from a DRYRUN manifest or one without a models/ line.
+  grep -q '^# DRYRUN' -- "$MAN" && die "manifest $MAN is a DRYRUN manifest; refusing to start"
+  grep -qE '^[0-9a-f]{64} [ *]?\*?models/' -- "$MAN" || die "manifest $MAN has no models/ line; refusing to start"
   declare -A listed=()
   while read -r h p; do
     case "${h:-}" in ''|\#*) continue ;; esac
@@ -76,9 +79,39 @@ if [ "$is_android" = 1 ]; then
     rel=tree/${f#"$D"/tree/}
     [ -n "${listed[$rel]:-}" ] || die "$rel (native addon) is not listed in $MAN; refusing to start"
   done < <("$FIND" "$D/tree" -name '*.node' -type f -print0 2>/dev/null)
+  # Brian 2026-11-02: an API key is always required (loopback included). llama-server gets
+  # --api-key-file (b11969 supports it); the key never appears in argv. Only a bare --version
+  # probe (no server) runs without one.
+  if [ "$#" -eq 1 ] && [ "$1" = --version ]; then
+    export LD_LIBRARY_PATH="$RT/bin"; cd "$RT"; exec "$RT/bin/llama-server" --version
+  fi
+  for a in "$@"; do
+    case "$a" in --api-key*) die "caller passed $a; the key comes only from api_key_file / GREEN_ROOMZ_API_KEY; refusing" ;; esac
+  done
+  STATE_DIR=$HOME_REAL/.green-roomz-state
+  command -v node >/dev/null 2>&1 || die "node missing; cannot validate api_key_file; refusing"
+  KEYF=$(GRZ_OVR_TREE="$D/tree" node --input-type=module -e '
+    const { readHostOverride, hostOverridePath, readApiKeyFile } = await import(process.env.GRZ_OVR_TREE + "/src/config.mjs");
+    try {
+      const o = readHostOverride(hostOverridePath("agents.note9.json", process.env), process.env);
+      if (o?.api_key_file) { readApiKeyFile(o.api_key_file, process.env); process.stdout.write(o.api_key_file); }
+    } catch (e) { console.error("api_key_file: " + (e.details ? JSON.stringify(e.details) : e.message)); process.exit(1); }') \
+    || die "api_key_file refused; refusing to start llama-server"
+  if [ -z "$KEYF" ]; then
+    key=${GREEN_ROOMZ_API_KEY:-}
+    key=${key//[[:space:]]/}
+    [ -n "$key" ] || die "no API key (api_key_file in $STATE_DIR override, or GREEN_ROOMZ_API_KEY); phones always require one, loopback included; refusing"
+    [ -d "$STATE_DIR" ] && [ ! -L "$STATE_DIR" ] || die "$STATE_DIR missing; run setup; refusing"
+    KEYF=$STATE_DIR/llama-server.key
+    [ -L "$KEYF" ] && die "$KEYF is a symlink; refusing"
+    if ! { ( umask 077; printf '%s\n' "$key" > "$KEYF.tmp.$$" ) && chmod 600 "$KEYF.tmp.$$" && mv -f -- "$KEYF.tmp.$$" "$KEYF"; }; then
+      die "writing $KEYF failed"
+    fi
+    unset key
+  fi
   export LD_LIBRARY_PATH="$RT/bin"
   cd "$RT"
-  exec "$RT/bin/llama-server" "$@"
+  exec "$RT/bin/llama-server" "$@" --api-key-file "$KEYF"
 fi
 # adb-only path: unverified, debug only.
 [ "${GRZ_ADB_DEBUG:-0}" = 1 ] || die "not under Termux; the adb /data/local/tmp runtime is UNVERIFIED. Set GRZ_ADB_DEBUG=1 to run it anyway (debug only)."
