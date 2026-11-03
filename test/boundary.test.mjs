@@ -339,3 +339,26 @@ test('BND-03: valid text embeddings still proxy', async (t) => {
   assert.equal(result.status, 200);
   assert.equal(result.body.data[0].embedding[0], 0.1);
 });
+
+test('BND-02 (SD-3): valid alias reaches header-setting; dirty variants are rejected before headers, never echoed raw', async (t) => {
+  const { server } = await withServer(t, {
+    ready: ['tool-router-agent', 'general-text-speculator'],
+    fetchImpl: async () => jsonFetch({ choices: [{ message: { role: 'assistant', content: 'hello' } }] }),
+  });
+  // Valid alias: the header-setting path runs and every route header is printable ASCII.
+  const ok = await request(server, { path: '/v1/chat/completions', body: { model: 'general-text-speculator', messages: [{ role: 'user', content: 'hi\r\nX-B: c' }] } });
+  assert.equal(ok.status, 200, JSON.stringify(ok.body));
+  assert.equal(ok.headers['x-green-roomz-requested-alias'], 'general-text-speculator');
+  assert.equal(ok.headers['x-b'], undefined);
+  for (const [k, v] of Object.entries(ok.headers)) if (k.startsWith('x-green-roomz-')) assert.doesNotMatch(String(v), /[^\x20-\x7E]/, k);
+  // Dirty variants of the same alias (whitespace/CRLF/C1/non-ASCII): chat does not trim, so
+  // they are 400 before any route header is written; the error text must be control-free.
+  for (const dirty of [' \tgeneral-text-speculator\r\n', 'general-text-speculator\u0085', 'general-text-speculator\u00e9']) {
+    const bad = await request(server, { path: '/v1/chat/completions', body: { model: dirty, messages: [{ role: 'user', content: 'hi' }] } });
+    assert.equal(bad.status, 400, JSON.stringify(dirty));
+    assert.equal(bad.headers['x-green-roomz-requested-alias'], undefined);
+    assert.doesNotMatch(bad.body.error.message, CTRL);
+  }
+  // And the header sanitizer applied to that dirty alias yields a single clean token.
+  assert.equal(headerSafe(' \tgeneral-text-speculator\r\n').trim(), 'general-text-speculator');
+});

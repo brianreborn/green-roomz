@@ -1,0 +1,11 @@
+# Green-Roomz note9 native runtime manifest (sha256sum format).
+# Plain paths are relative to $HOME/grz-runtime; "tree/" paths to $HOME/green-roomz, e.g.
+#   <64-hex>  bin/llama-server
+#   <64-hex>  lib/libggml.so
+#   <64-hex>  models/Qwenstral-Small-3.1-0.5B.Q4_K_M.gguf
+#   <64-hex>  tree/src/gateway.mjs
+# Trust anchor: operator passes GRZ_MANIFEST_SHA256=<sha256 of this file> out of band.
+# Generate with scripts/note9-gen-manifest.sh.
+# PLACEHOLDER: no arm64 runtime has been built yet, so there are no real hashes.
+# With no entries, note9-termux-setup.sh refuses to install a runtime
+# (unless GRZ_ALLOW_UNVERIFIED_RUNTIME=1). Every staged file must be listed.

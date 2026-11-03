@@ -76,3 +76,35 @@ Push scripts with `adb push` to `/data/local/tmp/grz/` (`chmod 644`) and run **`
 - Specialist GGUFs on phone (code/text/embed) — RAM-tight.
 - qodesh still ping-timeout at last check (`192.168.1.40`).
 - Do not Magisk/root unless a later task truly cannot copy into `$HOME`.
+
+## Runtime and tree verification (mandatory)
+
+`scripts/note9-termux-setup.sh` never executes anything from `/data/local/tmp/grz`.
+`scripts/note9-verify-runtime.sh` copies **only files listed** in the in-cut manifest
+`config/note9-runtime.SHA256SUMS` into `$HOME/grz-runtime` (native runtime: `bin/`, `lib/`,
+`models/`) and `$HOME/green-roomz` (entries prefixed `tree/`), then checks every sha256.
+
+Setup aborts when:
+- the manifest is missing, empty (the shipped placeholder), or resolves (realpath) outside
+  `$HOME/green-roomz` — `GRZ_RUNTIME_SUMS` may override the path but only inside the cut tree;
+  `/data/local/tmp` and `/sdcard` are always refused;
+- `GRZ_MANIFEST_SHA256` is unset or differs from the manifest's sha256 (the actual hash is printed);
+- any staged file is not listed, any copy fails (no symlink fallback), or any hash mismatches.
+
+**Trust anchor.** `GRZ_MANIFEST_SHA256` is the sha256 of the manifest, given to the operator
+out of band (e.g. read from the build host, not from the phone). No signing yet.
+
+    bash scripts/note9-gen-manifest.sh <stage_root> <stage_root>/green-roomz > config/note9-runtime.SHA256SUMS
+    sha256sum config/note9-runtime.SHA256SUMS      # -> GRZ_MANIFEST_SHA256
+    GRZ_MANIFEST_SHA256=<hash> bash /data/local/tmp/grz/green-roomz/scripts/note9-termux-setup.sh
+
+Limits: the setup and verifier scripts themselves are read by bash from the staging area on
+first install, so their integrity is whatever the operator trusts when invoking them; the
+anchor protects everything they copy.
+
+**Escape hatch:** `GRZ_ALLOW_UNVERIFIED_RUNTIME=1` skips verification with a loud warning.
+Use only with Brian's per-host OK.
+
+**Serve process:** setup/restart track serve in `$HOME/grz-serve.pid` (mode 600) and kill
+only if `/proc/<pid>/cmdline` still matches `bin/green-roomz.mjs serve`. No `pkill -f`.
+Source updates go through `note9-refresh-src.sh`; `note9-restart-serve.sh` only restarts.

@@ -9,6 +9,10 @@ SD=/sdcard/Download/grz
 SRC_TMP=/data/local/tmp/grz
 LOG=$HOME/grz-setup.log
 mkdir -p "$SD" "$HOME"
+# Pre-existing logs may predate umask 077: tighten them.
+for f in "$LOG" "$HOME/grz-serve.out.log" "$HOME/grz-serve.err.log" "$HOME/grz-validate.json" "$HOME/grz-serve.pid"; do
+  [[ -e $f ]] && chmod 600 "$f"
+done
 # /sdcard is shared storage: any app with storage permission can read it.
 # Full logs stay in Termux $HOME (0600); mirror to /sdcard only on explicit opt-in.
 if [[ "${GRZ_SDCARD_LOGS:-0}" == 1 ]]; then
@@ -41,43 +45,17 @@ HOME_GRZ="$HOME/green-roomz"
 RT="$HOME/grz-runtime"
 mkdir -p "$HOME_GRZ" "$RT/bin" "$RT/lib" "$RT/models"
 
-echo "=== copy JS tree ==="
-if [[ -d $SRC_TMP/green-roomz ]]; then
-  cp -a "$SRC_TMP/green-roomz/." "$HOME_GRZ/"
-elif [[ -d $SD/green-roomz ]]; then
-  cp -a "$SD/green-roomz/." "$HOME_GRZ/"
-else
-  echo "ERROR: no green-roomz tree"
-  exit 1
-fi
+echo "=== locate staged JS tree ==="
+if [[ -d $SRC_TMP/green-roomz ]]; then TREE_SRC=$SRC_TMP/green-roomz
+elif [[ -d $SD/green-roomz ]]; then TREE_SRC=$SD/green-roomz
+else echo "ERROR: no green-roomz tree"; exit 1; fi
 
-echo "=== copy native runtime into \$HOME (executable) ==="
-cp -a "$SRC_TMP/bin/llama-server" "$SRC_TMP/bin/llama-cli" "$SRC_TMP/bin/llama-bench" "$RT/bin/" 2>/dev/null || true
-cp -a "$SRC_TMP/lib/"*.so "$RT/lib/"
-cp -a "$SRC_TMP/bin/"libggml-cpu-*.so "$RT/bin/" 2>/dev/null || true
-cp -a "$SRC_TMP/bin/libggml-base.so" "$SRC_TMP/bin/libggml.so" "$SRC_TMP/bin/libc++_shared.so" "$RT/bin/" 2>/dev/null || true
-# model: prefer tmp (already on device); copy only if missing in runtime
-if [[ ! -f $RT/models/Qwenstral-Small-3.1-0.5B.Q4_K_M.gguf ]]; then
-  if [[ -f $SRC_TMP/models/Qwenstral-Small-3.1-0.5B.Q4_K_M.gguf ]]; then
-    echo "copying GGUF into \$HOME (may take a minute)..."
-    cp -a "$SRC_TMP/models/Qwenstral-Small-3.1-0.5B.Q4_K_M.gguf" "$RT/models/" || \
-      ln -sf "$SRC_TMP/models/Qwenstral-Small-3.1-0.5B.Q4_K_M.gguf" "$RT/models/" || true
-  fi
-fi
-# Optional integrity check of the copied native runtime. SUMS entries are
-# relative to $HOME/grz-runtime (e.g. "bin/llama-server", "lib/libfoo.so").
-SUMS="${GRZ_RUNTIME_SUMS:-}"
-if [[ -z $SUMS && -f /workspace/reviews/release/note9-runtime-SHA256SUMS ]]; then
-  SUMS=/workspace/reviews/release/note9-runtime-SHA256SUMS
-fi
-if [[ -n $SUMS ]]; then
-  echo "=== verify runtime against $SUMS ==="
-  if [[ ! -f $SUMS ]]; then echo "ERROR: GRZ_RUNTIME_SUMS=$SUMS not found; refusing"; exit 1; fi
-  if ! (cd "$RT" && sha256sum -c --strict "$SUMS"); then
-    echo "ERROR: runtime checksum mismatch; refusing to continue"; exit 1
-  fi
-fi
-chmod 755 "$RT/bin/llama-server" "$RT/bin/llama-cli" "$RT/bin/llama-bench" 2>/dev/null || true
+echo "=== copy + verify native runtime into \$HOME (never executed from $SRC_TMP) ==="
+# Manifest ships in the cut: $HOME_GRZ/config/note9-runtime.SHA256SUMS (GRZ_RUNTIME_SUMS may
+# override, only with a file inside $HOME_GRZ), anchored by GRZ_MANIFEST_SHA256. Only listed
+# files are copied (runtime + JS tree). The verifier runs via bash from the staged tree before
+# anything is trusted; bash reads it, nothing is exec'd from $SRC_TMP. See docs/note9-termux.md.
+bash "$TREE_SRC/scripts/note9-verify-runtime.sh" "$SRC_TMP" "$TREE_SRC" "$RT" "$HOME_GRZ" || exit 1
 
 cat > "$RT/run-llama-server.sh" <<'WRAP'
 #!/usr/bin/env bash
@@ -108,15 +86,15 @@ cd "$HOME_GRZ" || exit 1
 echo "=== validate ==="
 node ./bin/green-roomz.mjs validate --manifest ./config/agents.note9.json | tee "$HOME/grz-validate.json"
 
-pkill -f 'green-roomz.mjs serve' 2>/dev/null || true
-sleep 1
+# shellcheck source=note9-serve-pid.sh
+. "$HOME_GRZ/scripts/note9-serve-pid.sh"
+grz_stop_serve
 
 echo "=== serve ==="
 nohup node ./bin/green-roomz.mjs serve --manifest ./config/agents.note9.json --host 127.0.0.1 --port 8080 \
   >"$HOME/grz-serve.out.log" 2>"$HOME/grz-serve.err.log" &
 echo "serve_pid=$!"
-echo $! >"$HOME/grz-serve.pid"
-cp "$HOME/grz-serve.pid" "$SD/serve.pid" 2>/dev/null || true
+grz_write_pid "$!"
 
 ok=0
 for _ in $(seq 1 90); do
