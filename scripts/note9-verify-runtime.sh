@@ -88,7 +88,24 @@ HIST=$STATE/install-history
 # EMPTY pid (owner may not have written it yet) is refused; a dead pid's lock is renamed aside
 # atomically (mv -T) before a fresh mkdir, so two takers cannot both win.
 LOCK=$HOME_REAL/.grz-install.lock
-if ! mkdir -m 700 -- "$LOCK" 2>/dev/null; then
+# SD-33: prefer flock(1) when Termux ships it ($PREFIX/bin/flock): the kernel drops the lock when
+# the holder dies, so there is no stale-pid takeover at all. A leftover mkdir lock is then
+# stale unless its pid is alive (an older installer without flock).
+if [[ -n ${PREFIX:-} && -x ${PREFIX}/bin/flock ]]; then
+  FLOCKF=$HOME_REAL/.grz-install.flock
+  [[ -L $FLOCKF ]] && die "$FLOCKF is a symlink; refusing"
+  ( umask 077; : >> "$FLOCKF" ) || die "cannot create $FLOCKF"
+  exec 9>>"$FLOCKF"
+  "$PREFIX/bin/flock" -n 9 || die "another install holds $FLOCKF (flock); refusing"
+  if [[ -e $LOCK || -L $LOCK ]]; then
+    [[ -L $LOCK || ! -d $LOCK ]] && die "$LOCK is not a plain directory; refusing"
+    owner=$(cat -- "$LOCK/pid" 2>/dev/null || true)
+    if [[ $owner =~ ^[0-9]+$ ]] && kill -0 "$owner" 2>/dev/null; then die "another install (pid $owner) holds $LOCK; refusing"; fi
+    echo "removing stale $LOCK (flock held; pid '${owner}' not running)" >&2
+    rm -rf -- "$LOCK"
+  fi
+  mkdir -m 700 -- "$LOCK" 2>/dev/null || die "cannot take $LOCK; refusing"
+elif ! mkdir -m 700 -- "$LOCK" 2>/dev/null; then
   [[ -L $LOCK || ! -d $LOCK ]] && die "$LOCK is not a plain directory; refusing"
   owner=$(cat -- "$LOCK/pid" 2>/dev/null || true)
   [[ -n $owner ]] || die "$LOCK held (pid not written yet); refusing"
@@ -97,10 +114,11 @@ if ! mkdir -m 700 -- "$LOCK" 2>/dev/null; then
   ASIDE=$HOME_REAL/.grz-install.lock.stale.$$
   "$MV" -T -- "$LOCK" "$ASIDE" 2>/dev/null || die "lost the race to take over $LOCK; refusing"
   # SD-30: the dir we moved must still be the dead owner's lock (not one re-taken in between).
+  # SD-33: on a mismatch do NOT move it back (that could clobber a lock taken in the meantime);
+  # leave the moved copy where it is and stop.
   moved=$(cat -- "$ASIDE/pid" 2>/dev/null || true)
   if [[ $moved != "$owner" ]]; then
-    "$MV" -T -- "$ASIDE" "$LOCK" 2>/dev/null || true
-    die "lock changed hands during takeover (pid '$owner' -> '$moved'); refusing"
+    die "lock changed hands during takeover (pid '$owner' -> '$moved'); the moved lock was left at $ASIDE (not restored). If pid '$moved' is not running, remove $ASIDE and retry; refusing"
   fi
   echo "taking over stale lock $LOCK (pid $owner gone)" >&2
   rm -rf -- "$ASIDE"
@@ -160,7 +178,7 @@ else
     [[ $p != /* && $p != *..* ]] || die "manifest path escapes its root: $p"
     listed[$p]=1
   done < "$SUMS"
-  (( ${#listed[@]} > 0 )) || unverified "manifest $SUMS has no entries (manifest sha256=$ACTUAL)"
+  (( ${#listed[@]} > 0 )) || die "manifest $SUMS has no entries; refusing"  # backstop; the no-hash-lines check above normally fires first
 fi
 
 # SD-25: same verified sha already live and intact -> nothing to copy or flip.

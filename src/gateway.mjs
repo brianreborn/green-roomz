@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { fieldVote, similarityVote, resolveJudgeChoice, judgePrompt } from './council.mjs';
 import { AGENCY_ROLE, DEFAULT_FAITH, DEFAULT_FEAR, FALLBACK_ALIAS, HANDOFF_PEEK_CHARS, HANDOFF_PEEK_TIMEOUT_MS, MAX_SPECIALIST_HOPS, MONITOR_ALIAS, NEXUS_ALIAS, NEXUS_CHAT_SYSTEM, NEXUS_MAX_TOKENS, REBUKE_OP, UPSTREAM_MAX_BUFFER_BYTES, UPSTREAM_TIMEOUT_MS, YOLO_TOKEN } from './constants.mjs';
 import { loadDeclaredKernel, readApiKeyFile } from './config.mjs';
+import { backendPorts, redactKey, upstreamApiKey, withUpstreamKey } from './upstream-auth.mjs';
 import { compileStockPrompt } from './compile-prompt.mjs';
 import { Mailbox } from './mailbox.mjs';
 import { CAP, MonitorIpc } from './monitor/ipc.mjs';
@@ -390,8 +391,10 @@ export class Gateway {
     this.sessions = sessions;
     this.policy = policy;
     this.hostAdapter = hostAdapter;
-    this.fetchImpl = fetchImpl ?? fetch;
+    // Client auth (edge) and upstream auth (llama-server) are separate: SD-32.
     this.apiKey = process.env.GREEN_ROOMZ_API_KEY || readOverrideApiKey(manifest);
+    this.upstreamKey = upstreamApiKey(manifest);
+    this.fetchImpl = withUpstreamKey(fetchImpl ?? fetch, this.upstreamKey, backendPorts(manifest));
     this.startedAt = Date.now();
     this.mailbox = mailbox ?? new Mailbox();
     this.ipc = ipc ?? new MonitorIpc({
@@ -681,9 +684,9 @@ export class Gateway {
         : {};
       return jsonResponse(response, status, {
         error: {
-          message: redact(error.message),
+          message: redactKey(redact(error.message), this.upstreamKey),
           type: error.code ?? 'internal_error',
-          details: error.details,
+          details: error.details === undefined ? undefined : JSON.parse(redactKey(JSON.stringify(error.details), this.upstreamKey)),
         },
       }, { ...cors, ...retryAfter, ...extraHeaders });
     }
