@@ -17,7 +17,7 @@ import {
 import { ValidationError } from './errors.mjs';
 import { TIMING_PRIVACY_INSTALL_HINT, resolveTimingPrivacy } from './timing-quant.mjs';
 import { digestObject, expandEnvironment, resolveManifestPath, nfcPath } from './util.mjs';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, lstatSync } from 'node:fs';
 import { assertNexusKernelText, kernelBindingIssues } from './kernel-text.mjs';
 
 export { assertNexusKernelText, kernelBindingIssues };
@@ -184,6 +184,69 @@ function joinExpandedPath(value) {
   return path.normalize(value);
 }
 
+// Host override: an unlisted, setup-generated file in the user-state dir, never inside the
+// versioned/hashed folder: $HOME/.green-roomz-state/<name>.local.json (dir 700, file 600).
+// UNTRUSTED. Strict allowlist; never names a binary, library, model or args; no ${} expansion.
+export const HOST_OVERRIDE_KEYS = Object.freeze(['port', 'api_key_file', 'log_opt_in']);
+const OVERRIDE_FORBIDDEN = /(command|bin|binary|lib|library|ld_|model|draft|projector|args?|argv|exec|path|policy|kernel|env)/i;
+
+export const HOST_STATE_DIRNAME = '.green-roomz-state';
+export function hostOverridePath(manifestPath, env = process.env) {
+  if (!env?.HOME) return null;
+  const base = path.basename(manifestPath).replace(/\.json$/i, '');
+  return path.join(env.HOME, HOST_STATE_DIRNAME, `${base}.local.json`);
+}
+
+/** Read + validate the override at `file`. Returns null when absent. Throws ValidationError. */
+export function readHostOverride(file, env = process.env) {
+  if (!file) return null;
+  let st;
+  const dir = path.dirname(file);
+  try {
+    const ds = lstatSync(dir);
+    if (ds.isSymbolicLink() || !ds.isDirectory()) throw new ValidationError('host override refused', { issues: [`state dir ${dir} is not a real directory`] });
+    if ((ds.mode & 0o077) !== 0) throw new ValidationError('host override refused', { issues: [`state dir ${dir} mode ${(ds.mode & 0o777).toString(8)} must be 700`] });
+  } catch (err) { if (err.code === 'ENOENT') return null; throw err; }
+  try { st = lstatSync(file); } catch (err) { if (err.code === 'ENOENT') return null; throw err; }
+  const issues = [];
+  if (st.isSymbolicLink()) issues.push(`override ${file} is a symlink; refusing`);
+  else if (!st.isFile()) issues.push(`override ${file} is not a regular file; refusing`);
+  else {
+    if ((st.mode & 0o777) !== 0o600) issues.push(`override ${file} mode ${(st.mode & 0o777).toString(8)} must be 600`);
+    if (typeof process.getuid === 'function' && st.uid !== process.getuid()) issues.push(`override ${file} owned by uid ${st.uid}, not ${process.getuid()}`);
+  }
+  if (issues.length) throw new ValidationError('host override refused', { issues });
+  let data;
+  try { data = JSON.parse(readFileSync(file, 'utf8')); } catch (err) { throw new ValidationError('host override refused', { issues: [`override ${file}: ${err.message}`] }); }
+  return validateHostOverride(data, env);
+}
+
+export function validateHostOverride(data, env = process.env) {
+  const issues = [];
+  if (!data || typeof data !== 'object' || Array.isArray(data)) throw new ValidationError('host override refused', { issues: ['override must be a JSON object'] });
+  for (const [k, v] of Object.entries(data)) {
+    if (!HOST_OVERRIDE_KEYS.includes(k)) {
+      issues.push(OVERRIDE_FORBIDDEN.test(k) ? `override key ${k} names a binary/library/model/args; refusing` : `override key ${k} not allowed (allowed: ${HOST_OVERRIDE_KEYS.join(', ')})`);
+      continue;
+    }
+    if (typeof v === 'string' && v.includes('${')) { issues.push(`override ${k}: \${} expansion not allowed`); continue; }
+    if (k === 'port' && (!Number.isInteger(v) || v < 1024 || v > 65535)) issues.push('override port must be an integer 1024-65535');
+    if (k === 'log_opt_in' && typeof v !== 'boolean') issues.push('override log_opt_in must be boolean');
+    if (k === 'api_key_file') {
+      const home = env?.HOME;
+      if (typeof v !== 'string' || !path.isAbsolute(v) || /[\0\n]/.test(v)) issues.push('override api_key_file must be an absolute path');
+      else if (!home) issues.push('override api_key_file needs HOME');
+      else {
+        const r = path.resolve(v); const h = path.resolve(home);
+        if (!r.startsWith(h + path.sep)) issues.push(`override api_key_file ${r} is outside $HOME`);
+        else if (/^\/(data\/local\/tmp|sdcard|storage|mnt\/sdcard)\//.test(r)) issues.push(`override api_key_file ${r} is on shared storage`);
+      }
+    }
+  }
+  if (issues.length) throw new ValidationError('host override refused', { issues });
+  return Object.freeze({ ...data });
+}
+
 export async function loadManifest(input = DEFAULT_MANIFEST, env = process.env) {
   const root = packageRoot();
   const effectiveEnv = withDefaultGrzEnv(env, root);
@@ -191,7 +254,10 @@ export async function loadManifest(input = DEFAULT_MANIFEST, env = process.env) 
   let raw = await readFile(manifestPath, 'utf8');
   if (raw.charCodeAt(0) === 0xFEFF) raw = raw.slice(1); // UTF-8 BOM (PF8)
   const parsed = JSON.parse(raw);
+  const override = readHostOverride(hostOverridePath(manifestPath, effectiveEnv), effectiveEnv);
   const manifest = expandEnvironment(parsed, effectiveEnv);
+  // Applied after expansion: override values are literals, never expanded.
+  if (override?.port !== undefined && manifest.gateway) manifest.gateway.port = override.port;
   assertRuntimeCommands(manifest);
   validateManifest(manifest, effectiveEnv);
   for (const agent of manifest.agents) {
@@ -217,7 +283,7 @@ export async function loadManifest(input = DEFAULT_MANIFEST, env = process.env) 
   const nexus = manifest.agents.find((agent) => agent.alias === NEXUS_ALIAS);
   if (nexus?.system_policy) loadDeclaredKernel(nexus);
   Object.defineProperty(manifest, '_meta', {
-    value: Object.freeze({ path: manifestPath, digest: digestObject(parsed), packageRoot: root }),
+    value: Object.freeze({ path: manifestPath, digest: digestObject(parsed), packageRoot: root, hostOverride: override ?? null }),
     enumerable: false,
   });
   return deepFreeze(manifest);

@@ -1,27 +1,52 @@
 #!/usr/bin/env bash
 # Portable shebang. Invoke as: bash note9-run-llama-server.termux.sh [llama-server args]
-# Under Termux: runs the verified $HOME/grz-runtime copy only. Refuses unless
-#   - $RT/.verified exists and equals sha256 of the cut manifest (and GRZ_MANIFEST_SHA256 if set),
-#   - every bin/*.so and models/* file in $RT is listed in that manifest.
+# Under Termux: runs the verified $HOME/grz.current/runtime copy only. Refuses unless
+#   - grz.current is a symlink to $HOME/grz.<sha> with no other symlinks inside,
+#   - <sha> == .verified == sha256(manifest) == GRZ_MANIFEST_SHA256 (always required;
+#     escape GRZ_ALLOW_UNVERIFIED_RUNTIME=1 skips only the env anchor),
+#   - every bin/*.so and models/* file in runtime/ is listed in that manifest.
 #   LD_LIBRARY_PATH is set to exactly "$RT/bin" (caller value discarded).
 # adb-only legacy /data/local/tmp path: UNVERIFIED, requires GRZ_ADB_DEBUG=1.
 set -eu
 : "${LANG:=C.UTF-8}"; export LANG
 die() { echo "ERROR: $*" >&2; exit 1; }
+# Android 9 (API 28) minimum; skipped when getprop is absent (off-device tests).
+if command -v getprop >/dev/null 2>&1; then
+  sdk=$(getprop ro.build.version.sdk 2>/dev/null | tr -d '[:space:]')
+  case "$sdk" in ''|*[!0-9]*) ;; *) [ "$sdk" -ge 28 ] || die "Android SDK $sdk detected; this build needs Android 9 (API 28) or later" ;; esac
+fi
 is_termux=0
 [ -n "${TERMUX_VERSION:-}" ] && is_termux=1
 case "${PREFIX:-}" in */files/usr) is_termux=1 ;; esac
 if [ "$is_termux" = 1 ]; then
-  RT="${GRZ_RUNTIME_DIR:-$HOME/grz-runtime}"
-  MAN="${GRZ_TREE_DIR:-$HOME/green-roomz}/config/note9-runtime.SHA256SUMS"
-  [ -x "$RT/bin/llama-server" ] || die "$RT/bin/llama-server missing or not executable. Run note9-termux-setup.sh first; /data/local/tmp/grz/bin is adb-only (SELinux denies exec from Termux)."
-  [ -f "$RT/.verified" ] || die "$RT/.verified missing; runtime not verified. Re-run note9-termux-setup.sh with GRZ_MANIFEST_SHA256."
+  # Release runner: no GRZ_RUNTIME_DIR/GRZ_TREE_DIR overrides. The only symlink allowed is
+  # $HOME/grz.current; its realpath must be $HOME/grz.<64hex> and that hex must equal
+  # .verified, sha256(manifest) and GRZ_MANIFEST_SHA256.
+  if [ -n "${PREFIX:-}" ] && [ -x "$PREFIX/bin/realpath" ]; then REALPATH=$PREFIX/bin/realpath; else REALPATH=realpath; fi
+  HOME_REAL=$("$REALPATH" -e -- "$HOME") || die "HOME missing"
+  CUR=$HOME_REAL/grz.current
+  [ -L "$CUR" ] || die "$CUR missing or not a symlink. Run note9-termux-setup.sh first; /data/local/tmp/grz/bin is adb-only (SELinux denies exec from Termux)."
+  D=$("$REALPATH" -e -- "$CUR") || die "$CUR is dangling; refusing"
+  hex=${D#"$HOME_REAL"/grz.}
+  [[ $D == "$HOME_REAL"/grz.* && $hex =~ ^[0-9a-f]{64}$ ]] || die "$CUR resolves to $D, not $HOME_REAL/grz.<sha256>; refusing"
+  RT=$D/runtime
+  MAN=$D/tree/config/note9-runtime.SHA256SUMS
+  if [ -n "${PREFIX:-}" ] && [ -x "$PREFIX/bin/find" ]; then FIND=$PREFIX/bin/find; else FIND="find"; fi
+  link=$("$FIND" "$D" -type l -print -quit 2>/dev/null)
+  [ -z "$link" ] || die "symlink $link inside $D; refusing (only grz.current may be a symlink)"
+  [ -x "$RT/bin/llama-server" ] || die "$RT/bin/llama-server missing or not executable"
+  [ -f "$D/.verified" ] || die "$D/.verified missing; runtime not verified. Re-run note9-termux-setup.sh with GRZ_MANIFEST_SHA256."
   [ -f "$MAN" ] || die "manifest $MAN missing; refusing"
-  stamp=$(tr -d '[:space:]' < "$RT/.verified")
+  stamp=$(tr -d '[:space:]' < "$D/.verified")
   cur=$(sha256sum < "$MAN" | cut -d' ' -f1)
-  [ "$stamp" = "$cur" ] || die "$RT/.verified ($stamp) does not match manifest sha256 ($cur); refusing"
-  if [ -n "${GRZ_MANIFEST_SHA256:-}" ] && [ "${GRZ_MANIFEST_SHA256,,}" != "$stamp" ]; then
-    die "$RT/.verified ($stamp) does not match GRZ_MANIFEST_SHA256; refusing"
+  [ "$stamp" = "$cur" ] || die "$D/.verified ($stamp) does not match manifest sha256 ($cur); refusing"
+  [ "$hex" = "$stamp" ] || die "folder $D does not match .verified ($stamp); refusing"
+  # Anchor is always required: the stamp alone lives in a dir this user can write.
+  if [ -z "${GRZ_MANIFEST_SHA256:-}" ]; then
+    [ "${GRZ_ALLOW_UNVERIFIED_RUNTIME:-0}" = 1 ] || die "GRZ_MANIFEST_SHA256 unset; refusing (GRZ_ALLOW_UNVERIFIED_RUNTIME=1 only with Brian's per-host OK)"
+    echo "!! WARNING: GRZ_ALLOW_UNVERIFIED_RUNTIME=1 — runner anchor check skipped" >&2
+  elif [ "${GRZ_MANIFEST_SHA256,,}" != "$stamp" ]; then
+    die "$D/.verified ($stamp) does not match GRZ_MANIFEST_SHA256; refusing"
   fi
   declare -A listed=()
   while read -r h p; do

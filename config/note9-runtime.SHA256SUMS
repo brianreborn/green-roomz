@@ -1,8 +1,8 @@
 # Green-Roomz note9 native runtime manifest (sha256sum format).
-# Plain paths are relative to $HOME/grz-runtime; "tree/" paths to $HOME/green-roomz, e.g.
+# Plain paths are relative to $HOME/grz.<sha>/runtime; "tree/" paths to $HOME/grz.<sha>/tree, e.g.
 #   <64-hex>  bin/llama-server
 #   <64-hex>  bin/libggml.so      (every bin/*.so must be listed; runner refuses otherwise)
-#   <64-hex>  models/Qwenstral-Small-3.1-0.5B.Q4_K_M.gguf
+#   <64-hex>  models/<REAL-GGUF-FILENAME>.gguf   (slot only: model pending Brian; filename must match the real GGUF)
 #   <64-hex>  tree/src/gateway.mjs
 # Trust anchor: operator passes GRZ_MANIFEST_SHA256=<sha256 of this file> out of band.
 # Generate with scripts/note9-gen-manifest.sh.
