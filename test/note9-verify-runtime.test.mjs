@@ -578,7 +578,7 @@ test('SETUP:83: setup refuses to run from shared/adb storage (must run from the 
 
 // KEY: Brian 2026-11-02 — phones always require an API key, loopback included.
 function keyed() {
-  const f = fixture({ files: { 'bin/llama-server': '#!/bin/sh\necho "ARGV=$*"\n', 'bin/libggml.so': 'SO', 'models/m.gguf': 'GGUF' } });
+  const f = fixture({ files: { 'bin/llama-server': '#!/bin/sh\necho "ARGV=$*"\nenv | grep "^LLAMA" | sed "s/^/ENV=/"\n', 'bin/libggml.so': 'SO', 'models/m.gguf': 'GGUF' } });
   const r = run(f); assert.equal(r.code, 0, r.out);
   mkdirSync(join(f.cur, 'tree', 'src'), { recursive: true });
   for (const m of readdirSync(join(REPO, 'src'))) if (m.endsWith('.mjs')) writeFileSync(join(f.cur, 'tree', 'src', m), readFileSync(join(REPO, 'src', m)));
@@ -599,11 +599,11 @@ test('KEY: GREEN_ROOMZ_API_KEY -> 0600 file passed via --api-key-file; key never
   const r = runSrv(f, { GREEN_ROOMZ_API_KEY: secret }); assert.equal(r.code, 0, r.out);
   const kf = join(st, 'llama-server.key');
   assert.match(r.out, new RegExp(`ARGV=--host 127\\.0\\.0\\.1 --port 8081 --api-key-file ${kf.replace(/[.]/g, '\\.')}$`, 'm'));
-  assert.ok(!r.out.includes(secret)); assert.equal(statSync(kf).mode & 0o777, 0o600); assert.equal(readFileSync(kf, 'utf8').trim(), secret);
+  assert.ok(!r.out.includes(secret)); assert.equal(statSync(kf).mode & 0o777, 0o600); assert.equal(readFileSync(kf, 'utf8'), secret, 'no trailing newline');
 });
 test('KEY: override api_key_file is validated and passed; bad mode or caller --api-key refused', { skip: !hasBash }, () => {
   const { f, st } = keyed(); const kf = join(f.root, 'home', 'k.key');
-  writeFileSync(kf, 'k'.repeat(32) + '\n', { mode: 0o600 });
+  writeFileSync(kf, 'k'.repeat(32), { mode: 0o600 });
   writeFileSync(join(st, 'agents.note9.local.json'), JSON.stringify({ api_key_file: kf }), { mode: 0o600 });
   let r = runSrv(f); assert.equal(r.code, 0, r.out); assert.match(r.out, new RegExp(`--api-key-file ${kf.replace(/[.]/g, '\\.')}$`, 'm'));
   r = runSrv(f, {}, ['--api-key', 'x']); assert.notEqual(r.code, 0); assert.match(r.out, /caller passed --api-key/);
@@ -665,4 +665,16 @@ test('SD-30: stale-lock takeover aborts if the moved lock pid differs from the d
   const r = run(f, { PATH: `${bin}:${process.env.PATH}` });
   assert.notEqual(r.code, 0); assert.match(r.out, /lock changed hands during takeover \(pid '999999999' -> '424242'\); refusing/);
   assert.equal(readFileSync(join(lock, 'pid'), 'utf8').trim(), '424242', 'moved lock put back, not deleted');
+});
+
+test('KEY: runner unsets LLAMA_API_KEY, LLAMA_ARG_API_KEY_FILE and every LLAMA_ARG_* before exec', { skip: !hasBash }, () => {
+  const { f } = keyed();
+  const r = runSrv(f, { GREEN_ROOMZ_API_KEY: 'z'.repeat(24), LLAMA_API_KEY: 'evil', LLAMA_ARG_API_KEY_FILE: '/tmp/evil', LLAMA_ARG_HOST: '0.0.0.0', LLAMA_ARG_N_GPU_LAYERS: '99', LLAMA_CACHE: 'keep' });
+  assert.equal(r.code, 0, r.out);
+  assert.doesNotMatch(r.out, /ENV=LLAMA_API_KEY=|ENV=LLAMA_ARG_/);
+  assert.match(r.out, /ENV=LLAMA_CACHE=keep/, 'non-ARG LLAMA_ vars are left alone');
+});
+test('KEY: runner refuses GREEN_ROOMZ_API_KEY with whitespace/CR/LF', { skip: !hasBash }, () => {
+  const { f } = keyed();
+  const r = runSrv(f, { GREEN_ROOMZ_API_KEY: 'abc\r' + 'x'.repeat(20) }); assert.notEqual(r.code, 0); assert.match(r.out, /whitespace\/CR\/LF; refusing/);
 });

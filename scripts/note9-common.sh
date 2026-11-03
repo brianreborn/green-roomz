@@ -79,7 +79,10 @@ grz_key_generate() {
   local f=$1 tmp
   [[ -e $f || -L $f ]] && return 0
   tmp=$f.tmp.$$
-  ( umask 077; head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' > "$tmp" ) || return 1
+  local k
+  k=$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n') || return 1
+  [[ $k =~ ^[0-9a-f]{64}$ ]] || return 1
+  ( umask 077; printf '%s' "$k" > "$tmp" ) || return 1  # no trailing newline (llama-server does not trim)
   chmod 600 "$tmp" && mv -f -- "$tmp" "$f"
 }
 # grz_key_check <tree>: prints the validated key file path (override api_key_file, read via one

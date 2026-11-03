@@ -17,6 +17,7 @@ import {
 import { ValidationError } from './errors.mjs';
 import { TIMING_PRIVACY_INSTALL_HINT, resolveTimingPrivacy } from './timing-quant.mjs';
 import { digestObject, expandEnvironment, resolveManifestPath, nfcPath } from './util.mjs';
+import os from 'node:os';
 import { readFileSync, existsSync, lstatSync, realpathSync, openSync, fstatSync, closeSync, readlinkSync, constants as fsConstants } from 'node:fs';
 import { assertNexusKernelText, kernelBindingIssues } from './kernel-text.mjs';
 
@@ -205,14 +206,15 @@ export function readHostOverride(file, env = process.env) {
   try {
     const ds = lstatSync(dir);
     if (ds.isSymbolicLink() || !ds.isDirectory()) throw new ValidationError('host override refused', { issues: [`state dir ${dir} is not a real directory`] });
-    if ((ds.mode & 0o077) !== 0) throw new ValidationError('host override refused', { issues: [`state dir ${dir} mode ${(ds.mode & 0o777).toString(8)} must be 700`] });
+    if (!isWin32() && (ds.mode & 0o077) !== 0) throw new ValidationError('host override refused', { issues: [`state dir ${dir} mode ${(ds.mode & 0o777).toString(8)} must be 700`] });
   } catch (err) { if (err.code === 'ENOENT') return null; throw err; }
   try { st = lstatSync(file); } catch (err) { if (err.code === 'ENOENT') return null; throw err; }
   const issues = [];
   if (st.isSymbolicLink()) issues.push(`override ${file} is a symlink; refusing`);
   else if (!st.isFile()) issues.push(`override ${file} is not a regular file; refusing`);
   else {
-    if ((st.mode & 0o777) !== 0o600) issues.push(`override ${file} mode ${(st.mode & 0o777).toString(8)} must be 600`);
+    // P-1: POSIX mode bits are meaningless on win32 (Node reports 0o666/0o444); skip there.
+    if (!isWin32() && (st.mode & 0o777) !== 0o600) issues.push(`override ${file} mode ${(st.mode & 0o777).toString(8)} must be 600`);
     if (typeof process.getuid === 'function' && st.uid !== process.getuid()) issues.push(`override ${file} owned by uid ${st.uid}, not ${process.getuid()}`);
   }
   if (issues.length) throw new ValidationError('host override refused', { issues });
@@ -224,6 +226,27 @@ export function readHostOverride(file, env = process.env) {
   let data;
   try { data = JSON.parse(raw); } catch (err) { throw new ValidationError('host override refused', { issues: [`override ${file}: ${err.message}`] }); }
   return validateHostOverride(data, env);
+}
+
+/** P-1: platform seam (tests set it via _setPlatformForTest). win32 has no POSIX mode bits:
+ * mode checks are skipped and files must resolve under the user's profile (os.homedir()).
+ * Real ACL checks (owner-only DACL) are planned for v0.3. */
+let platformOverride = null; let homedirOverride = null;
+export function _setPlatformForTest(platform, homedir = null) { platformOverride = platform; homedirOverride = homedir; }
+function isWin32() { return (platformOverride ?? process.platform) === 'win32'; }
+function profileDir() { return homedirOverride ?? os.homedir(); }
+let procfsHintLogged = false;
+export function _resetProcfsHintForTest() { procfsHintLogged = false; }
+
+/** Key content rule (shared with the note9 scripts and familia): one token, no \r, no \n,
+ * no whitespace anywhere, incl. trailing newline. llama-server reads one key per line and does
+ * not trim, so a stray \r would 401 every client. Setup writes with printf '%s'. */
+export function apiKeyContentIssues(raw, file = 'api_key_file') {
+  if (raw.length === 0) return [`api_key_file ${file} is empty`];
+  if (raw.includes('\r')) return [`api_key_file ${file} contains \\r (CRLF); write it with printf '%s'`];
+  if (raw.includes('\n')) return [`api_key_file ${file} contains a newline; write it with printf '%s' (one key, no trailing newline)`];
+  if (/\s/u.test(raw)) return [`api_key_file ${file} contains whitespace; refusing`];
+  return [];
 }
 
 const SHARED_PREFIX_FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'config', 'shared-storage-prefixes.txt');
@@ -244,6 +267,11 @@ export function isSharedStorage(resolved) {
  * prefix (/data/user/0 -> /data/data) works. Secondary: shared-storage deny list. */
 function keyPathIssues(real, homeReal) {
   if (!real.startsWith(homeReal + path.sep)) return [`api_key_file ${real} is outside $HOME (${homeReal})`];
+  if (isWin32()) {
+    let prof; try { prof = realpathSync(profileDir()); } catch { return [`api_key_file: profile dir ${profileDir()} does not resolve`]; }
+    const norm = (x) => x.toLowerCase();
+    if (!norm(real).startsWith(norm(prof) + path.sep)) return [`api_key_file ${real} is outside the user profile (${prof}); on Windows the key must live under the profile (ACL checks come in v0.3)`];
+  }
   if (isSharedStorage(real)) return [`api_key_file ${real} is on shared storage; refusing`];
   return [];
 }
@@ -269,15 +297,21 @@ export function readApiKeyFile(file, env = process.env) {
     const st = fstatSync(fd);
     if (!st.isFile()) issues.push(`api_key_file ${file} is not a regular file`);
     const mode = st.mode & 0o777;
-    if (mode !== 0o600 && mode !== 0o400) issues.push(`api_key_file ${file} mode ${mode.toString(8)} must be 600 or 400`);
+    if (!isWin32() && mode !== 0o600 && mode !== 0o400) issues.push(`api_key_file ${file} mode ${mode.toString(8)} must be 600 or 400`);
     if (typeof process.getuid === 'function' && st.uid !== process.getuid()) issues.push(`api_key_file ${file} not owned by uid ${process.getuid()}`);
     if (st.size > HOST_OVERRIDE_MAX_BYTES) issues.push(`api_key_file ${file} is larger than ${HOST_OVERRIDE_MAX_BYTES} bytes`);
     let fdPath = null;
-    try { fdPath = readlinkSync(`/proc/self/fd/${fd}`); } catch { /* no procfs */ }
+    if (!isWin32()) {
+      try { fdPath = readlinkSync(`/proc/self/fd/${fd}`); } catch {
+        // P-2: no procfs (FreeBSD default). realpath + fstat above still hold; say so once.
+        if (!procfsHintLogged) { procfsHintLogged = true; console.warn('api_key_file: /proc/self/fd unavailable; fd path re-check skipped (realpath+fstat still enforced). On FreeBSD add "proc /proc procfs rw 0 0" to /etc/fstab and `mount /proc`.'); }
+      }
+    }
     if (fdPath && !issues.length) issues.push(...keyPathIssues(fdPath, realpathSync(env.HOME)));
     if (issues.length) throw new ValidationError('api_key_file refused', { issues });
-    const key = readFileSync(fd, 'utf8').trim();
-    if (!key) throw new ValidationError('api_key_file refused', { issues: [`api_key_file ${file} is empty`] });
+    const key = readFileSync(fd, 'utf8');
+    const ci = apiKeyContentIssues(key, file);
+    if (ci.length) throw new ValidationError('api_key_file refused', { issues: ci });
     return key;
   } finally { closeSync(fd); }
 }

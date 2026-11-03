@@ -5,7 +5,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, symlinkSync, chmod
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { loadManifest, readHostOverride, validateHostOverride, hostOverridePath, isSharedStorage, sharedStoragePrefixes, apiKeyFileIssues, readApiKeyFile } from '../src/config.mjs';
+import { loadManifest, readHostOverride, validateHostOverride, hostOverridePath, isSharedStorage, sharedStoragePrefixes, apiKeyFileIssues, readApiKeyFile, apiKeyContentIssues, _setPlatformForTest, _resetProcfsHintForTest } from '../src/config.mjs';
 import { execFileSync } from 'node:child_process';
 import { Gateway } from '../src/gateway.mjs';
 
@@ -47,7 +47,7 @@ test('OVR: ${} expansion refused; api_key_file outside $HOME refused', () => {
 });
 test('SD-21: api_key_file realpath/lstat/mode/uid checks', () => {
   const { h, st } = home(undefined);
-  const key = join(st, 'key'); writeFileSync(key, 'sekrit\n'); chmodSync(key, 0o600);
+  const key = join(st, 'key'); writeFileSync(key, 'sekrit'); chmodSync(key, 0o600);
   assert.equal(validateHostOverride({ api_key_file: key }, { HOME: h }).api_key_file, key);
   chmodSync(key, 0o400); assert.equal(readApiKeyFile(key, { HOME: h }), 'sekrit');
   chmodSync(key, 0o640); refused(() => readApiKeyFile(key, { HOME: h }), /must be 600 or 400/);
@@ -87,7 +87,7 @@ test('SD-23: override >4KB refused, duplicate keys refused, accepted keys logged
   ({ h, f } = home(undefined));
   writeFileSync(f, '{"port": {"x": 1}}'); chmodSync(f, 0o600);
   refused(() => readHostOverride(f, { HOME: h }), /scalar|port must be/);
-  const st = join(h, '.green-roomz-state'); const key = join(st, 'key'); writeFileSync(key, 'tok-123\n'); chmodSync(key, 0o600);
+  const st = join(h, '.green-roomz-state'); const key = join(st, 'key'); writeFileSync(key, 'tok-123'); chmodSync(key, 0o600);
   writeFileSync(f, JSON.stringify({ port: 8099, api_key_file: key })); chmodSync(f, 0o600);
   const logs = []; const w = process.stderr.write; process.stderr.write = (c, ...r) => { logs.push(String(c)); return true; };
   let m; try { m = await loadManifest(BASE, { ...process.env, HOME: h }); } finally { process.stderr.write = w; }
@@ -128,7 +128,7 @@ test('SD-21: allowlist is primary — $HOME reached via a symlinked prefix (/dat
   const realHome = join(t, 'data', 'data', 'com.example', 'files', 'home'); mkdirSync(join(realHome, '.green-roomz-state'), { recursive: true });
   mkdirSync(join(t, 'data', 'user'), { recursive: true }); symlinkSync(join(t, 'data', 'data'), join(t, 'data', 'user', '0'));
   const home = join(t, 'data', 'user', '0', 'com.example', 'files', 'home');
-  const key = join(home, '.green-roomz-state', 'key'); writeFileSync(key, 'tok\n'); chmodSync(key, 0o600);
+  const key = join(home, '.green-roomz-state', 'key'); writeFileSync(key, 'tok'); chmodSync(key, 0o600);
   assert.deepEqual(apiKeyFileIssues(key, { HOME: home }), []);
   assert.equal(validateHostOverride({ api_key_file: key }, { HOME: home }).api_key_file, key);
   assert.equal(readApiKeyFile(key, { HOME: home }), 'tok');
@@ -140,7 +140,7 @@ test('SD-21: allowlist is primary — $HOME reached via a symlinked prefix (/dat
 });
 test('SD-21: key file opened once with O_NOFOLLOW; fstat on that fd; read through it', () => {
   const { h, st } = home(undefined);
-  const key = join(st, 'key'); writeFileSync(key, 'abc\n'); chmodSync(key, 0o600);
+  const key = join(st, 'key'); writeFileSync(key, 'abc'); chmodSync(key, 0o600);
   const src = readFileSync(join(ROOT, 'src', 'config.mjs'), 'utf8');
   const body = src.slice(src.indexOf('export function readApiKeyFile'), src.indexOf('export const HOST_OVERRIDE_MAX_BYTES'));
   assert.equal((body.match(/openSync\(/g) || []).length, 1); assert.match(body, /O_NOFOLLOW/);
@@ -165,4 +165,39 @@ test('SD-27: duplicate keys counted after decoding (escaped and nested cases)', 
   refused(() => readHostOverride(f, { HOME: h }), /duplicate keys: log_opt_in/);
   const src = readFileSync(join(ROOT, 'src', 'config.mjs'), 'utf8');
   assert.doesNotMatch(src, /matchAll\(\/"\(\(\?:/); // raw-text key regex is gone
+});
+
+function keyHome() {
+  const h = mkdtempSync(join(tmpdir(), 'grz-p1-')); const st = join(h, '.green-roomz-state'); mkdirSync(st, { mode: 0o700 });
+  const key = join(st, 'api.key'); writeFileSync(key, 'k'.repeat(32)); return { h, st, key };
+}
+test('P-1: win32 skips the mode check (Node reports 0o666) but still requires the profile folder', () => {
+  const { h, key } = keyHome(); chmodSync(key, 0o666);
+  try {
+    _setPlatformForTest('linux'); assert.throws(() => readApiKeyFile(key, { HOME: h }), (e) => /must be 600 or 400/.test(JSON.stringify(e.details)));
+    _setPlatformForTest('win32', h); assert.equal(readApiKeyFile(key, { HOME: h }), 'k'.repeat(32));
+    const other = mkdtempSync(join(tmpdir(), 'grz-prof-'));
+    _setPlatformForTest('win32', other);
+    assert.throws(() => readApiKeyFile(key, { HOME: h }), (e) => /outside the user profile/.test(JSON.stringify(e.details)) && /v0\.3/.test(JSON.stringify(e.details)));
+  } finally { _setPlatformForTest(null); }
+});
+test('P-1: win32 host override with mode 666 is accepted; POSIX refuses', () => {
+  const h = mkdtempSync(join(tmpdir(), 'grz-p1o-')); const st = join(h, '.green-roomz-state'); mkdirSync(st, { mode: 0o700 });
+  const f = join(st, 'agents.note9.local.json'); writeFileSync(f, JSON.stringify({ port: 8099 })); chmodSync(f, 0o666);
+  try {
+    _setPlatformForTest('linux'); assert.throws(() => readHostOverride(f, { HOME: h }), /host override refused/);
+    _setPlatformForTest('win32', h); assert.equal(readHostOverride(f, { HOME: h }).port, 8099);
+  } finally { _setPlatformForTest(null); }
+});
+test('P-2: missing /proc/self/fd logs one fstab hint (source check) and still reads', () => {
+  const src = readFileSync(join(ROOT, 'src', 'config.mjs'), 'utf8');
+  assert.match(src, /proc \/proc procfs rw 0 0/); assert.match(src, /procfsHintLogged = true/);
+  _resetProcfsHintForTest();
+});
+test('KEY content: CR, LF, trailing newline and whitespace refused; bare token ok', () => {
+  assert.deepEqual(apiKeyContentIssues('abc123'), []);
+  for (const bad of ['abc\r\n', 'abc\n', 'ab\ncd', 'ab cd', 'abc\t', ' abc', '']) assert.ok(apiKeyContentIssues(bad).length, JSON.stringify(bad));
+  const { h, key } = keyHome(); chmodSync(key, 0o600);
+  writeFileSync(key, 'tok\r\n'); assert.throws(() => readApiKeyFile(key, { HOME: h }), (e) => /\\\\r/.test(JSON.stringify(e.details)));
+  writeFileSync(key, 'tok\n'); assert.throws(() => readApiKeyFile(key, { HOME: h }), /api_key_file refused/);
 });

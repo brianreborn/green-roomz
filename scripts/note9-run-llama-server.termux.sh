@@ -99,16 +99,20 @@ if [ "$is_android" = 1 ]; then
     || die "api_key_file refused; refusing to start llama-server"
   if [ -z "$KEYF" ]; then
     key=${GREEN_ROOMZ_API_KEY:-}
-    key=${key//[[:space:]]/}
+    case "$key" in *[[:space:]]*) die "GREEN_ROOMZ_API_KEY contains whitespace/CR/LF; refusing" ;; esac
     [ -n "$key" ] || die "no API key (api_key_file in $STATE_DIR override, or GREEN_ROOMZ_API_KEY); phones always require one, loopback included; refusing"
     [ -d "$STATE_DIR" ] && [ ! -L "$STATE_DIR" ] || die "$STATE_DIR missing; run setup; refusing"
     KEYF=$STATE_DIR/llama-server.key
     [ -L "$KEYF" ] && die "$KEYF is a symlink; refusing"
-    if ! { ( umask 077; printf '%s\n' "$key" > "$KEYF.tmp.$$" ) && chmod 600 "$KEYF.tmp.$$" && mv -f -- "$KEYF.tmp.$$" "$KEYF"; }; then
+    if ! { ( umask 077; printf '%s' "$key" > "$KEYF.tmp.$$" ) && chmod 600 "$KEYF.tmp.$$" && mv -f -- "$KEYF.tmp.$$" "$KEYF"; }; then
       die "writing $KEYF failed"
     fi
     unset key
   fi
+  # The caller's env must not add/swap a key or flags: llama-server reads LLAMA_API_KEY,
+  # LLAMA_ARG_API_KEY_FILE and every LLAMA_ARG_*.
+  unset LLAMA_API_KEY LLAMA_ARG_API_KEY_FILE
+  for v in $(compgen -e); do case "$v" in LLAMA_ARG_*) unset "$v" ;; esac; done
   export LD_LIBRARY_PATH="$RT/bin"
   cd "$RT"
   exec "$RT/bin/llama-server" "$@" --api-key-file "$KEYF"
