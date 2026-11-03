@@ -50,7 +50,7 @@ Resident **tool-router-agent** `:8187` is the only GGUF on the phone. Other alia
 - `am broadcast … RUN_COMMAND` returns 0 and does nothing.
 - `input text` into Termux works if the **terminal_view is focused** and **CTRL extra-key is off**. Sticky CTRL turns `bash` into `ash`.
 - Dump UI first: `uiautomator dump` and read `com.termux:id/terminal_view` `content-desc`.
-- Type `ba` then `sh` then `%s/data/local/tmp/grz/green-roomz/scripts/note9-termux-setup.sh`. Never toggle CTRL unless you mean Ctrl-C.
+- Type `ba` then `sh` then `%s~/grz-release/scripts/note9-termux-setup.sh` (after the tarball sha check below). Never toggle CTRL unless you mean Ctrl-C.
 
 `allow-external-apps=true` was written to `~/.termux/termux.properties` (status now written to `~/.green-roomz-state/ext-apps.status`).
 
@@ -66,7 +66,7 @@ Resident **tool-router-agent** `:8187` is the only GGUF on the phone. Other alia
 | `scripts/note9-restart-serve.sh` | kill pidfile, serve from `grz.current` (no stored path) |
 | `scripts/note9-run-llama-server.termux.sh` | release runner, run from the hashed tree |
 
-Push the cut with `adb push` to `/data/local/tmp/grz/` (runtime in `bin/ lib/ models/`, JS tree in `green-roomz/`, `chmod 644`) and run **`GRZ_MANIFEST_SHA256=<hash> bash /data/local/tmp/grz/green-roomz/scripts/note9-termux-setup.sh`** from a Termux prompt (bash reads tmp; it does not exec the file bit). All `scripts/note9-*.sh` use `#!/usr/bin/env bash` (works under Termux and NewTermux with termux-exec); always invoke them as `bash script.sh`. `note9-run-llama-server.termux.sh` runs `grz.current/runtime` under Termux and the `/data/local/tmp` path only as adb `shell` with `GRZ_ADB_DEBUG=1`. Setup options: `GRZ_PRUNE_APT_SOURCES=1` (persistent, needs Brian's per-host OK), `GRZ_PORT`, `GRZ_LOG_OPT_IN=1`. Android 9 (API 28)+ required: setup/runner refuse on SDK < 28, on empty/non-numeric `getprop`, or when `getprop` is missing on Android (`$TERMUX_VERSION` set or `uname -o` = `Android`; `$PREFIX` is not a signal); the check is skipped only on non-Android hosts.
+Push the cut with `adb push` to `/data/local/tmp/grz/` (runtime in `bin/ lib/ models/`, JS tree in `green-roomz/`, `chmod 644`) push the release tarball too, then from a Termux prompt **check the tarball sha256 first**, extract it under `$HOME`, and run setup from there (see *Release tarball* below). Setup refuses to run from shared/adb-writable storage. All `scripts/note9-*.sh` use `#!/usr/bin/env bash` (works under Termux and NewTermux with termux-exec); always invoke them as `bash script.sh`. `note9-run-llama-server.termux.sh` runs `grz.current/runtime` under Termux and the `/data/local/tmp` path only as adb `shell` with `GRZ_ADB_DEBUG=1`. Setup options: `GRZ_PRUNE_APT_SOURCES=1` (persistent, needs Brian's per-host OK), `GRZ_PORT`, `GRZ_LOG_OPT_IN=1`. Android 9 (API 28)+ required: setup/runner refuse on SDK < 28, on empty/non-numeric `getprop`, or when `getprop` is missing on Android (`$TERMUX_VERSION` set or `uname -o` = `Android`; `$PREFIX` is not a signal); the check is skipped only on non-Android hosts.
 
 ## RAM admission
 
@@ -83,14 +83,14 @@ Push the cut with `adb push` to `/data/local/tmp/grz/` (runtime in `bin/ lib/ mo
 ## Runtime and tree verification (mandatory)
 
 `scripts/note9-termux-setup.sh` never executes the staged **runtime** (`bin/`, `lib/`, `models/`)
-from `/data/local/tmp/grz`. **Open item:** it does run `note9-verify-runtime.sh` (and sources
-`note9-common.sh` / `note9-shared-storage.sh`) from the staged, not-yet-verified tree; see the
-readiness board. Mitigation until fixed: ship setup + verifier in one tarball whose hash Brian
-checks, or check the verifier's sha256 by hand before running setup.
+from `/data/local/tmp/grz`. Setup, the verifier and their sourced
+helpers come from the release tarball (sha-checked by Brian, extracted under `$HOME`), never from
+the staged tree. `npm-deps: none`: `package.json` has no runtime deps and no lockfile; setup never
+runs npm, and setup, the verifier and the runner refuse any `node_modules` dir.
 `scripts/note9-verify-runtime.sh` copies **only files listed** in the in-cut manifest
 `config/note9-runtime.SHA256SUMS` into a temp dir, checks every sha256, then installs it as
-`$HOME/grz.<sha>/{runtime,tree}` and flips `grz.current`. `node_modules` (incl. `*.node`) must
-be in the hashed tree and listed; the runner also refuses any unlisted `*.node`.
+`$HOME/grz.<sha>/{runtime,tree}` and flips `grz.current`. No `node_modules`
+(npm-deps: none); the runner also refuses any unlisted `*.node`.
 
 Setup aborts when:
 - the manifest (taken only from the staged tree) is missing or empty (the shipped placeholder);
@@ -98,28 +98,42 @@ Setup aborts when:
 - any staged file is not listed, any copy fails (no symlink fallback), or any hash mismatches;
 - `$HOME` (realpath) is on Android shared storage (one list, `config/shared-storage-prefixes.txt`:
   `/storage/ /sdcard /mnt/sdcard /mnt/user/ /mnt/media_rw/ /data/media/ /data/local/tmp`);
-- another install holds `~/.grz-install.lock` (a dead pid's lock is taken over).
+- another install holds `~/.grz-install.lock` (atomic mkdir; an empty pid counts as held; a dead
+  pid's lock is renamed aside with `mv -T` before a fresh mkdir).
 
 Re-running with the same, intact, already-current sha skips the copy and the flip. Startup
-sweeps only real dirs `grz.<64hex>.old.<n>` / `.grz-verify.XXXXXX`; after a flip, the kept
+sweeps only real dirs `grz.<64hex>.old.<n>` / `grz.unverified.<t>.<p>.old.<n>` / `.grz-verify.XXXXXX`; after a flip, the kept
 previous version is the one recorded in `~/.green-roomz-state/install-history` (never mtime).
 
-Host override `~/.green-roomz-state/agents.note9.local.json`: ≤ 4 KB, no duplicate keys, keys
+Host override `~/.green-roomz-state/agents.note9.local.json`: ≤ 4 KB, no duplicate keys (counted after decoding, so `\u0070ort` = `port`), keys
 `port` / `api_key_file` / `log_opt_in` only (accepted keys are logged at load). `api_key_file`
 is realpath'd, must be a regular non-symlink file under realpath(`$HOME`), mode 600 or 400,
-owned by the Termux uid, not on shared storage; the gateway uses it as its bearer key when
+owned by the Termux uid, not on shared storage (allowlist first: realpath must be under
+realpath(`$HOME`)/; deny list second). It is opened once with `O_NOFOLLOW`, checked with `fstat` on
+that fd and read through it; the gateway uses it as its bearer key when
 `GREEN_ROOMZ_API_KEY` is unset.
 
 **Trust anchor.** `GRZ_MANIFEST_SHA256` is the sha256 of the manifest, given to the operator
 out of band (e.g. read from the build host, not from the phone). No signing yet.
 
-    bash scripts/note9-gen-manifest.sh <stage_root> <stage_root>/green-roomz > config/note9-runtime.SHA256SUMS
-    sha256sum config/note9-runtime.SHA256SUMS      # -> GRZ_MANIFEST_SHA256
-    GRZ_MANIFEST_SHA256=<hash> bash /data/local/tmp/grz/green-roomz/scripts/note9-termux-setup.sh
+Build host:
 
-Limits: the setup and verifier scripts themselves are read by bash from the staging area on
-first install, so their integrity is whatever the operator trusts when invoking them; the
-anchor protects everything they copy.
+    bash scripts/note9-gen-manifest.sh <stage_root> <stage_root>/green-roomz config/note9-runtime.SHA256SUMS
+    #   refuses zero tree/ lines, a missing model line (--allow-no-model = DRYRUN header, dry runs
+    #   only) and node_modules; prints: manifest ... sha256=<M>  bin=N lib=N model=N tree=N
+    bash scripts/note9-pack-release.sh             # dist/grz-note9-release.tar.gz
+    #   deterministic (sorted, mtime 0, uid 0, gzip -n): setup, verifier, common + shared-storage
+    #   helpers, prefix list, manifest. Prints tarball sha256=<T> and manifest sha256=<M>.
+
+Publish **T and M together** (out of band). Nothing is uploaded or pushed by these scripts.
+
+### Release tarball (Brian, on the phone, before running anything)
+
+    sha256sum /data/local/tmp/grz/grz-note9-release.tar.gz     # must equal T; stop if not
+    mkdir -p ~/grz-release && tar -xzf /data/local/tmp/grz/grz-note9-release.tar.gz -C ~/grz-release
+    GRZ_MANIFEST_SHA256=<M> bash ~/grz-release/scripts/note9-termux-setup.sh
+
+T covers every script that runs before verification; M anchors everything they copy.
 
 **Escape hatch:** `GRZ_ALLOW_UNVERIFIED_RUNTIME=1` skips verification with a loud warning.
 Use only with Brian's per-host OK.
