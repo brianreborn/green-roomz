@@ -193,9 +193,10 @@ const OVERRIDE_FORBIDDEN = /(command|bin|binary|lib|library|ld_|model|draft|proj
 
 export const HOST_STATE_DIRNAME = '.green-roomz-state';
 export function hostOverridePath(manifestPath, env = process.env) {
-  if (!env?.HOME) return null;
-  const base = path.basename(manifestPath).replace(/\.json$/i, '');
-  return path.join(env.HOME, HOST_STATE_DIRNAME, `${base}.local.json`);
+  const home = homeOf(env);
+  if (!home) return null;
+  const base = P().basename(manifestPath).replace(/\.json$/i, '');
+  return P().join(home, HOST_STATE_DIRNAME, `${base}.local.json`);
 }
 
 /** Read + validate the override at `file`. Returns null when absent. Throws ValidationError. */
@@ -231,11 +232,19 @@ export function readHostOverride(file, env = process.env) {
 /** P-1: platform seam (tests set it via _setPlatformForTest). win32 has no POSIX mode bits:
  * mode checks are skipped and files must resolve under the user's profile (os.homedir()).
  * Real ACL checks (owner-only DACL) are planned for v0.3. */
-let platformOverride = null; let homedirOverride = null;
-export function _setPlatformForTest(platform, homedir = null) { platformOverride = platform; homedirOverride = homedir; }
+let platformOverride = null; let homedirOverride = null; let fsOverride = null;
+/** Test seam: platform, homedir, and optional { realpath, lstat } so win32 paths run on Linux. */
+export function _setPlatformForTest(platform, homedir = null, fsFns = null) { platformOverride = platform; homedirOverride = homedir; fsOverride = fsFns; }
 function isWin32() { return (platformOverride ?? process.platform) === 'win32'; }
 function profileDir() { return homedirOverride ?? os.homedir(); }
+/** P-1a: the home used for state + key checks: os.homedir() on win32 (HOME is usually unset
+ * there), env.HOME on POSIX. */
+function homeOf(env) { return isWin32() ? profileDir() : env?.HOME; }
+function P() { return isWin32() ? path.win32 : path; }
+function realpathX(p) { return (fsOverride?.realpath ?? realpathSync)(p); }
+function lstatX(p) { return (fsOverride?.lstat ?? lstatSync)(p); }
 let procfsHintLogged = false;
+export const _keyPathIssuesForTest = (real, homeReal) => keyPathIssues(real, homeReal);
 export function _resetProcfsHintForTest() { procfsHintLogged = false; }
 
 /** Key content rule (shared with the note9 scripts and familia): one token, no \r, no \n,
@@ -266,20 +275,23 @@ export function isSharedStorage(resolved) {
  * realpath($HOME) + '/'; no package path is hard-coded, so $HOME reached through a symlinked
  * prefix (/data/user/0 -> /data/data) works. Secondary: shared-storage deny list. */
 function keyPathIssues(real, homeReal) {
-  if (!real.startsWith(homeReal + path.sep)) return [`api_key_file ${real} is outside $HOME (${homeReal})`];
   if (isWin32()) {
-    let prof; try { prof = realpathSync(profileDir()); } catch { return [`api_key_file: profile dir ${profileDir()} does not resolve`]; }
-    const norm = (x) => x.toLowerCase();
-    if (!norm(real).startsWith(norm(prof) + path.sep)) return [`api_key_file ${real} is outside the user profile (${prof}); on Windows the key must live under the profile (ACL checks come in v0.3)`];
+    // P-1b: NTFS is case-insensitive and drive letters vary in case: compare only the
+    // normalized, lowercased win32 forms (homeReal is realpath(os.homedir()) here).
+    const norm = (x) => path.win32.normalize(x).replace(/[\\]+$/, '').toLowerCase();
+    if (!norm(real).startsWith(norm(homeReal) + '\\')) return [`api_key_file ${real} is outside the user profile (${homeReal}); on Windows the key must live under the profile (ACL checks come in v0.3)`];
+    return [];
   }
+  if (!real.startsWith(homeReal + path.sep)) return [`api_key_file ${real} is outside $HOME (${homeReal})`];
   if (isSharedStorage(real)) return [`api_key_file ${real} is on shared storage; refusing`];
   return [];
 }
 export function apiKeyFileIssues(file, env = process.env) {
   let homeReal; let real;
-  try { homeReal = realpathSync(env.HOME); } catch { return [`api_key_file: HOME ${env.HOME} does not resolve`]; }
-  try { if (lstatSync(file).isSymbolicLink()) return [`api_key_file ${file} is a symlink; refusing`]; } catch { return [`api_key_file ${file} does not exist`]; }
-  try { real = realpathSync(file); } catch { return [`api_key_file ${file} does not resolve`]; }
+  const home = homeOf(env);
+  try { homeReal = realpathX(home); } catch { return [`api_key_file: ${isWin32() ? 'profile dir' : 'HOME'} ${home} does not resolve`]; }
+  try { if (lstatX(file).isSymbolicLink()) return [`api_key_file ${file} is a symlink; refusing`]; } catch { return [`api_key_file ${file} does not exist`]; }
+  try { real = realpathX(file); } catch { return [`api_key_file ${file} does not resolve`]; }
   return keyPathIssues(real, homeReal);
 }
 
@@ -307,7 +319,7 @@ export function readApiKeyFile(file, env = process.env) {
         if (!procfsHintLogged) { procfsHintLogged = true; console.warn('api_key_file: /proc/self/fd unavailable; fd path re-check skipped (realpath+fstat still enforced). On FreeBSD add "proc /proc procfs rw 0 0" to /etc/fstab and `mount /proc`.'); }
       }
     }
-    if (fdPath && !issues.length) issues.push(...keyPathIssues(fdPath, realpathSync(env.HOME)));
+    if (fdPath && !issues.length) issues.push(...keyPathIssues(fdPath, realpathSync(homeOf(env))));
     if (issues.length) throw new ValidationError('api_key_file refused', { issues });
     const key = readFileSync(fd, 'utf8');
     const ci = apiKeyContentIssues(key, file);
@@ -360,8 +372,8 @@ export function validateHostOverride(data, env = process.env) {
     if (k === 'log_opt_in' && typeof v !== 'boolean') issues.push('override log_opt_in must be boolean');
     if (v !== null && typeof v === 'object') { issues.push(`override ${k} must be a scalar`); continue; }
     if (k === 'api_key_file') {
-      if (typeof v !== 'string' || !path.isAbsolute(v) || /[\0\n]/.test(v)) issues.push('override api_key_file must be an absolute path');
-      else if (!env?.HOME) issues.push('override api_key_file needs HOME');
+      if (typeof v !== 'string' || !P().isAbsolute(v) || /[\0\n]/.test(v)) issues.push('override api_key_file must be an absolute path');
+      else if (!homeOf(env)) issues.push(isWin32() ? 'override api_key_file needs a user profile (os.homedir())' : 'override api_key_file needs HOME');
       else issues.push(...apiKeyFileIssues(v, env));
     }
   }

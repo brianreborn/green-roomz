@@ -145,9 +145,9 @@ else
   # SD-29 (before the anchor, no escape hatch): a DRYRUN manifest or one without a models/ line
   # is never installed.
   grep -q '^# DRYRUN' -- "$SUMS" && die "manifest $SUMS is a DRYRUN manifest (gen-manifest --allow-no-model); refusing"
-  if grep -qE '^[0-9a-f]{64} [ *]?[^#]' -- "$SUMS"; then
-    grep -qE '^[0-9a-f]{64} [ *]?\*?models/' -- "$SUMS" || die "manifest $SUMS has no models/ line; refusing"
-  fi
+  # Boundary nit: a manifest with no hash lines at all lists nothing and verifies nothing.
+  grep -qE '^[0-9a-f]{64} [ *]?[^#]' -- "$SUMS" || die "manifest $SUMS has no hash lines; refusing"
+  grep -qE '^[0-9a-f]{64} [ *]?\*?models/' -- "$SUMS" || die "manifest $SUMS has no models/ line; refusing"
   if [[ -z ${GRZ_MANIFEST_SHA256:-} ]]; then
     unverified "GRZ_MANIFEST_SHA256 unset (manifest sha256=$ACTUAL)"
   elif [[ ${GRZ_MANIFEST_SHA256,,} != "$ACTUAL" ]]; then

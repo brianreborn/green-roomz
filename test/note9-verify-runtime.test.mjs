@@ -59,7 +59,7 @@ test('NOTE9-RT: missing manifest aborts', { skip: !hasBash }, () => {
 });
 test('NOTE9-RT: empty (placeholder) manifest aborts', { skip: !hasBash }, () => {
   const f = fixture({ manifest: [] }); const r = run(f);
-  assert.notEqual(r.code, 0); assert.match(r.out, /no entries/);
+  assert.notEqual(r.code, 0); assert.match(r.out, /no entries|has no hash lines; refusing/);
 });
 test('NOTE9-RT: unlisted staged runtime file aborts and is not copied', { skip: !hasBash }, () => {
   const f = fixture(); f.put(f.stage, 'lib/libevil.so', 'x');
@@ -677,4 +677,10 @@ test('KEY: runner unsets LLAMA_API_KEY, LLAMA_ARG_API_KEY_FILE and every LLAMA_A
 test('KEY: runner refuses GREEN_ROOMZ_API_KEY with whitespace/CR/LF', { skip: !hasBash }, () => {
   const { f } = keyed();
   const r = runSrv(f, { GREEN_ROOMZ_API_KEY: 'abc\r' + 'x'.repeat(20) }); assert.notEqual(r.code, 0); assert.match(r.out, /whitespace\/CR\/LF; refusing/);
+});
+
+test('Boundary nit: verifier refuses a manifest with no hash lines at all (comments only)', { skip: !hasBash }, () => {
+  const f = fixture({ manifest: ['# npm-deps: none', '# nothing listed'] });
+  let r = run(f); assert.notEqual(r.code, 0); assert.match(r.out, /has no hash lines; refusing/);
+  r = run(f, { GRZ_ALLOW_UNVERIFIED_RUNTIME: '1' }); assert.notEqual(r.code, 0); assert.match(r.out, /has no hash lines/);
 });

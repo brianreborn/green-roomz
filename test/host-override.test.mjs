@@ -5,7 +5,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, symlinkSync, chmod
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { loadManifest, readHostOverride, validateHostOverride, hostOverridePath, isSharedStorage, sharedStoragePrefixes, apiKeyFileIssues, readApiKeyFile, apiKeyContentIssues, _setPlatformForTest, _resetProcfsHintForTest } from '../src/config.mjs';
+import { loadManifest, readHostOverride, validateHostOverride, hostOverridePath, isSharedStorage, sharedStoragePrefixes, apiKeyFileIssues, readApiKeyFile, apiKeyContentIssues, _setPlatformForTest, _resetProcfsHintForTest, _keyPathIssuesForTest } from '../src/config.mjs';
 import { execFileSync } from 'node:child_process';
 import { Gateway } from '../src/gateway.mjs';
 
@@ -200,4 +200,32 @@ test('KEY content: CR, LF, trailing newline and whitespace refused; bare token o
   const { h, key } = keyHome(); chmodSync(key, 0o600);
   writeFileSync(key, 'tok\r\n'); assert.throws(() => readApiKeyFile(key, { HOME: h }), (e) => /\\\\r/.test(JSON.stringify(e.details)));
   writeFileSync(key, 'tok\n'); assert.throws(() => readApiKeyFile(key, { HOME: h }), /api_key_file refused/);
+});
+
+const WIN_FS = (files) => ({
+  realpath: (p) => { const k = p.toLowerCase(); if (k in files) return files[k]; const e = new Error('ENOENT'); e.code = 'ENOENT'; throw e; },
+  lstat: (p) => { if (p.toLowerCase() in files) return { isSymbolicLink: () => false }; const e = new Error('ENOENT'); e.code = 'ENOENT'; throw e; },
+});
+test('P-1a: win32 with HOME unset uses os.homedir() (C:\\Users\\X) for the override path and key checks', () => {
+  const files = { 'c:\\users\\x': 'C:\\Users\\X', 'c:\\users\\x\\.green-roomz-state\\api.key': 'C:\\Users\\X\\.green-roomz-state\\api.key', 'c:\\users\\y\\api.key': 'C:\\Users\\Y\\api.key' };
+  try {
+    _setPlatformForTest('win32', 'C:\\Users\\X', WIN_FS(files));
+    assert.equal(hostOverridePath('config\\agents.note9.json', {}), 'C:\\Users\\X\\.green-roomz-state\\agents.note9.local.json');
+    assert.deepEqual(apiKeyFileIssues('C:\\Users\\X\\.green-roomz-state\\api.key', {}), []);
+    assert.match(apiKeyFileIssues('C:\\Users\\Y\\api.key', {}).join(), /outside the user profile/);
+    assert.deepEqual(validateHostOverride({ port: 8099, api_key_file: 'C:\\Users\\X\\.green-roomz-state\\api.key' }, {}).port, 8099);
+    _setPlatformForTest('linux');
+    assert.equal(hostOverridePath('agents.note9.json', {}), null, 'POSIX still needs env.HOME');
+  } finally { _setPlatformForTest(null); }
+});
+test('P-1b: win32 compares lowercased path.win32 forms (drive-letter case, backslashes, sibling prefix)', () => {
+  try {
+    _setPlatformForTest('win32', 'C:\\Users\\X');
+    assert.deepEqual(_keyPathIssuesForTest('c:\\users\\x\\.green-roomz-state\\api.key', 'C:\\Users\\X'), []);
+    assert.deepEqual(_keyPathIssuesForTest('C:/Users/X/state/api.key', 'c:\\USERS\\x\\'), []);
+    assert.match(_keyPathIssuesForTest('C:\\Users\\Xavier\\api.key', 'C:\\Users\\X').join(), /outside the user profile/);
+    assert.match(_keyPathIssuesForTest('D:\\Users\\X\\api.key', 'C:\\Users\\X').join(), /outside the user profile/);
+    _setPlatformForTest('linux');
+    assert.match(_keyPathIssuesForTest('/home/X/k', '/home/x').join(), /outside \$HOME/, 'POSIX stays case-sensitive');
+  } finally { _setPlatformForTest(null); }
 });
