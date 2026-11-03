@@ -5,18 +5,32 @@
 #   tree_src    staged JS tree (device: /data/local/tmp/grz/green-roomz)
 #   runtime_dir destination for the runtime ($HOME/grz-runtime)
 #   tree_dir    destination JS tree, the cut ($HOME/green-roomz)
-# Manifest (sha256sum format): $GRZ_RUNTIME_SUMS or <tree_dir>/config/note9-runtime.SHA256SUMS.
-#   Plain entries are relative to runtime_dir (bin/llama-server, lib/x.so, models/x.gguf).
+# Manifest (sha256sum format): $GRZ_RUNTIME_SUMS or <tree_dir>/config/note9-runtime.SHA256SUMS
+# (the staged copy is verified inside the temp dir, then swapped in with the tree).
+#   Plain entries are relative to runtime_dir (bin/llama-server, bin/libggml.so, models/x.gguf).
 #   Entries prefixed "tree/" are relative to tree_dir (tree/src/gateway.mjs).
 # Trust anchor: GRZ_MANIFEST_SHA256 (operator-supplied out of band) must equal sha256(manifest).
-# Only listed files are copied; any staged file not listed aborts. Also aborts on a
-# missing/empty/out-of-tree manifest, failed copy or hash mismatch.
-# Only escape: GRZ_ALLOW_UNVERIFIED_RUNTIME=1 (loud warning, copies everything unverified).
+# Flow: build both trees in a fresh mktemp -d under $HOME (mode 700), verify there, then
+# swap into place (rename old -> mv new -> rm old). Any failure removes the temp dir and
+# leaves the live runtime/tree untouched. Files in the live tree not in the manifest are
+# gone after the swap. On success $RT/.verified holds the manifest sha256 (runner checks it).
+# Aborts on: unlisted or symlinked staged file, missing/empty/out-of-tree manifest, copy
+# failure, hash mismatch, or non-Termux/toybox realpath/find ahead in PATH.
+# Only escape: GRZ_ALLOW_UNVERIFIED_RUNTIME=1 (loud warning, copies everything, no .verified).
 set -euo pipefail
 umask 077
 STAGE=${1:?stage root}; TSRC=${2:?tree src}; RT=${3:?runtime dir}; TREE=${4:?tree dir}
 MAN_REL=config/note9-runtime.SHA256SUMS
 die() { echo "ERROR: $*" >&2; exit 1; }
+
+# Tools: toybox realpath/find (/system/bin) lack -e / -print0 semantics we rely on.
+if [[ -n ${PREFIX:-} && -x ${PREFIX}/bin/realpath ]]; then REALPATH=$PREFIX/bin/realpath; else REALPATH=realpath; fi
+if [[ -n ${PREFIX:-} && -x ${PREFIX}/bin/find ]]; then FIND=$PREFIX/bin/find; else FIND="find"; fi
+"$REALPATH" --version 2>/dev/null | grep -q coreutils \
+  || die "realpath is not GNU coreutils ($(command -v "$REALPATH" || echo missing)); put Termux \$PREFIX/bin first in PATH (pkg install coreutils)"
+"$FIND" --version 2>/dev/null | grep -q findutils \
+  || die "find is not GNU findutils ($(command -v "$FIND" || echo missing)); put Termux \$PREFIX/bin first in PATH (pkg install findutils)"
+
 UNVERIFIED=0
 unverified() {
   if [[ "${GRZ_ALLOW_UNVERIFIED_RUNTIME:-0}" == 1 ]]; then
@@ -31,26 +45,48 @@ unverified() {
   fi
   die "$*; refusing (GRZ_ALLOW_UNVERIFIED_RUNTIME=1 only with Brian's per-host OK)"
 }
-copy() { # src dst
+
+# Refuse staged symlinks loudly (find -type f would silently skip them).
+for d in "$STAGE/bin" "$STAGE/lib" "$STAGE/models" "$TSRC"; do
+  [[ -L $d ]] && die "staged path $d is a symlink; refusing"
+  [[ -d $d ]] || continue
+  link=$("$FIND" "$d" -type l -print -quit)
+  [[ -z $link ]] || die "staged symlink $link; refusing (symlinks are never installed)"
+done
+
+[[ -n ${HOME:-} && -d $HOME ]] || die "HOME unset or missing"
+WORK=$(mktemp -d "$HOME/.grz-verify.XXXXXX") || die "mktemp under $HOME failed"
+chmod 700 "$WORK"
+# shellcheck disable=SC2329 # invoked via trap
+cleanup() { [[ -n ${WORK:-} ]] && rm -rf -- "$WORK"; }
+trap cleanup EXIT
+NRT=$WORK/rt; NTREE=$WORK/tree
+mkdir -p "$NRT/bin" "$NRT/lib" "$NRT/models" "$NTREE/config"
+
+# copy src -> temp dst. If the live file is byte-identical, copy from the live tree
+# (the cmp-skip path); either way the result is re-hashed and re-chmodded below.
+copy() { # src dst live
   mkdir -p "$(dirname -- "$2")"
-  cmp -s -- "$1" "$2" 2>/dev/null || cp -- "$1" "$2" || die "copy of $1 failed; refusing (no fallback into $STAGE)"
+  if [[ -f $3 && ! -L $3 ]] && cmp -s -- "$1" "$3"; then src=$3; else src=$1; fi
+  cp -- "$src" "$2" || die "copy of $1 failed; refusing (no fallback into $STAGE)"
 }
 
-mkdir -p "$TREE/config" "$RT/bin" "$RT/lib" "$RT/models"
-# Bring in only the manifest first; it is anchored by GRZ_MANIFEST_SHA256 before anything else is trusted.
-[[ -f $TSRC/$MAN_REL ]] && copy "$TSRC/$MAN_REL" "$TREE/$MAN_REL"
-TREE_REAL=$(realpath -e -- "$TREE")
-SUMS_IN=${GRZ_RUNTIME_SUMS:-$TREE_REAL/$MAN_REL}
+[[ -f $TSRC/$MAN_REL ]] && copy "$TSRC/$MAN_REL" "$NTREE/$MAN_REL" "$TREE/$MAN_REL"
+NTREE_REAL=$("$REALPATH" -e -- "$NTREE")
+TREE_REAL=""; [[ -d $TREE ]] && TREE_REAL=$("$REALPATH" -e -- "$TREE")
+SUMS_IN=${GRZ_RUNTIME_SUMS:-$NTREE_REAL/$MAN_REL}
 SUMS=""
-if SUMS_REAL=$(realpath -e -- "$SUMS_IN" 2>/dev/null) && [[ -f $SUMS_REAL ]]; then
+if SUMS_REAL=$("$REALPATH" -e -- "$SUMS_IN" 2>/dev/null) && [[ -f $SUMS_REAL ]]; then
   case "$SUMS_REAL" in
     /data/local/tmp/*|/sdcard/*|/storage/*|/mnt/sdcard/*) die "manifest $SUMS_REAL is on adb/shared storage; refusing" ;;
   esac
-  [[ $SUMS_REAL == "$TREE_REAL"/* ]] || die "manifest $SUMS_REAL is outside the cut tree $TREE_REAL; refusing"
+  [[ $SUMS_REAL == "$NTREE_REAL"/* || ( -n $TREE_REAL && $SUMS_REAL == "$TREE_REAL"/* ) ]] \
+    || die "manifest $SUMS_REAL is outside the cut tree $TREE; refusing"
   SUMS=$SUMS_REAL
 fi
 
 declare -A listed=()
+ACTUAL=""
 if [[ -z $SUMS ]]; then
   unverified "manifest $SUMS_IN missing"
 else
@@ -73,31 +109,46 @@ fi
 
 n=0
 check_listed() { [[ $UNVERIFIED == 1 || -n ${listed[$1]:-} ]] || die "staged file $1 is not listed in the manifest; refusing"; }
-# Runtime: bin/ lib/ models/ under stage root.
 while IFS= read -r -d '' f; do
-  rel=${f#"$STAGE"/}; check_listed "$rel"; copy "$f" "$RT/$rel"; n=$((n+1))
-done < <(find "$STAGE/bin" "$STAGE/lib" "$STAGE/models" -type f -print0 2>/dev/null)
-# JS tree.
+  rel=${f#"$STAGE"/}; check_listed "$rel"; copy "$f" "$NRT/$rel" "$RT/$rel"; n=$((n+1))
+done < <("$FIND" "$STAGE/bin" "$STAGE/lib" "$STAGE/models" -type f -print0 2>/dev/null)
 if [[ -d $TSRC ]]; then
   while IFS= read -r -d '' f; do
     rel=${f#"$TSRC"/}; [[ $rel == "$MAN_REL" ]] && continue
-    check_listed "tree/$rel"; copy "$f" "$TREE/$rel"; n=$((n+1))
-  done < <(find "$TSRC" -type f -not -path '*/.git/*' -print0)
+    check_listed "tree/$rel"; copy "$f" "$NTREE/$rel" "$TREE/$rel"; n=$((n+1))
+  done < <("$FIND" "$TSRC" -type f -not -path '*/.git/*' -print0)
 fi
 echo "copied $n staged files"
 
 if [[ $UNVERIFIED == 0 ]]; then
   fail=0
   for p in "${!listed[@]}"; do
-    if [[ $p == tree/* ]]; then dst=$TREE/${p#tree/}; else dst=$RT/$p; fi
+    if [[ $p == tree/* ]]; then dst=$NTREE/${p#tree/}; else dst=$NRT/$p; fi
     want=$(awk -v p="$p" '($2==p||$2=="*"p)&&$1!~/^#/{print $1; exit}' "$SUMS")
     got=$(sha256sum -- "$dst" 2>/dev/null | cut -d' ' -f1) || got=""
     if [[ $got != "$want" ]]; then echo "FAILED: $p" >&2; fail=1; fi
   done
-  (( fail == 0 )) || die "checksum mismatch against $SUMS; refusing"
+  (( fail == 0 )) || die "checksum mismatch against $SUMS; refusing (live tree untouched)"
   echo "verified ${#listed[@]} files against $SUMS"
+  printf '%s\n' "$ACTUAL" > "$NRT/.verified"
 fi
-for b in "$RT"/bin/llama-server "$RT"/bin/llama-cli "$RT"/bin/llama-bench; do
-  [[ -f $b ]] && chmod 700 "$b"
+# Exec bits after verification, on every path (fresh copy and cmp-skip alike).
+for b in "$NRT"/bin/llama-server "$NRT"/bin/llama-cli "$NRT"/bin/llama-bench; do
+  [[ -f $b ]] && chmod 755 "$b"
 done
+
+swap() { # new live
+  local new=$1 live=$2 old=""
+  mkdir -p "$(dirname -- "$live")"
+  if [[ -e $live || -L $live ]]; then old="$live.old.$$"; mv -- "$live" "$old" || die "cannot move aside $live"; fi
+  if ! mv -- "$new" "$live"; then
+    [[ -n $old ]] && mv -- "$old" "$live"
+    die "swap into $live failed; previous tree restored"
+  fi
+  [[ -n $old ]] && rm -rf -- "$old"
+  return 0
+}
+swap "$NRT" "$RT"
+swap "$NTREE" "$TREE"
+echo "installed runtime $RT and tree $TREE"
 exit 0

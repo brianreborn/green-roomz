@@ -59,9 +59,8 @@ bash "$TREE_SRC/scripts/note9-verify-runtime.sh" "$SRC_TMP" "$TREE_SRC" "$RT" "$
 
 cat > "$RT/run-llama-server.sh" <<'WRAP'
 #!/usr/bin/env bash
-export LD_LIBRARY_PATH="${HOME}/grz-runtime/lib:${HOME}/grz-runtime/bin:${LD_LIBRARY_PATH:-}"
-cd "${HOME}/grz-runtime"
-exec "${HOME}/grz-runtime/bin/llama-server" "$@"
+# Delegates to the cut runner: checks $HOME/grz-runtime/.verified, sets LD_LIBRARY_PATH=$RT/bin.
+exec bash "${HOME}/green-roomz/scripts/note9-run-llama-server.termux.sh" "$@"
 WRAP
 chmod 755 "$RT/run-llama-server.sh"
 
