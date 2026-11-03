@@ -198,7 +198,8 @@ export function stripEscapes(value) {
 }
 
 export function headerSafe(value, maxBytes = 240) {
-  const cleaned = stripControls(value);
+  // BND-02: Node setHeader throws on code points > 0xFF (-> 500); keep header values printable ASCII.
+  const cleaned = stripControls(value).replace(/[^\x20-\x7E]/gu, '?');
   const buf = Buffer.from(cleaned, 'utf8');
   if (buf.length <= maxBytes) return cleaned;
   return buf.subarray(0, maxBytes).toString('utf8').replace(/\uFFFD$/, '');
