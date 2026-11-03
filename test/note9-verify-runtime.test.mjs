@@ -93,7 +93,7 @@ test('NOTE9-PID: pidfile kill only when /proc cmdline matches; pidfile mode 600'
 
 const RUNNER = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'note9-run-llama-server.termux.sh');
 function runRunner(f, env = {}) {
-  const r = spawnSync('bash', [RUNNER, '--version'], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: join(f.root, 'home'), TERMUX_VERSION: '0.118', LD_LIBRARY_PATH: '/evil', GRZ_MANIFEST_SHA256: f.manSha, ...env } });
+  const r = spawnSync('bash', [RUNNER, '--version'], { encoding: 'utf8', env: { PATH: stubGetprop(join(f.root, 'gp28'), 28), HOME: join(f.root, 'home'), TERMUX_VERSION: '0.118', LD_LIBRARY_PATH: '/evil', GRZ_MANIFEST_SHA256: f.manSha, ...env } });
   return { code: r.status, out: r.stdout + r.stderr };
 }
 function installed() {
@@ -213,4 +213,129 @@ test('NOTE9-SETUP: setup never edits verified files (no sed on the manifest; ove
   const text = readFileSync(SETUP, 'utf8');
   assert.doesNotMatch(text.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n'), /\bsed\s/);
   assert.match(text, /OVR="\$STATE\/agents\.note9\.local\.json"/);
+});
+
+// --- N5 SDK strictness, .node addons, refresh/restart via grz.current, log_opt_in -------------
+const SCRIPTS = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts');
+const REPO = join(SCRIPTS, '..');
+test('N5: runner refuses empty or non-numeric getprop output', { skip: !hasBash }, () => {
+  const f = installed();
+  for (const v of ["''", 'abc', '28x']) {
+    const r = runRunner(f, { PATH: stubGetprop(join(f.root, `gp-${v.length}${v[0]}`), v) });
+    assert.notEqual(r.code, 0, v); assert.match(r.out, /empty\/non-numeric.*refusing/, v);
+  }
+});
+test('N5: runner refuses missing getprop when TERMUX_VERSION or PREFIX is set; skips on non-Android', { skip: !hasBash }, () => {
+  const f = installed();
+  const base = process.env.PATH.split(':').filter((d) => !existsSync(join(d, 'getprop'))).join(':');
+  let r = runRunner(f, { PATH: base }); // TERMUX_VERSION set by runRunner
+  assert.notEqual(r.code, 0); assert.match(r.out, /getprop not found but this looks like Termux/);
+  r = runRunner(f, { PATH: base, TERMUX_VERSION: '', PREFIX: '/data/data/com.termux/files/usr' });
+  assert.notEqual(r.code, 0); assert.match(r.out, /getprop not found/);
+  // non-Android: no TERMUX_VERSION/PREFIX -> SDK check skipped (reaches the adb gate instead)
+  const r2 = spawnSync('bash', [RUNNER], { encoding: 'utf8', env: { PATH: base, HOME: f.home } });
+  assert.doesNotMatch(r2.stderr, /getprop/); assert.match(r2.stderr, /GRZ_ADB_DEBUG=1/);
+});
+test('N5: setup refuses empty / non-numeric getprop and missing getprop under Termux; proceeds past the gate off-Android', { skip: !hasBash }, () => {
+  const root = mkdtempSync(join(tmpdir(), 'grz-n5s-'));
+  const base = process.env.PATH.split(':').filter((d) => !existsSync(join(d, 'getprop'))).join(':');
+  let r = spawnSync('bash', [SETUP], { encoding: 'utf8', env: { PATH: stubGetprop(join(root, 'a'), "''"), HOME: root } });
+  assert.notEqual(r.status, 0); assert.match(r.stderr, /empty\/non-numeric/);
+  r = spawnSync('bash', [SETUP], { encoding: 'utf8', env: { PATH: stubGetprop(join(root, 'b'), 'Q'), HOME: root } });
+  assert.notEqual(r.status, 0); assert.match(r.stderr, /empty\/non-numeric/);
+  r = spawnSync('bash', [SETUP], { encoding: 'utf8', env: { PATH: base, HOME: root, TERMUX_VERSION: '0.118' } });
+  assert.notEqual(r.status, 0); assert.match(r.stderr, /getprop not found but this looks like Termux/);
+  r = spawnSync('bash', [SETUP], { encoding: 'utf8', env: { PATH: base, HOME: root } });
+  assert.doesNotMatch(r.stdout + r.stderr, /getprop|API 28/); assert.match(r.stdout + r.stderr, /no green-roomz tree/);
+  assert.equal(existsSync(join(root, '.green-roomz-state', 'logs')), false, 'logs off by default');
+  assert.equal(existsSync(join(root, 'grz-setup.log')), false);
+});
+test('NODE: node_modules + listed .node install inside the hashed tree; unlisted .node refused by verifier', { skip: !hasBash }, () => {
+  let f = fixture({ tree: { 'src/gateway.mjs': 'js', 'node_modules/addon/build/addon.node': 'ELF-NODE', 'node_modules/addon/index.js': 'x' } });
+  let r = run(f); assert.equal(r.code, 0, r.out);
+  assert.equal(readFileSync(join(f.home, `grz.${f.manSha}`, 'tree/node_modules/addon/build/addon.node'), 'utf8'), 'ELF-NODE');
+  assert.equal(existsSync(join(f.home, '.green-roomz-state', 'node_modules')), false);
+  f = fixture({ tree: { 'src/gateway.mjs': 'js' } }); f.put(f.tsrc, 'node_modules/evil/evil.node', 'X');
+  r = run(f); assert.notEqual(r.code, 0); assert.match(r.out, /tree\/node_modules\/evil\/evil\.node is not listed/);
+});
+test('NODE: runner refuses an unlisted .node dropped into the installed tree', { skip: !hasBash }, () => {
+  const f = installed(); chmodSync(join(f.home, `grz.${f.manSha}`), 0o700);
+  f.put(f.dst, 'node_modules/x/x.node', 'X');
+  const r = runRunner(f); assert.notEqual(r.code, 0); assert.match(r.out, /tree\/node_modules\/x\/x\.node \(native addon\) is not listed/);
+});
+
+// Fixture tree carrying the real scripts + src so refresh/restart run end to end (stub serve).
+function realTree(extra = {}) {
+  const tree = { 'bin/green-roomz.mjs': 'console.log("serve-stub", process.argv.slice(2).join(" ")); console.error("serve-stub-err");\n', ...extra };
+  for (const n of ['note9-verify-runtime.sh', 'note9-common.sh', 'note9-serve-pid.sh', 'note9-restart-serve.sh', 'note9-refresh-src.sh', 'note9-run-llama-server.termux.sh']) tree[`scripts/${n}`] = readFileSync(join(SCRIPTS, n), 'utf8');
+  for (const rel of spawnSync('bash', ['-c', 'cd src && find . -type f -name "*.mjs" -printf "%P\\n"'], { cwd: REPO, encoding: 'utf8' }).stdout.trim().split('\n')) tree[`src/${rel}`] = readFileSync(join(REPO, 'src', rel), 'utf8');
+  return fixture({ files: { 'bin/llama-server': 'ELF', 'bin/libggml.so': 'SO' }, tree });
+}
+const envFor = (f, extra = {}) => ({ PATH: process.env.PATH, HOME: f.home, GRZ_MANIFEST_SHA256: f.manSha, GRZ_RESTART_NO_PROBE: '1', ...extra });
+test('REFRESH: goes through verify + flip from the verified tree; bad anchor leaves grz.current unchanged; no cp into tree', { skip: !hasBash }, () => {
+  const f = realTree(); assert.equal(run(f).code, 0);
+  const g = realTree({ 'src/new.mjs': 'export {};\n' });
+  let r = spawnSync('bash', [join(f.dst, 'scripts/note9-refresh-src.sh')], { encoding: 'utf8', env: envFor(f, { GRZ_STAGE_ROOT: g.stage, GRZ_MANIFEST_SHA256: '0'.repeat(64), GRZ_REFRESH_NO_RESTART: '1' }) });
+  assert.notEqual(r.status, 0); assert.equal(readlinkSync(f.cur), `grz.${f.manSha}`);
+  r = spawnSync('bash', [join(f.dst, 'scripts/note9-refresh-src.sh')], { encoding: 'utf8', env: envFor(f, { GRZ_STAGE_ROOT: g.stage, GRZ_MANIFEST_SHA256: g.manSha, GRZ_REFRESH_NO_RESTART: '1' }) });
+  assert.equal(r.status, 0, r.stdout + r.stderr); assert.equal(readlinkSync(f.cur), `grz.${g.manSha}`);
+  assert.ok(existsSync(join(f.home, 'grz.current', 'tree', 'src', 'new.mjs')));
+  r = spawnSync('bash', [join(f.dst, 'scripts/note9-refresh-src.sh')], { encoding: 'utf8', env: envFor(f, { GRZ_STAGE_ROOT: g.stage, GRZ_MANIFEST_SHA256: '' }) });
+  assert.notEqual(r.status, 0); assert.match(r.stderr, /GRZ_MANIFEST_SHA256 unset/);
+  const text = readFileSync(join(SCRIPTS, 'note9-refresh-src.sh'), 'utf8').split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+  assert.doesNotMatch(text, /\bcp\b|\btar\b|grz-runtime|HOME\/green-roomz/);
+});
+test('RESTART: resolves via grz.current (no stored path); refuses when grz.current is missing', { skip: !hasBash }, () => {
+  const f = realTree(); assert.equal(run(f).code, 0);
+  let r = spawnSync('bash', [join(f.dst, 'scripts/note9-restart-serve.sh')], { encoding: 'utf8', env: envFor(f) });
+  assert.equal(r.status, 0, r.stdout + r.stderr); assert.match(r.stdout, new RegExp(`tree=${f.home}/grz\\.${f.manSha}/tree logs=off`));
+  spawnSync('rm', [f.cur]);
+  r = spawnSync('bash', [join(SCRIPTS, 'note9-restart-serve.sh')], { encoding: 'utf8', env: envFor(f) });
+  assert.notEqual(r.status, 0); assert.match(r.stderr, /grz\.current missing/);
+  for (const n of ['note9-restart-serve.sh', 'note9-refresh-src.sh', 'note9-termux-setup.sh', 'note9-enable-external-apps.sh', 'note9-common.sh']) {
+    const t = readFileSync(join(SCRIPTS, n), 'utf8');
+    assert.doesNotMatch(t, /\$HOME\/grz-runtime|\$HOME\/green-roomz\b|GRZ_SDCARD_LOGS/, n);
+  }
+});
+const sleepMs = (ms) => spawnSync('sleep', [String(ms / 1000)]);
+function writeOverride(home, o) {
+  const st = join(home, '.green-roomz-state'); mkdirSync(st, { recursive: true }); chmodSync(st, 0o700);
+  writeFileSync(join(st, 'agents.note9.local.json'), JSON.stringify(o)); chmodSync(join(st, 'agents.note9.local.json'), 0o600);
+}
+test('LOGS: log_opt_in off by default (no files); on -> $STATE/logs/*.log mode 600; never /sdcard', { skip: !hasBash }, () => {
+  const f = realTree(); assert.equal(run(f).code, 0);
+  writeOverride(f.home, { port: 8099, log_opt_in: false });
+  let r = spawnSync('bash', [join(f.dst, 'scripts/note9-restart-serve.sh')], { encoding: 'utf8', env: envFor(f) });
+  assert.equal(r.status, 0, r.stderr); sleepMs(400);
+  assert.equal(existsSync(join(f.home, '.green-roomz-state', 'logs')), false);
+  assert.ok(!readdirSync(f.home).some((n) => n.endsWith('.log')));
+  writeOverride(f.home, { port: 8099, log_opt_in: true });
+  r = spawnSync('bash', [join(f.dst, 'scripts/note9-restart-serve.sh')], { encoding: 'utf8', env: envFor(f) });
+  assert.equal(r.status, 0, r.stderr); sleepMs(600);
+  const logs = join(f.home, '.green-roomz-state', 'logs');
+  assert.equal(statSync(logs).mode & 0o777, 0o700);
+  for (const n of ['serve.out.log', 'serve.err.log']) assert.equal(statSync(join(logs, n)).mode & 0o777, 0o600);
+  assert.match(readFileSync(join(logs, 'serve.out.log'), 'utf8'), /serve-stub .*--port 8099/);
+  for (const n of ['note9-common.sh', 'note9-termux-setup.sh', 'note9-restart-serve.sh', 'note9-refresh-src.sh']) {
+    const code = readFileSync(join(SCRIPTS, n), 'utf8').split('\n').filter((l) => !/^\s*#/.test(l) && !/^SD=/.test(l)).join('\n');
+    assert.doesNotMatch(code, /\/sdcard/, n);
+  }
+});
+test('LOGS: a refused override (mode 644) stops restart instead of defaulting', { skip: !hasBash }, () => {
+  const f = realTree(); assert.equal(run(f).code, 0);
+  writeOverride(f.home, { log_opt_in: true }); chmodSync(join(f.home, '.green-roomz-state', 'agents.note9.local.json'), 0o644);
+  const r = spawnSync('bash', [join(f.dst, 'scripts/note9-restart-serve.sh')], { encoding: 'utf8', env: envFor(f) });
+  assert.notEqual(r.status, 0); assert.match(r.stderr, /must be 600|override refused/);
+});
+test('N6: setup resolves paths via $REALPATH (Termux $PREFIX/bin/realpath), not bare realpath', () => {
+  const t = readFileSync(SETUP, 'utf8').split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+  assert.doesNotMatch(t, /(^|[\s($])realpath\s/m);
+  assert.match(readFileSync(join(SCRIPTS, 'note9-common.sh'), 'utf8'), /REALPATH=\$PREFIX\/bin\/realpath/);
+});
+test('EXT-APPS: enable-external-apps writes status only under the state folder', { skip: !hasBash }, () => {
+  const h = mkdtempSync(join(tmpdir(), 'grz-ext-'));
+  const r = spawnSync('bash', [join(SCRIPTS, 'note9-enable-external-apps.sh')], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: h } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(readFileSync(join(h, '.green-roomz-state', 'ext-apps.status'), 'utf8'), /enabled[\s\S]*DONE/);
+  assert.doesNotMatch(readFileSync(join(SCRIPTS, 'note9-enable-external-apps.sh'), 'utf8'), /data\/local\/tmp\/grz/);
 });

@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 # Portable shebang (NewTermux may use a non-com.termux $PREFIX). Invoke as: bash <script>.sh
 set -e
-ST=/data/local/tmp/grz
+umask 077
+# Status goes to the user-state folder (700), never /data/local/tmp or /sdcard.
+ST="$HOME/.green-roomz-state"
+[[ -L $ST ]] && { echo "ERROR: $ST is a symlink; refusing" >&2; exit 1; }
+mkdir -p "$ST" && chmod 700 "$ST"
 mkdir -p "$HOME/.termux"
 PROP="$HOME/.termux/termux.properties"
 touch "$PROP"
@@ -13,7 +17,6 @@ else
   echo 'allow-external-apps=true' >> "$PROP"
   echo "enabled" | tee "$ST/ext-apps.status"
 fi
-cp "$PROP" "$ST/termux.properties.copy" 2>/dev/null || true
 if command -v termux-reload-settings >/dev/null 2>&1; then
   termux-reload-settings || true
 fi

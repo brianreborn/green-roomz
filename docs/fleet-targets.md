@@ -267,7 +267,7 @@ Landed `b1c034f`. User-facing resident completions do **not** inject `tool-route
 | ADB | `27841130ae1c7ece device` SM-N960U, **no root** |
 | CPU pack | llama.cpp 0.3.0 NDK 29 arm64; backends next to bin |
 | llama-bench 4t | **pp64 36.8** / **tg32 23.8** on 0.5B Q4 |
-| Termux Node | **v26.4.0**; GRZ in `~/green-roomz`; runtime in `~/grz-runtime` |
+| Termux Node | **v26.4.0**; GRZ cut in `~/grz.<sha>/{runtime,tree}` via `~/grz.current`; state in `~/.green-roomz-state` |
 | Gateway | **listening** `127.0.0.1:8080`; `adb forward tcp:18080 tcp:8080` |
 | tool-router-agent | **ready** resident; chat 200 ~4.5 s via forward |
 | Specialists | unavailable (no extra GGUFs) |

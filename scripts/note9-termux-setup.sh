@@ -5,29 +5,20 @@
 # Runtime is copied into $HOME because SELinux blocks executing /data/local/tmp.
 set -uo pipefail
 umask 077
-# Android 9 (API 28) minimum: the runtime is built for NDK API 28. Skipped when getprop is
-# absent (off-device tests).
-if command -v getprop >/dev/null 2>&1; then
-  sdk=$(getprop ro.build.version.sdk 2>/dev/null | tr -d '[:space:]')
-  if [[ $sdk =~ ^[0-9]+$ ]] && (( sdk < 28 )); then
-    echo "ERROR: Android SDK $sdk detected; this build needs Android 9 (API 28) or later" >&2; exit 1
-  fi
-fi
-SD=/sdcard/Download/grz
+SELF_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=note9-common.sh
+. "$SELF_DIR/note9-common.sh"
+# Android 9 (API 28) minimum (NDK API 28 build). See grz_sdk_check: refuses on empty/non-numeric
+# getprop, or missing getprop under Termux; skipped only on non-Android hosts.
+grz_sdk_check || exit 1
+SD=/sdcard/Download/grz   # staged-tree fallback location only; nothing is ever written there
 SRC_TMP=/data/local/tmp/grz
-LOG=$HOME/grz-setup.log
-mkdir -p "$SD" "$HOME"
-# Pre-existing logs may predate umask 077: tighten them.
-for f in "$LOG" "$HOME/grz-serve.out.log" "$HOME/grz-serve.err.log" "$HOME/grz-validate.json" "$HOME/grz-serve.pid"; do
-  [[ -e $f ]] && chmod 600 "$f"
-done
-# /sdcard is shared storage: any app with storage permission can read it.
-# Full logs stay in Termux $HOME (0600); mirror to /sdcard only on explicit opt-in.
-if [[ "${GRZ_SDCARD_LOGS:-0}" == 1 ]]; then
-  exec > >(tee -a "$LOG" | tee -a "$SD/setup.log") 2>&1
-else
-  exec > >(tee -a "$LOG") 2>&1
-fi
+grz_state_init || exit 1
+STATE=$GRZ_STATE
+# Logs: off by default. GRZ_LOG_OPT_IN=1 -> $STATE/logs/*.log (600); never /sdcard.
+LOG_OPT_IN=0; [[ ${GRZ_LOG_OPT_IN:-0} == 1 ]] && LOG_OPT_IN=1
+LOG=$(grz_log_path setup "$LOG_OPT_IN")
+if [[ $LOG != /dev/null ]]; then exec > >(tee -a "$LOG") 2>&1; fi
 echo "=== note9 setup $(date -Is 2>/dev/null || date) ==="
 echo "uid=$(id)"
 echo "HOME=$HOME PREFIX=${PREFIX:-}"
@@ -49,18 +40,14 @@ fi
 echo "node=$(command -v node) $(node -v || true)"
 command -v node >/dev/null || { echo "ERROR: nodejs install failed"; exit 1; }
 
-CUR="$HOME/grz.current"
+CUR="$GRZ_CUR"
 HOME_GRZ="$CUR/tree"
 RT="$CUR/runtime"
-# User state (.git, local config, 0600 override): never inside the versioned folder.
-STATE="$HOME/.green-roomz-state"
-[[ -L $STATE ]] && { echo "ERROR: $STATE is a symlink; refusing"; exit 1; }
-mkdir -p "$STATE" && chmod 700 "$STATE"
 
 # Crash recovery: grz.current must name grz.<sha> whose .verified and manifest agree. If not
 # (crash mid-flip), drop the link so the runner refuses until verify succeeds.
 if [[ -L $CUR ]]; then
-  _d=$(realpath -e -- "$CUR" 2>/dev/null || true); _hex=${_d##*/grz.}
+  _d=$("$REALPATH" -e -- "$CUR" 2>/dev/null || true); _hex=${_d##*/grz.}
   _man="$_d/tree/config/note9-runtime.SHA256SUMS"; _cur=""
   [[ -f $_man ]] && _cur=$(sha256sum < "$_man" | cut -d' ' -f1)
   _st=""; [[ -f $_d/.verified ]] && _st=$(tr -d '[:space:]' < "$_d/.verified")
@@ -94,7 +81,7 @@ MAN="$HOME_GRZ/config/agents.note9.json"
 PORT=${GRZ_PORT:-8080}
 [[ $PORT =~ ^[0-9]+$ ]] || { echo "ERROR: GRZ_PORT must be numeric"; exit 1; }
 OVR="$STATE/agents.note9.local.json"
-GRZ_OVR_PORT=$PORT GRZ_OVR_LOG="${GRZ_SDCARD_LOGS:-0}" GRZ_OVR_OUT="$OVR" node -e '
+GRZ_OVR_PORT=$PORT GRZ_OVR_LOG="$LOG_OPT_IN" GRZ_OVR_OUT="$OVR" node -e '
 const fs = require("fs");
 const o = { port: Number(process.env.GRZ_OVR_PORT), log_opt_in: process.env.GRZ_OVR_LOG === "1" };
 const out = process.env.GRZ_OVR_OUT, tmp = out + ".tmp." + process.pid;
@@ -106,22 +93,22 @@ fs.renameSync(tmp, out);
 test -f "$HOME_GRZ/bin/green-roomz.mjs"
 test -f "$MAN"
 
-export GRZ_ROOT="$HOME_GRZ"
+grz_resolve_current || exit 1
+export GRZ_ROOT="$GRZ_TREE"
 unset LD_LIBRARY_PATH  # the runner sets exactly runtime/bin
-cd "$HOME_GRZ" || exit 1
+cd "$GRZ_TREE" || exit 1
 
 echo "=== validate ==="
-node ./bin/green-roomz.mjs validate --manifest ./config/agents.note9.json | tee "$HOME/grz-validate.json"
+VAL=$(grz_log_path validate "$LOG_OPT_IN")
+node ./bin/green-roomz.mjs validate --manifest ./config/agents.note9.json | tee -a "$VAL"
 
 # shellcheck source=note9-serve-pid.sh
-. "$HOME_GRZ/scripts/note9-serve-pid.sh"
+. "$GRZ_TREE/scripts/note9-serve-pid.sh"
 grz_stop_serve
 
 echo "=== serve ==="
-nohup node ./bin/green-roomz.mjs serve --manifest ./config/agents.note9.json --host 127.0.0.1 --port "$PORT" \
-  >"$HOME/grz-serve.out.log" 2>"$HOME/grz-serve.err.log" &
-echo "serve_pid=$!"
-grz_write_pid "$!"
+grz_serve_start "$PORT" "$LOG_OPT_IN"
+echo "serve_pid=$GRZ_SERVE_PID"
 
 ok=0
 for _ in $(seq 1 90); do
@@ -135,9 +122,5 @@ done
 echo "gateway_ready=$ok"
 if [[ "$ok" -eq 1 ]]; then
   node -e "fetch('http://127.0.0.1:$PORT/v1/models').then(async r=>console.log(await r.text())).catch(e=>console.error(e))" || true
-fi
-if [[ "${GRZ_SDCARD_LOGS:-0}" == 1 ]]; then
-  cp "$HOME/grz-serve.out.log" "$SD/serve.out.log" 2>/dev/null || true
-  cp "$HOME/grz-serve.err.log" "$SD/serve.err.log" 2>/dev/null || true
 fi
 echo "=== DONE ok=$ok ==="

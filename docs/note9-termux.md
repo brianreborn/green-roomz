@@ -28,9 +28,10 @@ Pack on shalom: `C:\LocalAI\android-pack\arm64-v8a` (~219 MB). Model: `C:\LocalA
 | path | who | role |
 |---|---|---|
 | `/data/local/tmp/grz` | `shell` 777 | adb drop zone (bin/lib/models + scripts). **SELinux: Termux cannot execute here.** |
-| `~/grz-runtime` | Termux | copied ELF + wrap `run-llama-server.sh` (this is what GRZ spawns) |
-| `~/green-roomz` | Termux | JS tree, manifest `config/agents.note9.json` |
-| `/sdcard/Download/grz` | sdcard_rw | `serve.pid`, status markers; full logs only with `GRZ_SDCARD_LOGS=1` (shared storage is readable by other apps) |
+| `~/grz.<manifest-sha>/` | Termux (700) | one verified cut: `runtime/` (bin/lib/models), `tree/` (JS tree, `config/agents.note9.json`), `.verified` |
+| `~/grz.current` | Termux | the only symlink: → `grz.<sha>`; flipped by `ln -s` tmp + `mv -T` after verify |
+| `~/.green-roomz-state/` | Termux (700) | user state, never hashed or copied: `agents.note9.local.json` override (600), `logs/` (opt-in, 600), `ext-apps.status` |
+| `/sdcard/Download/grz` | sdcard_rw | optional staged-tree drop only; **nothing is written here** (no logs, no pidfile) |
 
 Gateway: Termux `node` `127.0.0.1:8080`. From shalom: `adb forward tcp:18080 tcp:8080` then `http://127.0.0.1:18080`.
 
@@ -40,8 +41,8 @@ Resident **tool-router-agent** `:8187` is the only GGUF on the phone. Other alia
 
 - `/sdcard` is `noexec` and `rw-rw----` until `termux-setup-storage`.
 - `bash /sdcard/.../enable-ext.sh` → **Permission denied** (read).
-- `[[ -x /data/local/tmp/grz/bin/run-llama-server.sh ]]` fails under Termux even when the file is `755`: **SELinux `untrusted_app` cannot execute `/data/local/tmp`**. Copy runtime into `$HOME/grz-runtime`.
-- Termux also cannot **write** `/data/local/tmp` (status files). Logs go to `$HOME` (app-private); set `GRZ_SDCARD_LOGS=1` to also mirror them to `/sdcard/Download/grz`.
+- `[[ -x /data/local/tmp/grz/bin/run-llama-server.sh ]]` fails under Termux even when the file is `755`: **SELinux `untrusted_app` cannot execute `/data/local/tmp`**. Runtime is verified and installed into `$HOME/grz.<sha>/runtime`.
+- Termux also cannot **write** `/data/local/tmp` (status files). Logs are **off by default**; `GRZ_LOG_OPT_IN=1` at setup sets `log_opt_in` in the override, and logs then go to `~/.green-roomz-state/logs/*.log` (600). Never `/sdcard`.
 
 ## ADB / Termux automation (do not race)
 
@@ -51,19 +52,21 @@ Resident **tool-router-agent** `:8187` is the only GGUF on the phone. Other alia
 - Dump UI first: `uiautomator dump` and read `com.termux:id/terminal_view` `content-desc`.
 - Type `ba` then `sh` then `%s/data/local/tmp/grz/setup.sh`. Never toggle CTRL unless you mean Ctrl-C.
 
-`allow-external-apps=true` was written to `~/.termux/termux.properties` (script printed `enabled`; writing status into tmp failed).
+`allow-external-apps=true` was written to `~/.termux/termux.properties` (status now written to `~/.green-roomz-state/ext-apps.status`).
 
 ## Scripts in this repo
 
 | file | use |
 |---|---|
-| `config/agents.note9.json` | Termux manifest (`${HOME}/grz-runtime/…`) |
-| `scripts/note9-termux-setup.sh` | pkg nodejs, copy runtime into `$HOME`, validate, serve |
+| `config/agents.note9.json` | Termux manifest (`${HOME}/grz.current/runtime/…`; runtime command = tree's runner) |
+| `scripts/note9-termux-setup.sh` | pkg nodejs, verify + flip, write override, validate, serve |
+| `scripts/note9-common.sh` | sourced: SDK gate, `$REALPATH`, resolve `grz.current`, override port/log_opt_in, serve start |
+| `scripts/note9-refresh-src.sh` | new cut via the verified tree's verifier + flip (needs `GRZ_MANIFEST_SHA256`); then restart. Copies nothing into the tree |
 | `scripts/note9-enable-external-apps.sh` | `allow-external-apps=true` |
-| `scripts/note9-restart-serve.sh` | copy `src/memory.mjs`, kill pidfile, serve |
-| `scripts/note9-run-llama-server.termux.sh` | example wrap (device copy lives in `$HOME/grz-runtime`) |
+| `scripts/note9-restart-serve.sh` | kill pidfile, serve from `grz.current` (no stored path) |
+| `scripts/note9-run-llama-server.termux.sh` | release runner, run from the hashed tree |
 
-Push scripts with `adb push` to `/data/local/tmp/grz/` (`chmod 644`) and run **`bash /data/local/tmp/grz/setup.sh`** from a Termux prompt (bash reads tmp; it does not exec the file bit). All `scripts/note9-*.sh` use `#!/usr/bin/env bash` (works under Termux and NewTermux with termux-exec); always invoke them as `bash script.sh`. `note9-run-llama-server.termux.sh` runs the `$HOME/grz-runtime` copy under Termux and the `/data/local/tmp` path only as adb `shell` (adb-only). Setup options: `GRZ_PRUNE_APT_SOURCES=1` (removes game/science/unstable apt lists; persistent, needs Brian's per-host OK), `GRZ_RUNTIME_SUMS=<file>` (sha256sum -c against `$HOME/grz-runtime`, refuses on mismatch; also auto-used if `/workspace/reviews/release/note9-runtime-SHA256SUMS` exists).
+Push scripts with `adb push` to `/data/local/tmp/grz/` (`chmod 644`) and run **`bash /data/local/tmp/grz/setup.sh`** from a Termux prompt (bash reads tmp; it does not exec the file bit). All `scripts/note9-*.sh` use `#!/usr/bin/env bash` (works under Termux and NewTermux with termux-exec); always invoke them as `bash script.sh`. `note9-run-llama-server.termux.sh` runs `grz.current/runtime` under Termux and the `/data/local/tmp` path only as adb `shell` with `GRZ_ADB_DEBUG=1`. Setup options: `GRZ_PRUNE_APT_SOURCES=1` (persistent, needs Brian's per-host OK), `GRZ_PORT`, `GRZ_LOG_OPT_IN=1`. Android 9 (API 28)+ required: setup/runner refuse on SDK < 28, on empty/non-numeric `getprop`, or when `getprop` is missing under Termux; the check is skipped only on non-Android hosts.
 
 ## RAM admission
 
@@ -81,13 +84,12 @@ Push scripts with `adb push` to `/data/local/tmp/grz/` (`chmod 644`) and run **`
 
 `scripts/note9-termux-setup.sh` never executes anything from `/data/local/tmp/grz`.
 `scripts/note9-verify-runtime.sh` copies **only files listed** in the in-cut manifest
-`config/note9-runtime.SHA256SUMS` into `$HOME/grz-runtime` (native runtime: `bin/`, `lib/`,
-`models/`) and `$HOME/green-roomz` (entries prefixed `tree/`), then checks every sha256.
+`config/note9-runtime.SHA256SUMS` into a temp dir, checks every sha256, then installs it as
+`$HOME/grz.<sha>/{runtime,tree}` and flips `grz.current`. `node_modules` (incl. `*.node`) must
+be in the hashed tree and listed; the runner also refuses any unlisted `*.node`.
 
 Setup aborts when:
-- the manifest is missing, empty (the shipped placeholder), or resolves (realpath) outside
-  `$HOME/green-roomz` — `GRZ_RUNTIME_SUMS` may override the path but only inside the cut tree;
-  `/data/local/tmp` and `/sdcard` are always refused;
+- the manifest (taken only from the staged tree) is missing or empty (the shipped placeholder);
 - `GRZ_MANIFEST_SHA256` is unset or differs from the manifest's sha256 (the actual hash is printed);
 - any staged file is not listed, any copy fails (no symlink fallback), or any hash mismatches.
 
@@ -107,4 +109,4 @@ Use only with Brian's per-host OK.
 
 **Serve process:** setup/restart track serve in `$HOME/grz-serve.pid` (mode 600) and kill
 only if `/proc/<pid>/cmdline` still matches `bin/green-roomz.mjs serve`. No `pkill -f`.
-Source updates go through `note9-refresh-src.sh`; `note9-restart-serve.sh` only restarts.
+Source updates go through `note9-refresh-src.sh` (verify + flip, never an in-place copy); `note9-restart-serve.sh` only restarts, resolving `grz.current`.

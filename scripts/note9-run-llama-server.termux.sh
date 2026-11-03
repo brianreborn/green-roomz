@@ -10,10 +10,16 @@
 set -eu
 : "${LANG:=C.UTF-8}"; export LANG
 die() { echo "ERROR: $*" >&2; exit 1; }
-# Android 9 (API 28) minimum; skipped when getprop is absent (off-device tests).
+# Android 9 (API 28) minimum. getprop present: must print a number >= 28 (empty/non-numeric
+# refuses). getprop missing: refuse under Termux ($PREFIX/$TERMUX_VERSION); skip on non-Android.
 if command -v getprop >/dev/null 2>&1; then
   sdk=$(getprop ro.build.version.sdk 2>/dev/null | tr -d '[:space:]')
-  case "$sdk" in ''|*[!0-9]*) ;; *) [ "$sdk" -ge 28 ] || die "Android SDK $sdk detected; this build needs Android 9 (API 28) or later" ;; esac
+  case "$sdk" in
+    ''|*[!0-9]*) die "getprop ro.build.version.sdk returned '$sdk' (empty/non-numeric); cannot confirm Android 9 (API 28) or later; refusing" ;;
+    *) [ "$sdk" -ge 28 ] || die "Android SDK $sdk detected; this build needs Android 9 (API 28) or later" ;;
+  esac
+elif [ -n "${PREFIX:-}" ] || [ -n "${TERMUX_VERSION:-}" ]; then
+  die "getprop not found but this looks like Termux (PREFIX/TERMUX_VERSION set); cannot confirm Android 9 (API 28) or later; refusing"
 fi
 is_termux=0
 [ -n "${TERMUX_VERSION:-}" ] && is_termux=1
@@ -58,6 +64,11 @@ if [ "$is_termux" = 1 ]; then
     rel=${f#"$RT"/}
     [ -n "${listed[$rel]:-}" ] || die "$rel is not listed in $MAN; refusing to start"
   done
+  # Native node addons (node_modules/**/*.node) must live in the hashed tree and be listed.
+  while IFS= read -r -d '' f; do
+    rel=tree/${f#"$D"/tree/}
+    [ -n "${listed[$rel]:-}" ] || die "$rel (native addon) is not listed in $MAN; refusing to start"
+  done < <("$FIND" "$D/tree" -name '*.node' -type f -print0 2>/dev/null)
   export LD_LIBRARY_PATH="$RT/bin"
   cd "$RT"
   exec "$RT/bin/llama-server" "$@"
