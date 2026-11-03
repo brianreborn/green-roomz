@@ -6,6 +6,7 @@
 #   <64-hex>  tree/src/gateway.mjs
 # Trust anchor: operator passes GRZ_MANIFEST_SHA256=<sha256 of this file> out of band.
 # Generate with scripts/note9-gen-manifest.sh.
+# npm-deps: none
 # Runtime pin: llama.cpp b11969 (c3df4b7), source of truth code-bootstraps-llama.cpp
 #   config/llama-pin.env:4 (LLAMA_TAG=b11969). arm64-v8a, armv8-a baseline, no SVE/i8mm, NDK r29.
 #   Build tarball note9-runtime-b11969.tar.gz sha256

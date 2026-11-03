@@ -5,7 +5,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, symlinkSync, chmod
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { loadManifest, readHostOverride, validateHostOverride, hostOverridePath, isSharedStorage, sharedStoragePrefixes, apiKeyFileIssues } from '../src/config.mjs';
+import { loadManifest, readHostOverride, validateHostOverride, hostOverridePath, isSharedStorage, sharedStoragePrefixes, apiKeyFileIssues, readApiKeyFile } from '../src/config.mjs';
 import { execFileSync } from 'node:child_process';
 import { Gateway } from '../src/gateway.mjs';
 
@@ -49,13 +49,13 @@ test('SD-21: api_key_file realpath/lstat/mode/uid checks', () => {
   const { h, st } = home(undefined);
   const key = join(st, 'key'); writeFileSync(key, 'sekrit\n'); chmodSync(key, 0o600);
   assert.equal(validateHostOverride({ api_key_file: key }, { HOME: h }).api_key_file, key);
-  chmodSync(key, 0o400); assert.deepEqual(apiKeyFileIssues(key, { HOME: h }), []);
-  chmodSync(key, 0o640); refused(() => validateHostOverride({ api_key_file: key }, { HOME: h }), /must be 600 or 400/);
+  chmodSync(key, 0o400); assert.equal(readApiKeyFile(key, { HOME: h }), 'sekrit');
+  chmodSync(key, 0o640); refused(() => readApiKeyFile(key, { HOME: h }), /must be 600 or 400/);
   chmodSync(key, 0o600);
   const link = join(st, 'keylink'); symlinkSync(key, link);
   refused(() => validateHostOverride({ api_key_file: link }, { HOME: h }), /symlink/);
   const d = join(st, 'kdir'); mkdirSync(d); chmodSync(d, 0o600);
-  refused(() => validateHostOverride({ api_key_file: d }, { HOME: h }), /not a regular file/);
+  refused(() => readApiKeyFile(d, { HOME: h }), /not a regular file/);
   refused(() => validateHostOverride({ api_key_file: join(st, 'missing') }, { HOME: h }), /does not exist/);
   // intermediate dir symlinked out of HOME: realpath catches it
   const out = mkdtempSync(join(tmpdir(), 'grz-out-')); writeFileSync(join(out, 'k'), 'x'); chmodSync(join(out, 'k'), 0o600);
@@ -121,4 +121,48 @@ test('OVR: absent override and absent state dir are fine', async () => {
   const h = mkdtempSync(join(tmpdir(), 'grz-ovr-none-'));
   const m = await loadManifest(BASE, { ...process.env, HOME: h });
   assert.equal(m._meta.hostOverride, null);
+});
+
+test('SD-21: allowlist is primary — $HOME reached via a symlinked prefix (/data/user/0 -> /data/data) passes', () => {
+  const t = mkdtempSync(join(tmpdir(), 'grz-du-'));
+  const realHome = join(t, 'data', 'data', 'com.example', 'files', 'home'); mkdirSync(join(realHome, '.green-roomz-state'), { recursive: true });
+  mkdirSync(join(t, 'data', 'user'), { recursive: true }); symlinkSync(join(t, 'data', 'data'), join(t, 'data', 'user', '0'));
+  const home = join(t, 'data', 'user', '0', 'com.example', 'files', 'home');
+  const key = join(home, '.green-roomz-state', 'key'); writeFileSync(key, 'tok\n'); chmodSync(key, 0o600);
+  assert.deepEqual(apiKeyFileIssues(key, { HOME: home }), []);
+  assert.equal(validateHostOverride({ api_key_file: key }, { HOME: home }).api_key_file, key);
+  assert.equal(readApiKeyFile(key, { HOME: home }), 'tok');
+  // shell helper agrees (allowlist under realpath(HOME), deny list second)
+  const sh = (k) => execFileSync('bash', ['-c', `source "${join(ROOT, 'scripts', 'note9-shared-storage.sh')}"; grz_key_path_ok "$1" && echo y || echo n`, 'x', k], { env: { ...process.env, HOME: home } }).toString().trim();
+  assert.equal(sh(key), 'y');
+  const out = join(t, 'outside'); writeFileSync(out, 'x'); chmodSync(out, 0o600);
+  assert.equal(sh(out), 'n'); assert.match(apiKeyFileIssues(out, { HOME: home })[0], /outside \$HOME/);
+});
+test('SD-21: key file opened once with O_NOFOLLOW; fstat on that fd; read through it', () => {
+  const { h, st } = home(undefined);
+  const key = join(st, 'key'); writeFileSync(key, 'abc\n'); chmodSync(key, 0o600);
+  const src = readFileSync(join(ROOT, 'src', 'config.mjs'), 'utf8');
+  const body = src.slice(src.indexOf('export function readApiKeyFile'), src.indexOf('export const HOST_OVERRIDE_MAX_BYTES'));
+  assert.equal((body.match(/openSync\(/g) || []).length, 1); assert.match(body, /O_NOFOLLOW/);
+  assert.match(body, /fstatSync\(fd\)/); assert.match(body, /readFileSync\(fd/);
+  assert.doesNotMatch(body.replace(/readFileSync\(fd/g, ''), /readFileSync\(|statSync\((?!fd)/);
+  assert.equal(readApiKeyFile(key, { HOME: h }), 'abc');
+  // final component swapped for a symlink after validation: O_NOFOLLOW refuses (ELOOP)
+  const real2 = join(st, 'k2'); writeFileSync(real2, 'z'); chmodSync(real2, 0o600);
+  const link = join(st, 'lnk'); symlinkSync(real2, link);
+  refused(() => readApiKeyFile(link, { HOME: h }), /symlink/);
+  const gw = readFileSync(join(ROOT, 'src', 'gateway.mjs'), 'utf8');
+  assert.match(gw, /return readApiKeyFile\(file, /);
+});
+test('SD-27: duplicate keys counted after decoding (escaped and nested cases)', async () => {
+  const { duplicateKeys } = await import('../src/config.mjs');
+  assert.deepEqual(duplicateKeys('{"port":1,"\\u0070ort":2}'), ['port']);
+  assert.deepEqual(duplicateKeys('{"a":"\\"b\\": 1, \\"b\\":","b":1}'), []);
+  assert.deepEqual(duplicateKeys('{"a":{"x":1},"b":{"x":2}}'), []);
+  assert.deepEqual(duplicateKeys('{"a":[{"x":1,"x":2}]}'), ['x']);
+  let { h, f } = home(undefined);
+  writeFileSync(f, '{"log_opt_in": false, "log_opt\\u005fin": true}'); chmodSync(f, 0o600);
+  refused(() => readHostOverride(f, { HOME: h }), /duplicate keys: log_opt_in/);
+  const src = readFileSync(join(ROOT, 'src', 'config.mjs'), 'utf8');
+  assert.doesNotMatch(src, /matchAll\(\/"\(\(\?:/); // raw-text key regex is gone
 });

@@ -14,7 +14,8 @@
 #   bin/libggml.so, models/x.gguf); "tree/" entries are relative to tree/.
 # Trust anchor: GRZ_MANIFEST_SHA256 (operator-supplied out of band) must equal sha256(manifest).
 # Install lock: mkdir $HOME/.grz-install.lock (SD-24); a lock whose pid is dead is taken over.
-# Startup sweep (SD-20): only real dirs named grz.<64hex>.old.<n> or .grz-verify.XXXXXX (ours);
+# Startup sweep (SD-20): only real dirs named grz.<64hex>.old.<n>, grz.unverified.<t>.<p>.old.<n>
+#   or .grz-verify.XXXXXX (ours);
 #   never a bare *.old.*, never a symlink.
 # Same sha already current and intact (SD-25): no copy, no flip.
 # After the flip: keep current + the previous one named by the install record
@@ -67,6 +68,11 @@ for d in "$STAGE/bin" "$STAGE/lib" "$STAGE/models" "$TSRC"; do
   [[ -z $link ]] || die "staged symlink $link; refusing (symlinks are never installed)"
 done
 
+# npm-deps: none (package.json has no runtime deps): any node_modules dir is refused.
+if [[ -d $TSRC ]]; then
+  nm=$("$FIND" "$TSRC" -name node_modules -not -path '*/.git/*' -print -quit)
+  [[ -z $nm ]] || die "node_modules present in staged tree ($nm); npm-deps: none; refusing"
+fi
 [[ -n ${HOME:-} && -d $HOME ]] || die "HOME unset or missing"
 HOME_REAL=$("$REALPATH" -e -- "$HOME")
 CUR=$HOME_REAL/grz.current
@@ -78,16 +84,21 @@ STATE=$HOME_REAL/.green-roomz-state
 [[ -L $STATE ]] && die "$STATE is a symlink; refusing"
 [[ -d $STATE ]] || mkdir -m 700 -- "$STATE" || die "cannot create $STATE"
 HIST=$STATE/install-history
-# SD-24: one install at a time.
+# SD-24/SD-26: one install at a time. mkdir is the atomic acquire. A held lock with a live or
+# EMPTY pid (owner may not have written it yet) is refused; a dead pid's lock is renamed aside
+# atomically (mv -T) before a fresh mkdir, so two takers cannot both win.
 LOCK=$HOME_REAL/.grz-install.lock
 if ! mkdir -m 700 -- "$LOCK" 2>/dev/null; then
-  [[ -L $LOCK ]] && die "$LOCK is a symlink; refusing"
+  [[ -L $LOCK || ! -d $LOCK ]] && die "$LOCK is not a plain directory; refusing"
   owner=$(cat -- "$LOCK/pid" 2>/dev/null || true)
-  if [[ $owner =~ ^[0-9]+$ ]] && kill -0 "$owner" 2>/dev/null; then
-    die "another install (pid $owner) holds $LOCK; refusing"
-  fi
-  echo "taking over stale lock $LOCK (pid ${owner:-?} gone)" >&2
-  rm -rf -- "$LOCK"; mkdir -m 700 -- "$LOCK" || die "cannot take $LOCK"
+  [[ -n $owner ]] || die "$LOCK held (pid not written yet); refusing"
+  [[ $owner =~ ^[0-9]+$ ]] || die "$LOCK has a bad pid '$owner'; refusing"
+  kill -0 "$owner" 2>/dev/null && die "another install (pid $owner) holds $LOCK; refusing"
+  ASIDE=$HOME_REAL/.grz-install.lock.stale.$$
+  "$MV" -T -- "$LOCK" "$ASIDE" 2>/dev/null || die "lost the race to take over $LOCK; refusing"
+  echo "taking over stale lock $LOCK (pid $owner gone)" >&2
+  rm -rf -- "$ASIDE"
+  mkdir -m 700 -- "$LOCK" 2>/dev/null || die "another install took $LOCK first; refusing"
 fi
 echo $$ > "$LOCK/pid"
 WORK=""
@@ -99,7 +110,7 @@ shopt -s nullglob
 for stale in "$HOME_REAL"/grz.*.old.* "$HOME_REAL"/.grz-verify.*; do
   n=${stale##*/}
   [[ -d $stale && ! -L $stale ]] || continue
-  [[ $n =~ ^grz\.[0-9a-f]{64}\.old\.[0-9]+$ || $n =~ ^\.grz-verify\.[A-Za-z0-9]{6}$ ]] || continue
+  [[ $n =~ ^grz\.([0-9a-f]{64}|unverified\.[0-9]+\.[0-9]+)\.old\.[0-9]+$ || $n =~ ^\.grz-verify\.[A-Za-z0-9]{6}$ ]] || continue
   echo "sweeping stale $stale" >&2; rm -rf -- "$stale"
 done
 shopt -u nullglob

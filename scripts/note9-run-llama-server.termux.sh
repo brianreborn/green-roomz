@@ -39,9 +39,12 @@ if [ "$is_android" = 1 ]; then
   # shellcheck source=note9-shared-storage.sh
   . "$D/tree/scripts/note9-shared-storage.sh" || die "shared-storage helper missing in $D/tree; refusing"
   if grz_is_shared_storage "$D"; then die "$D is on shared storage; refusing"; fi
+  if [ -n "${PREFIX:-}" ] && [ -x "$PREFIX/bin/find" ]; then FIND=$PREFIX/bin/find; else FIND="find"; fi
+  # npm-deps: none: any node_modules dir in the installed tree is refused.
+  nm=$("$FIND" "$D/tree" -name node_modules -print -quit 2>/dev/null)
+  [ -z "$nm" ] || die "node_modules present in $D/tree ($nm); npm-deps: none; refusing"
   RT=$D/runtime
   MAN=$D/tree/config/note9-runtime.SHA256SUMS
-  if [ -n "${PREFIX:-}" ] && [ -x "$PREFIX/bin/find" ]; then FIND=$PREFIX/bin/find; else FIND="find"; fi
   link=$("$FIND" "$D" -type l -print -quit 2>/dev/null)
   [ -z "$link" ] || die "symlink $link inside $D; refusing (only grz.current may be a symlink)"
   [ -x "$RT/bin/llama-server" ] || die "$RT/bin/llama-server missing or not executable"

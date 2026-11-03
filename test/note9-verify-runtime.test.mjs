@@ -263,18 +263,15 @@ test('N5: setup refuses empty / non-numeric getprop and missing getprop under Te
   assert.equal(existsSync(join(root, '.green-roomz-state', 'logs')), false, 'logs off by default');
   assert.equal(existsSync(join(root, 'grz-setup.log')), false);
 });
-test('NODE: node_modules + listed .node install inside the hashed tree; unlisted .node refused by verifier', { skip: !hasBash }, () => {
-  let f = fixture({ tree: { 'src/gateway.mjs': 'js', 'node_modules/addon/build/addon.node': 'ELF-NODE', 'node_modules/addon/index.js': 'x' } });
-  let r = run(f); assert.equal(r.code, 0, r.out);
-  assert.equal(readFileSync(join(f.home, `grz.${f.manSha}`, 'tree/node_modules/addon/build/addon.node'), 'utf8'), 'ELF-NODE');
-  assert.equal(existsSync(join(f.home, '.green-roomz-state', 'node_modules')), false);
-  f = fixture({ tree: { 'src/gateway.mjs': 'js' } }); f.put(f.tsrc, 'node_modules/evil/evil.node', 'X');
-  r = run(f); assert.notEqual(r.code, 0); assert.match(r.out, /tree\/node_modules\/evil\/evil\.node is not listed/);
+test('NODE: npm-deps none — node_modules (even with a listed .node) is refused by the verifier', { skip: !hasBash }, () => {
+  const f = fixture({ tree: { 'src/gateway.mjs': 'js', 'node_modules/addon/build/addon.node': 'ELF-NODE', 'node_modules/addon/index.js': 'x' } });
+  const r = run(f); assert.notEqual(r.code, 0); assert.match(r.out, /node_modules present/);
+  assert.equal(existsSync(join(f.home, `grz.${f.manSha}`)), false);
 });
-test('NODE: runner refuses an unlisted .node dropped into the installed tree', { skip: !hasBash }, () => {
+test('NODE: runner refuses an unlisted .node dropped into the installed tree (outside node_modules too)', { skip: !hasBash }, () => {
   const f = installed(); chmodSync(join(f.home, `grz.${f.manSha}`), 0o700);
-  f.put(f.dst, 'node_modules/x/x.node', 'X');
-  const r = runRunner(f); assert.notEqual(r.code, 0); assert.match(r.out, /tree\/node_modules\/x\/x\.node \(native addon\) is not listed/);
+  f.put(f.dst, 'src/x.node', 'X');
+  const r = runRunner(f); assert.notEqual(r.code, 0); assert.match(r.out, /tree\/src\/x\.node \(native addon\) is not listed/);
 });
 
 // Fixture tree carrying the real scripts + src so refresh/restart run end to end (stub serve).
@@ -416,4 +413,120 @@ test('SD-21: setup refuses a $HOME on shared storage; runner refuses a current d
   writeFileSync(p2, `${f.home}\n`);
   const rr = spawnSync('bash', [join(f.cur, 'tree', 'scripts', 'note9-run-llama-server.termux.sh'), '--version'], { encoding: 'utf8', env: { PATH: stubGetprop(join(f.root, 'gpx'), 28), HOME: f.home, TERMUX_VERSION: '0.118', GRZ_MANIFEST_SHA256: f.manSha, GRZ_SHARED_PREFIXES_EXTRA: p2 } });
   assert.notEqual(rr.status, 0); assert.match(rr.stderr, /on shared storage; refusing/);
+});
+
+test('SD-22 (= N5a): on Android, empty / non-numeric / missing getprop refused in BOTH setup and runner', { skip: !hasBash }, () => {
+  const f = installed();
+  const base = process.env.PATH.split(':').filter((d) => !existsSync(join(d, 'getprop'))).join(':');
+  const un = stubUname(join(f.root, 'sd22-un'));
+  const cases = [
+    ['empty', (d) => stubGetprop(d, "''"), /empty\/non-numeric/],
+    ['non-numeric', (d) => stubGetprop(d, 'Q'), /empty\/non-numeric/],
+    ['missing', () => base, /getprop not found but this is Android/],
+  ];
+  for (const [name, mk, re] of cases) {
+    for (const android of [{ TERMUX_VERSION: '0.118' }, { TERMUX_VERSION: '', unamePath: un }]) {
+      const p = mk(join(f.root, `sd22-${name}-${android.unamePath ? 'u' : 't'}`));
+      const PATH = android.unamePath ? `${android.unamePath}:${p}` : p;
+      const env = { TERMUX_VERSION: android.TERMUX_VERSION };
+      const rr = runRunner(f, { PATH, ...env });
+      assert.notEqual(rr.code, 0, `runner ${name}`); assert.match(rr.out, re, `runner ${name}`);
+      const sh = mkdtempSync(join(tmpdir(), 'grz-sd22-'));
+      const rs = spawnSync('bash', [SETUP], { encoding: 'utf8', env: { PATH, HOME: sh, ...env } });
+      assert.notEqual(rs.status, 0, `setup ${name}`); assert.match(rs.stderr, re, `setup ${name}`);
+    }
+  }
+});
+
+test('PACK: release tarball is deterministic, holds setup+verifier+helpers+manifest, prints both shas; setup uses its own verifier', { skip: !hasBash }, () => {
+  const t = mkdtempSync(join(tmpdir(), 'grz-pack-'));
+  const pack = join(SCRIPTS, 'note9-pack-release.sh');
+  const a = spawnSync('bash', [pack, join(t, 'a.tar.gz')], { encoding: 'utf8' });
+  assert.equal(a.status, 0, a.stderr);
+  const b = spawnSync('bash', [pack, join(t, 'b.tar.gz')], { encoding: 'utf8', env: { ...process.env, TZ: 'Asia/Tokyo', LC_ALL: 'C' } });
+  assert.equal(readFileSync(join(t, 'a.tar.gz')).equals(readFileSync(join(t, 'b.tar.gz'))), true, 'byte-identical');
+  const tsha = sha(readFileSync(join(t, 'a.tar.gz')));
+  assert.match(a.stdout, new RegExp(`tarball  sha256=${tsha}`));
+  assert.match(a.stdout, new RegExp(`manifest sha256=${sha(readFileSync(join(REPO, 'config', 'note9-runtime.SHA256SUMS')))}`));
+  const list = spawnSync('tar', ['tzvf', join(t, 'a.tar.gz')], { encoding: 'utf8' }).stdout.trim().split('\n');
+  assert.deepEqual(list.map((l) => l.split(/\s+/).pop()), ['config/note9-runtime.SHA256SUMS', 'config/shared-storage-prefixes.txt', 'scripts/note9-common.sh', 'scripts/note9-shared-storage.sh', 'scripts/note9-termux-setup.sh', 'scripts/note9-verify-runtime.sh']);
+  for (const l of list) assert.match(l, /^-rw-r--r-- 0\/0 /);
+  assert.equal(readFileSync(join(t, 'a.tar.gz'))[4] | readFileSync(join(t, 'a.tar.gz'))[5] | readFileSync(join(t, 'a.tar.gz'))[6] | readFileSync(join(t, 'a.tar.gz'))[7], 0, 'gzip -n: no mtime');
+  const setup = readFileSync(SETUP, 'utf8');
+  assert.match(setup, /bash "\$SELF_DIR\/note9-verify-runtime\.sh"/);
+  assert.doesNotMatch(setup, /\$TREE_SRC\/scripts\/note9-verify-runtime/);
+});
+
+// --- gen-manifest / npm-deps none / SD-26 / unverified .old sweep / stage root ----------------
+const GEN = join(SCRIPTS, 'note9-gen-manifest.sh');
+function genStage({ bin = true, lib = false, model = true, tree = true } = {}) {
+  const t = mkdtempSync(join(tmpdir(), 'grz-gen-')); const st = join(t, 'stage'); const tr = join(t, 'tree'); mkdirSync(st); mkdirSync(tr);
+  if (bin) { mkdirSync(join(st, 'bin')); writeFileSync(join(st, 'bin', 'llama-server'), 'ELF'); writeFileSync(join(st, 'bin', 'libggml.so'), 'SO'); }
+  if (lib) { mkdirSync(join(st, 'lib')); writeFileSync(join(st, 'lib', 'libx.so'), 'X'); }
+  if (model) { mkdirSync(join(st, 'models')); writeFileSync(join(st, 'models', 'm.gguf'), 'GGUF'); }
+  if (tree) { mkdirSync(join(tr, 'src')); writeFileSync(join(tr, 'src', 'a.mjs'), 'a'); }
+  return { t, st, tr, out: join(t, 'SUMS') };
+}
+const gen = (g, extra = []) => spawnSync('bash', [GEN, ...extra, g.st, g.tr, g.out], { encoding: 'utf8' });
+test('GEN: lists only existing dirs; header npm-deps: none; prints sha + per-section counts', { skip: !hasBash }, () => {
+  const g = genStage(); const r = gen(g); assert.equal(r.status, 0, r.stderr);
+  assert.doesNotMatch(r.stderr, /No such file/); // lib/ absent, not hidden-and-ignored: never passed to find
+  const text = readFileSync(g.out, 'utf8');
+  assert.match(text, /^# npm-deps: none$/m); assert.doesNotMatch(text, /DRYRUN/);
+  assert.match(r.stdout, new RegExp(`sha256=${sha(text)}  bin=2 lib=0 model=1 tree=1`));
+  assert.match(text, /  tree\/src\/a\.mjs$/m);
+});
+test('GEN: refuses zero tree/ lines, missing model (unless --allow-no-model -> DRYRUN), node_modules, and surfaces errors', { skip: !hasBash }, () => {
+  let g = genStage({ tree: false }); let r = gen(g); assert.notEqual(r.status, 0); assert.match(r.stderr, /zero tree\/ lines/); assert.equal(existsSync(g.out), false);
+  g = genStage({ model: false }); r = gen(g); assert.notEqual(r.status, 0); assert.match(r.stderr, /no models\/ line/);
+  r = gen(g, ['--allow-no-model']); assert.equal(r.status, 0, r.stderr); assert.match(readFileSync(g.out, 'utf8'), /^# DRYRUN/); assert.match(r.stdout, /model=0/);
+  g = genStage(); mkdirSync(join(g.tr, 'node_modules', 'x'), { recursive: true }); writeFileSync(join(g.tr, 'node_modules', 'x', 'i.js'), '1');
+  r = gen(g); assert.notEqual(r.status, 0); assert.match(r.stderr, /node_modules present/);
+  if (process.getuid?.() !== 0) {
+    g = genStage(); chmodSync(join(g.st, 'bin', 'libggml.so'), 0o000);
+    r = gen(g); assert.notEqual(r.status, 0, 'unreadable file must fail, not be skipped'); assert.equal(existsSync(g.out), false);
+  }
+});
+test('NPM: verifier, setup and runner refuse any node_modules dir (npm-deps: none); setup never runs npm', { skip: !hasBash }, () => {
+  const pkg = JSON.parse(readFileSync(join(REPO, 'package.json'), 'utf8'));
+  assert.equal(Object.keys(pkg.dependencies ?? {}).length, 0); assert.equal(existsSync(join(REPO, 'package-lock.json')), false);
+  assert.match(readFileSync(join(REPO, 'config', 'note9-runtime.SHA256SUMS'), 'utf8'), /^# npm-deps: none$/m);
+  for (const sc of ['note9-termux-setup.sh', 'note9-refresh-src.sh', 'note9-restart-serve.sh', 'note9-verify-runtime.sh', 'note9-common.sh']) {
+    assert.doesNotMatch(readFileSync(join(SCRIPTS, sc), 'utf8').replace(/^\s*#.*$/gm, ''), /\bnpm\b(?!-deps)/, sc);
+  }
+  const f = fixture({ tree: { 'src/gateway.mjs': 'js', 'node_modules/x/index.js': '1' } });
+  const r = run(f); assert.notEqual(r.code, 0); assert.match(r.out, /node_modules present/);
+  const g = installed(); mkdirSync(join(g.home, `grz.${g.manSha}`, 'tree', 'node_modules'));
+  const rr = runRunner(g); assert.notEqual(rr.code, 0); assert.match(rr.out, /node_modules present/);
+  const setupSrc = readFileSync(SETUP, 'utf8'); assert.match(setupSrc, /node_modules present in staged tree/);
+});
+test('SD-26: empty pid = held (refused); stale lock renamed aside then re-acquired atomically', { skip: !hasBash }, () => {
+  const f = fixture(); mkdirSync(f.home, { recursive: true });
+  const lock = join(f.home, '.grz-install.lock'); mkdirSync(lock);
+  let r = run(f); assert.notEqual(r.code, 0); assert.match(r.out, /held \(pid not written yet\); refusing/);
+  writeFileSync(join(lock, 'pid'), ''); r = run(f); assert.notEqual(r.code, 0); assert.match(r.out, /pid not written yet/);
+  writeFileSync(join(lock, 'pid'), 'abc'); r = run(f); assert.notEqual(r.code, 0); assert.match(r.out, /bad pid/);
+  writeFileSync(join(lock, 'pid'), '999999999'); r = run(f); assert.equal(r.code, 0, r.out); assert.match(r.out, /taking over stale lock/);
+  assert.equal(readdirSync(f.home).some((n) => n.startsWith('.grz-install.lock')), false, 'lock and aside both gone');
+  const src = readFileSync(SCRIPT, 'utf8'); assert.match(src, /"\$MV" -T -- "\$LOCK" "\$ASIDE"/);
+});
+test('SWEEP: grz.unverified.<t>.<p>.old.<n> real dirs are swept too', { skip: !hasBash }, () => {
+  const f = installed(); const n = 'grz.unverified.1700000000.123.old.9'; mkdirSync(join(f.home, n));
+  const g = fixture({ tree: { 'src/gateway.mjs': 'js-unv' } });
+  const r = spawnSync('bash', [SCRIPT, g.stage, g.tsrc], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: f.home, GRZ_MANIFEST_SHA256: g.manSha } });
+  assert.equal(r.status, 0, r.stderr); assert.equal(existsSync(join(f.home, n)), false);
+});
+test('STAGE: refresh classifies GRZ_STAGE_ROOT with the shared helper (input only) and refuses a verifier inside it', { skip: !hasBash }, () => {
+  const f = realTree(); assert.equal(run(f).code, 0);
+  const g = realTree({ 'src/new2.mjs': 'export {};\n' });
+  const pre = join(f.root, 'p.txt'); writeFileSync(pre, `${g.stage}\n`);
+  const r = spawnSync('bash', [join(f.dst, 'scripts/note9-refresh-src.sh')], { encoding: 'utf8', env: envFor(f, { GRZ_STAGE_ROOT: g.stage, GRZ_MANIFEST_SHA256: g.manSha, GRZ_REFRESH_NO_RESTART: '1', GRZ_SHARED_PREFIXES_EXTRA: pre }) });
+  assert.equal(r.status, 0, r.stdout + r.stderr); assert.match(r.stdout, /on shared storage \(input only; never executed\)/);
+  const src = readFileSync(join(SCRIPTS, 'note9-refresh-src.sh'), 'utf8');
+  assert.match(src, /is inside stage root .*refusing/);
+});
+test('SETUP:83: setup refuses to run from shared/adb storage (must run from the extracted release tarball)', { skip: !hasBash }, () => {
+  const root = mkdtempSync(join(tmpdir(), 'grz-s83-')); const pre = join(root, 'p.txt'); writeFileSync(pre, `${SCRIPTS}\n`);
+  const r = spawnSync('bash', [SETUP], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: root, GRZ_SHARED_PREFIXES_EXTRA: pre } });
+  assert.notEqual(r.status, 0); assert.match(r.stderr, /shared\/adb-writable storage.*release tarball/);
 });

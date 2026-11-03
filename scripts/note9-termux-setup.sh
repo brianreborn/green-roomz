@@ -13,6 +13,10 @@ SELF_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 grz_sdk_check || exit 1
 HOME_REAL=$("$REALPATH" -e -- "$HOME") || { echo "ERROR: HOME missing" >&2; exit 1; }
 if grz_is_shared_storage "$HOME_REAL"; then echo "ERROR: HOME $HOME_REAL is on shared storage; refusing" >&2; exit 1; fi
+# setup:83 fix: setup + verifier + helpers run from the sha-checked release tarball
+# (note9-pack-release.sh), extracted under $HOME; never from shared/adb-writable storage.
+SELF_REAL=$("$REALPATH" -e -- "$SELF_DIR")
+if grz_is_shared_storage "$SELF_REAL"; then echo "ERROR: setup is running from $SELF_REAL (shared/adb-writable storage); extract the sha-checked release tarball under \$HOME and run it from there; refusing" >&2; exit 1; fi
 SD=/sdcard/Download/grz   # staged-tree fallback location only; nothing is ever written there
 SRC_TMP=/data/local/tmp/grz
 grz_state_init || exit 1
@@ -63,13 +67,17 @@ echo "=== locate staged JS tree ==="
 if [[ -d $SRC_TMP/green-roomz ]]; then TREE_SRC=$SRC_TMP/green-roomz
 elif [[ -d $SD/green-roomz ]]; then TREE_SRC=$SD/green-roomz
 else echo "ERROR: no green-roomz tree"; exit 1; fi
+# npm-deps: none. Setup never runs npm; a node_modules dir in the staged tree is refused.
+nm=$(find "$TREE_SRC" -name node_modules -not -path '*/.git/*' -print -quit 2>/dev/null)
+if [[ -n $nm ]]; then echo "ERROR: node_modules present in staged tree ($nm); package.json has no runtime deps (npm-deps: none); refusing" >&2; exit 1; fi
 
 echo "=== copy + verify native runtime into \$HOME (never executed from $SRC_TMP) ==="
 # Manifest ships in the cut: tree/config/note9-runtime.SHA256SUMS, anchored by
 # GRZ_MANIFEST_SHA256. Installs $HOME/grz.<sha>/{runtime,tree} and flips grz.current. Only listed
-# files are copied (runtime + JS tree). The verifier runs via bash from the staged tree before
-# anything is trusted; bash reads it, nothing is exec'd from $SRC_TMP. See docs/note9-termux.md.
-bash "$TREE_SRC/scripts/note9-verify-runtime.sh" "$SRC_TMP" "$TREE_SRC" || exit 1
+# files are copied (runtime + JS tree); nothing is exec'd from $SRC_TMP. See docs/note9-termux.md.
+# Verifier comes from setup's own dir (the sha-checked release tarball, note9-pack-release.sh),
+# never from the staged, unverified tree.
+bash "$SELF_DIR/note9-verify-runtime.sh" "$SRC_TMP" "$TREE_SRC" || exit 1
 
 RUNNER="$HOME_GRZ/scripts/note9-run-llama-server.termux.sh"
 test -x "$RUNNER" || { echo "ERROR: runner not executable at $RUNNER"; exit 1; }

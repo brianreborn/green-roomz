@@ -15,3 +15,15 @@ grz_is_shared_storage() {
   done < <(cat -- "$GRZ_SHARED_PREFIXES"; if [[ -n ${GRZ_SHARED_PREFIXES_EXTRA:-} ]]; then cat -- "$GRZ_SHARED_PREFIXES_EXTRA"; fi)
   return 1
 }
+
+# SD-21 for key-like paths: allowlist first — realpath(path) must start with realpath($HOME)/
+# (no package path hard-coded); then the deny list above as a second check.
+grz_key_path_ok() {
+  local real home_real
+  [[ -L $1 ]] && return 1
+  real=$(realpath -e -- "$1" 2>/dev/null) || return 1
+  home_real=$(realpath -e -- "$HOME" 2>/dev/null) || return 1
+  [[ $real == "$home_real"/* ]] || return 1
+  grz_is_shared_storage "$real" && return 1
+  return 0
+}

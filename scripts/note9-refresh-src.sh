@@ -17,6 +17,12 @@ grz_state_init || exit 1
 grz_resolve_current || exit 1
 VERIFY="$GRZ_TREE/scripts/note9-verify-runtime.sh"
 [[ -f $VERIFY ]] || { echo "ERROR: $VERIFY missing in verified tree" >&2; exit 1; }
+# GRZ_STAGE_ROOT is an input only: classify it with the shared-storage helper and make sure
+# nothing we execute (the verifier) lives under it.
+ST_REAL=$("$REALPATH" -e -- "$ST") || { echo "ERROR: stage root $ST missing" >&2; exit 1; }
+if grz_is_shared_storage "$ST_REAL"; then echo "stage root $ST_REAL is on shared storage (input only; never executed)"; fi
+VERIFY_REAL=$("$REALPATH" -e -- "$VERIFY")
+if [[ $VERIFY_REAL == "$ST_REAL"/* ]]; then echo "ERROR: verifier $VERIFY_REAL is inside stage root $ST_REAL; refusing" >&2; exit 1; fi
 [[ -d $ST/green-roomz ]] || { echo "ERROR: no staged tree at $ST/green-roomz" >&2; exit 1; }
 bash "$VERIFY" "$ST" "$ST/green-roomz" || { echo "ERROR: verify failed; grz.current unchanged" >&2; exit 1; }
 grz_resolve_current || exit 1

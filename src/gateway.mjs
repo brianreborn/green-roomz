@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { fieldVote, similarityVote, resolveJudgeChoice, judgePrompt } from './council.mjs';
 import { AGENCY_ROLE, DEFAULT_FAITH, DEFAULT_FEAR, FALLBACK_ALIAS, HANDOFF_PEEK_CHARS, HANDOFF_PEEK_TIMEOUT_MS, MAX_SPECIALIST_HOPS, MONITOR_ALIAS, NEXUS_ALIAS, NEXUS_CHAT_SYSTEM, NEXUS_MAX_TOKENS, REBUKE_OP, UPSTREAM_MAX_BUFFER_BYTES, UPSTREAM_TIMEOUT_MS, YOLO_TOKEN } from './constants.mjs';
-import { loadDeclaredKernel } from './config.mjs';
+import { loadDeclaredKernel, readApiKeyFile } from './config.mjs';
 import { compileStockPrompt } from './compile-prompt.mjs';
 import { Mailbox } from './mailbox.mjs';
 import { CAP, MonitorIpc } from './monitor/ipc.mjs';
@@ -45,13 +45,11 @@ const UNICORN_PAGE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..
 /** 8080 may post/observe hops. No vote / lockdown / reboot / respond rights. */
 export const GATEWAY_IPC_RIGHTS = (CAP.POST | CAP.OBSERVE | CAP.SNAPSHOT) >>> 0;
 
-// SD-23: api_key_file from the validated host override (config.mjs checked path/mode/owner).
+// SD-23: api_key_file from the validated host override (path checked at load; content via one fd).
 function readOverrideApiKey(manifest) {
   const file = manifest?._meta?.hostOverride?.api_key_file;
   if (!file) return '';
-  const key = readFileSync(file, 'utf8').trim();
-  if (!key) throw new ValidationError(`api_key_file ${file} is empty`);
-  return key;
+  return readApiKeyFile(file, { HOME: manifest._meta.hostHome ?? process.env.HOME }); // one O_NOFOLLOW open: fstat + read through the same fd
 }
 
 function identityFrom(request, apiKey) {

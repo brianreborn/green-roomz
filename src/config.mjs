@@ -17,7 +17,7 @@ import {
 import { ValidationError } from './errors.mjs';
 import { TIMING_PRIVACY_INSTALL_HINT, resolveTimingPrivacy } from './timing-quant.mjs';
 import { digestObject, expandEnvironment, resolveManifestPath, nfcPath } from './util.mjs';
-import { readFileSync, existsSync, lstatSync, realpathSync, statSync } from 'node:fs';
+import { readFileSync, existsSync, lstatSync, realpathSync, openSync, fstatSync, closeSync, readlinkSync, constants as fsConstants } from 'node:fs';
 import { assertNexusKernelText, kernelBindingIssues } from './kernel-text.mjs';
 
 export { assertNexusKernelText, kernelBindingIssues };
@@ -219,9 +219,8 @@ export function readHostOverride(file, env = process.env) {
   if (st.size > HOST_OVERRIDE_MAX_BYTES) throw new ValidationError('host override refused', { issues: [`override ${file} is ${st.size} bytes (cap ${HOST_OVERRIDE_MAX_BYTES})`] });
   const raw = readFileSync(file, 'utf8');
   if (Buffer.byteLength(raw) > HOST_OVERRIDE_MAX_BYTES) throw new ValidationError('host override refused', { issues: [`override ${file} exceeds ${HOST_OVERRIDE_MAX_BYTES} bytes`] });
-  const seen = new Set(); const dups = [];
-  for (const m of raw.matchAll(/"((?:[^"\\]|\\.)*)"\s*:/g)) { if (seen.has(m[1])) dups.push(m[1]); seen.add(m[1]); }
-  if (dups.length) throw new ValidationError('host override refused', { issues: [`override ${file} has duplicate keys: ${[...new Set(dups)].join(', ')}`] });
+  const dups = duplicateKeys(raw);
+  if (dups.length) throw new ValidationError('host override refused', { issues: [`override ${file} has duplicate keys: ${dups.join(', ')}`] });
   let data;
   try { data = JSON.parse(raw); } catch (err) { throw new ValidationError('host override refused', { issues: [`override ${file}: ${err.message}`] }); }
   return validateHostOverride(data, env);
@@ -240,23 +239,77 @@ export function isSharedStorage(resolved) {
   return sharedStoragePrefixes().some((pre) => { const b = pre.replace(/\/+$/, ''); return resolved === b || resolved.startsWith(b + '/'); });
 }
 
-/** SD-21: api key file must resolve under realpath($HOME), final component not a symlink,
- * regular file, mode 600/400, owned by us, not on shared storage (after realpath). */
+/** SD-21 path checks (no open). Primary: allowlist — realpath(key) must start with
+ * realpath($HOME) + '/'; no package path is hard-coded, so $HOME reached through a symlinked
+ * prefix (/data/user/0 -> /data/data) works. Secondary: shared-storage deny list. */
+function keyPathIssues(real, homeReal) {
+  if (!real.startsWith(homeReal + path.sep)) return [`api_key_file ${real} is outside $HOME (${homeReal})`];
+  if (isSharedStorage(real)) return [`api_key_file ${real} is on shared storage; refusing`];
+  return [];
+}
 export function apiKeyFileIssues(file, env = process.env) {
-  const issues = [];
-  let homeReal; let real; let st;
+  let homeReal; let real;
   try { homeReal = realpathSync(env.HOME); } catch { return [`api_key_file: HOME ${env.HOME} does not resolve`]; }
-  try { st = lstatSync(file); } catch { return [`api_key_file ${file} does not exist`]; }
-  if (st.isSymbolicLink()) return [`api_key_file ${file} is a symlink; refusing`];
+  try { if (lstatSync(file).isSymbolicLink()) return [`api_key_file ${file} is a symlink; refusing`]; } catch { return [`api_key_file ${file} does not exist`]; }
   try { real = realpathSync(file); } catch { return [`api_key_file ${file} does not resolve`]; }
-  if (isSharedStorage(real)) issues.push(`api_key_file ${real} is on shared storage; refusing`);
-  if (!real.startsWith(homeReal + path.sep)) issues.push(`api_key_file ${real} is outside $HOME (${homeReal})`);
-  const fst = statSync(real);
-  if (!fst.isFile()) issues.push(`api_key_file ${real} is not a regular file`);
-  const mode = fst.mode & 0o777;
-  if (mode !== 0o600 && mode !== 0o400) issues.push(`api_key_file ${real} mode ${mode.toString(8)} must be 600 or 400`);
-  if (typeof process.getuid === 'function' && fst.uid !== process.getuid()) issues.push(`api_key_file ${real} not owned by uid ${process.getuid()}`);
-  return issues;
+  return keyPathIssues(real, homeReal);
+}
+
+/** SD-21 single open: O_NOFOLLOW open, then fstat THAT fd (regular, 600/400, our uid) and read
+ * through it. The fd's own path (/proc/self/fd) is re-checked against the allowlist/deny list. */
+export function readApiKeyFile(file, env = process.env) {
+  const pre = apiKeyFileIssues(file, env);
+  if (pre.length) throw new ValidationError('api_key_file refused', { issues: pre });
+  let fd;
+  try { fd = openSync(file, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | (fsConstants.O_NONBLOCK ?? 0)); } catch (e) {
+    throw new ValidationError('api_key_file refused', { issues: [e.code === 'ELOOP' ? `api_key_file ${file} is a symlink; refusing` : `api_key_file ${file}: ${e.code}`] });
+  }
+  try {
+    const issues = [];
+    const st = fstatSync(fd);
+    if (!st.isFile()) issues.push(`api_key_file ${file} is not a regular file`);
+    const mode = st.mode & 0o777;
+    if (mode !== 0o600 && mode !== 0o400) issues.push(`api_key_file ${file} mode ${mode.toString(8)} must be 600 or 400`);
+    if (typeof process.getuid === 'function' && st.uid !== process.getuid()) issues.push(`api_key_file ${file} not owned by uid ${process.getuid()}`);
+    if (st.size > HOST_OVERRIDE_MAX_BYTES) issues.push(`api_key_file ${file} is larger than ${HOST_OVERRIDE_MAX_BYTES} bytes`);
+    let fdPath = null;
+    try { fdPath = readlinkSync(`/proc/self/fd/${fd}`); } catch { /* no procfs */ }
+    if (fdPath && !issues.length) issues.push(...keyPathIssues(fdPath, realpathSync(env.HOME)));
+    if (issues.length) throw new ValidationError('api_key_file refused', { issues });
+    const key = readFileSync(fd, 'utf8').trim();
+    if (!key) throw new ValidationError('api_key_file refused', { issues: [`api_key_file ${file} is empty`] });
+    return key;
+  } finally { closeSync(fd); }
+}
+
+/** SD-27: duplicate keys counted AFTER decoding. A parse-tracking walk over the JSON text:
+ * every object key token is decoded with JSON.parse (so "\u0070ort" and "port" are the same
+ * key) and counted per object. Strings are skipped as whole tokens, so a "x": inside a value
+ * is never mistaken for a key. Returns decoded duplicate key names. */
+export function duplicateKeys(raw) {
+  const dups = new Set(); const stack = []; let i = 0; let expectKey = false;
+  const n = raw.length;
+  while (i < n) {
+    const c = raw[i];
+    if (c === '"') {
+      let j = i + 1;
+      while (j < n && raw[j] !== '"') j += raw[j] === '\\' ? 2 : 1;
+      const tok = raw.slice(i, j + 1); i = j + 1;
+      const top = stack[stack.length - 1];
+      if (top && top.type === 'obj' && expectKey) {
+        const key = JSON.parse(tok);
+        if (top.keys.has(key)) dups.add(key); else top.keys.add(key);
+        expectKey = false;
+      }
+      continue;
+    }
+    if (c === '{') { stack.push({ type: 'obj', keys: new Set() }); expectKey = true; }
+    else if (c === '[') { stack.push({ type: 'arr' }); expectKey = false; }
+    else if (c === '}' || c === ']') { stack.pop(); expectKey = false; }
+    else if (c === ',') { expectKey = stack[stack.length - 1]?.type === 'obj'; }
+    i += 1;
+  }
+  return [...dups];
 }
 
 export const HOST_OVERRIDE_MAX_BYTES = 4096;
@@ -319,7 +372,7 @@ export async function loadManifest(input = DEFAULT_MANIFEST, env = process.env) 
   const nexus = manifest.agents.find((agent) => agent.alias === NEXUS_ALIAS);
   if (nexus?.system_policy) loadDeclaredKernel(nexus);
   Object.defineProperty(manifest, '_meta', {
-    value: Object.freeze({ path: manifestPath, digest: digestObject(parsed), packageRoot: root, hostOverride: override ?? null }),
+    value: Object.freeze({ path: manifestPath, digest: digestObject(parsed), packageRoot: root, hostOverride: override ?? null, hostHome: override ? effectiveEnv.HOME : null }),
     enumerable: false,
   });
   return deepFreeze(manifest);
