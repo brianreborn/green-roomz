@@ -1,4 +1,6 @@
-#!/data/data/com.termux/files/usr/bin/bash
+#!/usr/bin/env bash
+# Portable shebang (NewTermux may use a non-com.termux $PREFIX). Invoke as: bash <script>.sh
+: "${LANG:=C.UTF-8}"; export LANG
 # Copy a staged src/bin/web/policies tree into ~/green-roomz and restart serve.
 # Run from Termux: bash /data/local/tmp/grz/note9-refresh-src.sh
 set -eu
@@ -31,8 +33,10 @@ for d in /proc/[0-9]*; do
 done
 echo STOP="$pids"
 if [ -n "$pids" ]; then
+  # shellcheck disable=SC2086 # word-split pid list on purpose
   kill $pids || true
   sleep 2
+  # shellcheck disable=SC2086
   kill -9 $pids 2>/dev/null || true
 fi
 export LD_LIBRARY_PATH="$HOME/grz-runtime/lib:$HOME/grz-runtime/bin${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"

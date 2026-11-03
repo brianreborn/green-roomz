@@ -1,4 +1,5 @@
-#!/data/data/com.termux/files/usr/bin/bash
+#!/usr/bin/env bash
+# Portable shebang (NewTermux may use a non-com.termux $PREFIX). Invoke as: bash <script>.sh
 set -e
 ST=/data/local/tmp/grz
 mkdir -p "$HOME/.termux"

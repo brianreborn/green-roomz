@@ -63,7 +63,7 @@ Resident **tool-router-agent** `:8187` is the only GGUF on the phone. Other alia
 | `scripts/note9-restart-serve.sh` | copy `src/memory.mjs`, kill pidfile, serve |
 | `scripts/note9-run-llama-server.termux.sh` | example wrap (device copy lives in `$HOME/grz-runtime`) |
 
-Push scripts with `adb push` to `/data/local/tmp/grz/` (`chmod 644`) and run **`bash /data/local/tmp/grz/setup.sh`** from a Termux prompt (bash reads tmp; it does not exec the file bit).
+Push scripts with `adb push` to `/data/local/tmp/grz/` (`chmod 644`) and run **`bash /data/local/tmp/grz/setup.sh`** from a Termux prompt (bash reads tmp; it does not exec the file bit). All `scripts/note9-*.sh` use `#!/usr/bin/env bash` (works under Termux and NewTermux with termux-exec); always invoke them as `bash script.sh`. `note9-run-llama-server.termux.sh` runs the `$HOME/grz-runtime` copy under Termux and the `/data/local/tmp` path only as adb `shell` (adb-only). Setup options: `GRZ_PRUNE_APT_SOURCES=1` (removes game/science/unstable apt lists; persistent, needs Brian's per-host OK), `GRZ_RUNTIME_SUMS=<file>` (sha256sum -c against `$HOME/grz-runtime`, refuses on mismatch; also auto-used if `/workspace/reviews/release/note9-runtime-SHA256SUMS` exists).
 
 ## RAM admission
 

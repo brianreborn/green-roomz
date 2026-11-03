@@ -1,4 +1,6 @@
-#!/data/data/com.termux/files/usr/bin/bash
+#!/usr/bin/env bash
+# Portable shebang (NewTermux may use a non-com.termux $PREFIX). Invoke as: bash <script>.sh
+: "${LANG:=C.UTF-8}"; export LANG
 set -e
 cp /data/local/tmp/grz/green-roomz/src/memory.mjs "$HOME/green-roomz/src/memory.mjs"
 if [[ -f $HOME/grz-serve.pid ]]; then
