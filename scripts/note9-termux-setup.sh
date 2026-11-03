@@ -6,7 +6,14 @@ SD=/sdcard/Download/grz
 SRC_TMP=/data/local/tmp/grz
 LOG=$HOME/grz-setup.log
 mkdir -p "$SD" "$HOME"
-exec > >(tee -a "$LOG" | tee -a "$SD/setup.log") 2>&1
+# /sdcard is shared storage: any app with storage permission can read it.
+# Full logs stay in Termux $HOME (0600); mirror to /sdcard only on explicit opt-in.
+umask 077
+if [[ "${GRZ_SDCARD_LOGS:-0}" == 1 ]]; then
+  exec > >(tee -a "$LOG" | tee -a "$SD/setup.log") 2>&1
+else
+  exec > >(tee -a "$LOG") 2>&1
+fi
 echo "=== note9 setup $(date -Is 2>/dev/null || date) ==="
 echo "uid=$(id)"
 echo "HOME=$HOME PREFIX=${PREFIX:-}"
@@ -78,7 +85,7 @@ export LD_LIBRARY_PATH="$RT/lib:$RT/bin${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 cd "$HOME_GRZ"
 
 echo "=== validate ==="
-node ./bin/green-roomz.mjs validate --manifest ./config/agents.note9.json | tee "$HOME/grz-validate.json" | tee "$SD/validate.json"
+node ./bin/green-roomz.mjs validate --manifest ./config/agents.note9.json | tee "$HOME/grz-validate.json"
 
 pkill -f 'green-roomz.mjs serve' 2>/dev/null || true
 sleep 1
@@ -103,6 +110,8 @@ echo "gateway_ready=$ok"
 if [[ "$ok" -eq 1 ]]; then
   node -e "fetch('http://127.0.0.1:8080/v1/models').then(async r=>console.log(await r.text())).catch(e=>console.error(e))" || true
 fi
-cp "$HOME/grz-serve.out.log" "$SD/serve.out.log" 2>/dev/null || true
-cp "$HOME/grz-serve.err.log" "$SD/serve.err.log" 2>/dev/null || true
+if [[ "${GRZ_SDCARD_LOGS:-0}" == 1 ]]; then
+  cp "$HOME/grz-serve.out.log" "$SD/serve.out.log" 2>/dev/null || true
+  cp "$HOME/grz-serve.err.log" "$SD/serve.err.log" 2>/dev/null || true
+fi
 echo "=== DONE ok=$ok ==="

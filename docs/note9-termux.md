@@ -30,7 +30,7 @@ Pack on shalom: `C:\LocalAI\android-pack\arm64-v8a` (~219 MB). Model: `C:\LocalA
 | `/data/local/tmp/grz` | `shell` 777 | adb drop zone (bin/lib/models + scripts). **SELinux: Termux cannot execute here.** |
 | `~/grz-runtime` | Termux | copied ELF + wrap `run-llama-server.sh` (this is what GRZ spawns) |
 | `~/green-roomz` | Termux | JS tree, manifest `config/agents.note9.json` |
-| `/sdcard/Download/grz` | sdcard_rw | logs after `termux-setup-storage` (`setup.log`, `serve.pid`) |
+| `/sdcard/Download/grz` | sdcard_rw | `serve.pid`, status markers; full logs only with `GRZ_SDCARD_LOGS=1` (shared storage is readable by other apps) |
 
 Gateway: Termux `node` `127.0.0.1:8080`. From shalom: `adb forward tcp:18080 tcp:8080` then `http://127.0.0.1:18080`.
 
@@ -41,7 +41,7 @@ Resident **tool-router-agent** `:8187` is the only GGUF on the phone. Other alia
 - `/sdcard` is `noexec` and `rw-rw----` until `termux-setup-storage`.
 - `bash /sdcard/.../enable-ext.sh` → **Permission denied** (read).
 - `[[ -x /data/local/tmp/grz/bin/run-llama-server.sh ]]` fails under Termux even when the file is `755`: **SELinux `untrusted_app` cannot execute `/data/local/tmp`**. Copy runtime into `$HOME/grz-runtime`.
-- Termux also cannot **write** `/data/local/tmp` (status files). Logs go to `$HOME` and `/sdcard/Download/grz`.
+- Termux also cannot **write** `/data/local/tmp` (status files). Logs go to `$HOME` (app-private); set `GRZ_SDCARD_LOGS=1` to also mirror them to `/sdcard/Download/grz`.
 
 ## ADB / Termux automation (do not race)
 
