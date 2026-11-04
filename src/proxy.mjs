@@ -23,6 +23,17 @@ function downstreamHeaders(response) {
   return headers;
 }
 
+function sanitizeToolCalls(calls) {
+  if (!Array.isArray(calls)) return calls;
+  return calls.map((call) => {
+    if (!call || typeof call !== 'object' || !call.function || typeof call.function !== 'object') return call;
+    const fn = { ...call.function };
+    // arguments is a JSON string: strip as a string, never parse/reformat.
+    for (const f of ['name', 'arguments']) if (typeof fn[f] === 'string') fn[f] = stripInvisibleAndEsc(fn[f]);
+    return { ...call, function: fn };
+  });
+}
+
 function sanitizeOpts(opts) {
   if (typeof opts === 'boolean') return { keepReasoning: opts };
   return opts ?? {};
@@ -53,6 +64,7 @@ export function sanitizeCompletionJson(payload, opts = {}) {
         }
         if (typeof message.content === 'string') message.content = stripInvisibleAndEsc(message.content);
         for (const f of ['reasoning', 'reasoning_content']) if (typeof message[f] === 'string') message[f] = stripInvisibleAndEsc(message[f]);
+        if (Array.isArray(message.tool_calls)) message.tool_calls = sanitizeToolCalls(message.tool_calls);
         copy.message = message;
       }
       if (copy.delta && typeof copy.delta === 'object') {
@@ -63,6 +75,7 @@ export function sanitizeCompletionJson(payload, opts = {}) {
         }
         if (typeof delta.content === 'string') delta.content = stripInvisibleAndEsc(delta.content);
         for (const f of ['reasoning', 'reasoning_content']) if (typeof delta[f] === 'string') delta[f] = stripInvisibleAndEsc(delta[f]);
+        if (Array.isArray(delta.tool_calls)) delta.tool_calls = sanitizeToolCalls(delta.tool_calls);
         copy.delta = delta;
       }
       return copy;

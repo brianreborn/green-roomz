@@ -93,3 +93,25 @@ test('non-stream regression: timings dropped via sanitizeCompletionJson', () => 
 test('headerSafe strips C0 controls', () => {
   assert.ok(!/[\u0000-\u001f\u007f]/.test(headerSafe('bad\u0007reason\r\nx-inj: 1')));
 });
+
+test('tool_calls name/arguments stripped in message (non-stream)', () => {
+  const args = '{"q":"a\u001b[31mb\u200bc"}';
+  const j = sanitizeCompletionJson({ choices: [{ message: { tool_calls: [{ id: 't1', type: 'function', function: { name: 'se\u200barch\u001b]0;x\u0007', arguments: args } }] } }] });
+  const fn = j.choices[0].message.tool_calls[0].function;
+  assert.equal(fn.name, 'search');
+  assert.equal(fn.arguments, '{"q":"abc"}');
+  assert.equal(j.choices[0].message.tool_calls[0].id, 't1');
+});
+
+test('tool_calls name/arguments stripped in streaming delta chunks', () => {
+  const chunks = [
+    { choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 't1', function: { name: 'get\ufeff_w\u001b[0m', arguments: '' } }] } }] },
+    { choices: [{ index: 0, delta: { tool_calls: [{ index: 0, function: { arguments: '{"city":\u200b"Par' } }] } }] },
+    { choices: [{ index: 0, delta: { tool_calls: [{ index: 0, function: { arguments: 'is\u001b[2J"}' } }] } }] },
+  ];
+  const out = chunks.map((c) => sanitizeCompletionJson(c).choices[0].delta.tool_calls[0].function);
+  assert.equal(out[0].name, 'get_w');
+  assert.equal(out.map((f) => f.arguments).join(''), '{"city":"Paris"}');
+  const line = sanitizeSseDataLine(`data: ${JSON.stringify(chunks[1])}`);
+  assert.ok(!/[\u001b\u200b\ufeff]/.test(line));
+});
