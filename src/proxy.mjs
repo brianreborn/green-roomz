@@ -1,9 +1,7 @@
-import { Readable } from 'node:stream';
-import { pipeline } from 'node:stream/promises';
 import { UPSTREAM_MAX_BUFFER_BYTES, UPSTREAM_TIMEOUT_MS } from './constants.mjs';
 import { UpstreamProtocolError, UpstreamTimeoutError } from './errors.mjs';
 import { applyLogprobContract } from './logprobs.mjs';
-import { deadlineSignal, isTimeoutAbort, jitteredBackoff, readCappedText, sleep, stripEscapes } from './util.mjs';
+import { deadlineSignal, isTimeoutAbort, jitteredBackoff, readCappedText, sleep, stripEscapes, stripInvisibleAndEsc } from './util.mjs';
 
 const HOP_BY_HOP = new Set(['connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization', 'te', 'trailer', 'transfer-encoding', 'upgrade']);
 const UPSTREAM_HEADER_ALLOW = new Set(['content-type', 'accept', 'idempotency-key']);
@@ -35,6 +33,14 @@ export function sanitizeCompletionJson(payload, opts = {}) {
   if (!payload || typeof payload !== 'object') return payload;
   const next = { ...payload };
   delete next.timings;
+  if (next.usage && typeof next.usage === 'object') {
+    const usage = { ...next.usage };
+    if (usage.prompt_tokens_details && typeof usage.prompt_tokens_details === 'object') {
+      usage.prompt_tokens_details = { ...usage.prompt_tokens_details };
+      if ('cached_tokens' in usage.prompt_tokens_details) usage.prompt_tokens_details.cached_tokens = 0;
+    }
+    next.usage = usage;
+  }
   if (Array.isArray(next.choices)) {
     next.choices = next.choices.map((choice) => {
       if (!choice || typeof choice !== 'object') return choice;
@@ -45,7 +51,8 @@ export function sanitizeCompletionJson(payload, opts = {}) {
           delete message.reasoning;
           delete message.reasoning_content;
         }
-        if (typeof message.content === 'string') message.content = stripEscapes(message.content);
+        if (typeof message.content === 'string') message.content = stripInvisibleAndEsc(message.content);
+        for (const f of ['reasoning', 'reasoning_content']) if (typeof message[f] === 'string') message[f] = stripInvisibleAndEsc(message[f]);
         copy.message = message;
       }
       if (copy.delta && typeof copy.delta === 'object') {
@@ -54,7 +61,8 @@ export function sanitizeCompletionJson(payload, opts = {}) {
           delete delta.reasoning;
           delete delta.reasoning_content;
         }
-        if (typeof delta.content === 'string') delta.content = stripEscapes(delta.content);
+        if (typeof delta.content === 'string') delta.content = stripInvisibleAndEsc(delta.content);
+        for (const f of ['reasoning', 'reasoning_content']) if (typeof delta[f] === 'string') delta[f] = stripInvisibleAndEsc(delta[f]);
         copy.delta = delta;
       }
       return copy;
@@ -115,10 +123,31 @@ function frameFromParsed(parsed, opts) {
   if (parsed.json) {
     return {
       frame: `data: ${JSON.stringify(sanitizeCompletionJson(parsed.json, opts))}\n\n`,
-      delta: assistantDeltaFromJson(parsed.json),
+      delta: stripInvisibleAndEsc(assistantDeltaFromJson(parsed.json)),
     };
   }
-  return { frame: `data: ${parsed.raw}\n\n`, delta: '' };
+  return { frame: `data: ${sanitizeRawData(parsed.raw)}\n\n`, delta: '' };
+}
+
+function sanitizeRawData(raw) {
+  // Non-JSON data payload: strip ESC/invisibles and keep it on one data line (no frame injection).
+  return stripInvisibleAndEsc(raw).replace(/[\r\n]+/g, ' ');
+}
+
+/**
+ * P0: sanitize one SSE `data:` line. JSON payloads go through sanitizeCompletionJson;
+ * `[DONE]` passes through; comments (`:`) and other fields are ESC/invisible-stripped.
+ */
+export function sanitizeSseDataLine(line, opts = {}) {
+  const text = String(line ?? '').replace(/[\r\n]+$/, '');
+  if (!text.startsWith('data:')) return stripInvisibleAndEsc(text).replace(/[\r\n]+/g, ' ');
+  const data = text.slice(5).trimStart();
+  if (data === '[DONE]') return 'data: [DONE]';
+  try {
+    return `data: ${JSON.stringify(sanitizeCompletionJson(JSON.parse(data), opts))}`;
+  } catch {
+    return `data: ${sanitizeRawData(data)}`;
+  }
 }
 
 function parseSseBlock(raw) {
@@ -147,7 +176,7 @@ export function sanitizeSseText(raw, opts = {}) {
     if (!parsed) continue;
     if (parsed.done) out.push('data: [DONE]\n\n');
     else if (parsed.json) out.push(`data: ${JSON.stringify(sanitizeCompletionJson(parsed.json, opts))}\n\n`);
-    else if (parsed.raw) out.push(`data: ${parsed.raw}\n\n`);
+    else if (parsed.raw) out.push(`data: ${sanitizeRawData(parsed.raw)}\n\n`);
   }
   const rest = text.slice(pos);
   if (rest.trim()) {
@@ -218,11 +247,11 @@ async function writeSanitizedSse(upstream, response, { keepReasoning, requestBod
         content = wrapped.text;
         if (typeof response.write === 'function') response.write(wrapped.sse);
       } catch {
-        if (typeof response.write === 'function') response.write(raw);
+        if (typeof response.write === 'function') response.write(`data: ${JSON.stringify({ choices: [{ delta: { content: stripInvisibleAndEsc(raw) } }] })}\n\ndata: [DONE]\n\n`);
       }
     } else if (trimmed) {
       const text = sanitizeSseText(raw, opts);
-      if (typeof response.write === 'function') response.write(text || raw);
+      if (typeof response.write === 'function' && text) response.write(text);
     }
     if (typeof response.end === 'function' && !response.writableEnded && !response.destroyed) response.end();
     return content;
@@ -403,7 +432,8 @@ export async function proxyJson({ request, response, body, target, config, signa
           content = assistantContentFromJson(sanitized);
           data = Buffer.from(JSON.stringify(sanitized));
         } catch {
-          data = Buffer.from(raw);
+          // Non-JSON body: never forward raw bytes; ESC/invisible-strip it.
+          data = Buffer.from(stripInvisibleAndEsc(raw));
         }
         if (response.writableEnded || response.destroyed || signal?.aborted) return { status: upstream.status, content };
         if (beforeClientWrite) await beforeClientWrite();
@@ -411,7 +441,7 @@ export async function proxyJson({ request, response, body, target, config, signa
         if (response.headersSent) {
           const sse = sanitized
             ? sseFromJsonCompletion(sanitized, { keepReasoning, requestBody: body }).sse
-            : `data: ${JSON.stringify({ choices: [{ delta: { content: raw } }] })}\n\ndata: [DONE]\n\n`;
+            : `data: ${JSON.stringify({ choices: [{ delta: { content: stripInvisibleAndEsc(raw) } }] })}\n\ndata: [DONE]\n\n`;
           response.write(sse);
           if (!response.writableEnded) response.end();
           return { status: upstream.status, content };
@@ -424,19 +454,10 @@ export async function proxyJson({ request, response, body, target, config, signa
         try { await upstream.body?.cancel(); } catch {}
         return { status: upstream.status, content: '' };
       }
+      // P0: no raw pipe. Only reachable with no body and no text(): nothing to forward.
       if (beforeClientWrite) await beforeClientWrite();
       if (!response.headersSent) response.writeHead(upstream.status, downstreamHeaders(upstream));
-      if (!upstream.body) {
-        response.end();
-        return { status: upstream.status, content: '' };
-      }
-      try {
-        await pipeline(Readable.fromWeb(upstream.body), response, { signal: connectController.signal });
-      } catch (streamError) {
-        // Client gone or upstream stalled mid-stream: tear the socket down, do not rethrow
-        // into the handler (headers are already sent).
-        if (!response.writableEnded && !response.destroyed) response.destroy(streamError);
-      }
+      if (!response.writableEnded) response.end();
       return { status: upstream.status, content: '' };
     } catch (error) {
       if (isTimeoutAbort(error, signal)) {

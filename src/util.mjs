@@ -184,17 +184,26 @@ const OSC = /\u001b\][\s\S]*?(?:\u0007|\u001b\\)/g;
 const LS_PS = /[\u2028\u2029]/g;
 const BIDI_ISOLATES = /[\u2066-\u2069]/g;
 
+// Cf invisibles: ZW*/LRM/RLM, bidi embeds/overrides, word-joiner..nominal-digit block, BOM, tag chars.
+const CF_INVISIBLE = /[\u200B-\u200F\u202A-\u202E\u2060-\u206F\uFEFF\u{E0000}-\u{E007F}]/gu;
+
 export function stripControls(value) {
-  return String(value ?? '').replace(C0_C1, ' ').replace(LS_PS, ' ').replace(BIDI_ISOLATES, '').replace(/[ \t]{2,}/g, ' ').trim();
+  return String(value ?? '').replace(CF_INVISIBLE, '').replace(C0_C1, ' ').replace(LS_PS, ' ').replace(BIDI_ISOLATES, '').replace(/[ \t]{2,}/g, ' ').trim();
 }
 
-export function stripEscapes(value) {
+/** P0 SSE/ESC: defensive filter for model text bound for clients (keeps \t \n \r). */
+export function stripInvisibleAndEsc(value) {
   return String(value ?? '')
     .replace(OSC, '')
     .replace(CSI, '')
+    .replace(/\u001b[@-_]?/g, '')
     .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, '')
     .replace(LS_PS, '')
-    .replace(BIDI_ISOLATES, '');
+    .replace(CF_INVISIBLE, '');
+}
+
+export function stripEscapes(value) {
+  return stripInvisibleAndEsc(value);
 }
 
 export function headerSafe(value, maxBytes = 240) {
