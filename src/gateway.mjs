@@ -383,6 +383,13 @@ function nativeRequestInit(kind, payload, signal) {
   };
 }
 
+/** Boundary: if a llama upstream key is configured, refuse keyless client modes. */
+export function requireClientKeyWhenUpstreamKeyed(apiKey, upstreamKey) {
+  if (upstreamKey && !apiKey) {
+    throw new ValidationError('llama upstream key is set but gateway has no API key; refusing keyless client mode');
+  }
+}
+
 export class Gateway {
   constructor({ manifest, registry, processes, sessions, policy, hostAdapter, fetchImpl, mailbox, ipc, logger, interrupts, brainz }) {
     this.manifest = manifest;
@@ -394,6 +401,8 @@ export class Gateway {
     // Client auth (edge) and upstream auth (llama-server) are separate: SD-32.
     this.apiKey = process.env.GREEN_ROOMZ_API_KEY || readOverrideApiKey(manifest);
     this.upstreamKey = upstreamApiKey(manifest);
+    // If llama is keyed, clients must authenticate too (no loopback-dev / allowlisted-peer).
+    requireClientKeyWhenUpstreamKeyed(this.apiKey, this.upstreamKey);
     this.fetchImpl = withUpstreamKey(fetchImpl ?? fetch, this.upstreamKey, backendPorts(manifest));
     this.startedAt = Date.now();
     this.mailbox = mailbox ?? new Mailbox();

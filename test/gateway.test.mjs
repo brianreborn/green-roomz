@@ -9,7 +9,8 @@ import { AgentRegistry } from '../src/registry.mjs';
 import { ProcessManager } from '../src/process-manager.mjs';
 import { PolicyGate } from '../src/scheduler.mjs';
 import { SessionLedger } from '../src/sessions.mjs';
-import { Gateway, prepareInferenceBody } from '../src/gateway.mjs';
+import { Gateway, prepareInferenceBody, requireClientKeyWhenUpstreamKeyed } from '../src/gateway.mjs';
+import { ValidationError } from '../src/errors.mjs';
 import { sampleManifest, writeTinyF32Gguf } from './helpers.mjs';
 import { NEXUS_CHAT_SYSTEM, REQUIRED_ALIASES } from '../src/constants.mjs';
 
@@ -1862,3 +1863,18 @@ test('SD-32: no client key -> 401 from the gateway even though the backend would
   assert.ok(calls.length >= 1);
   for (const c of calls) { assert.match(c.url, /^http:\/\/127\.0\.0\.1:\d+\//); assert.equal(c.auth, 'Bearer host-key-123'); }
 });
+
+test('Boundary: llama upstream key set + empty client apiKey refuses keyless mode', () => {
+  assert.throws(
+    () => requireClientKeyWhenUpstreamKeyed('', 'llama-host-key'),
+    (e) => e instanceof ValidationError && /refusing keyless client mode/.test(e.message),
+  );
+  assert.throws(
+    () => requireClientKeyWhenUpstreamKeyed(null, 'k'),
+    (e) => e instanceof ValidationError,
+  );
+  assert.doesNotThrow(() => requireClientKeyWhenUpstreamKeyed('client', 'llama'));
+  assert.doesNotThrow(() => requireClientKeyWhenUpstreamKeyed('', ''));
+  assert.doesNotThrow(() => requireClientKeyWhenUpstreamKeyed('client', ''));
+});
+
