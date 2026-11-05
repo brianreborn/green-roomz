@@ -90,7 +90,7 @@ exec "${HOME}/grz-runtime/bin/llama-server" "$@"
 WRAP
 chmod 755 "$RT/run-llama-server.sh"
 
-MAN="$HOME_GRZ/config/agents.note9.json"
+MAN="$HOME_GRZ/config/agents.android-termux.json"
 [[ -f $MAN ]] || MAN="$HOME_GRZ/config/agents.android.json"
 test -f "$HOME_GRZ/bin/green-roomz.mjs"
 test -f "$MAN"

@@ -1,6 +1,6 @@
 # sm11-monitor
 
-CUDA **6.5 / sm_1.1** security-monitor hot-path assist for qodesh **GeForce 8600 GT**.
+CUDA **6.5 / sm_1.1** security-monitor hot-path assist for mvp-host **GeForce 8600 GT**.
 
 Proves the GPU can do mailbox/monitor floor work without listing models (**GPU MUST NOT list**):
 
@@ -23,7 +23,7 @@ Host owns the 32-bit lock-free ring index; GPU assists hash/copy/scrub/cmp/seq o
 
 **Landed instead:** host-authoritative index + optional device meta mirror (auto H2D after push/scrub commits; explicit sync/dump flags for verify).
 
-## Build (qodesh)
+## Build (mvp-host)
 
 Requires:
 
@@ -36,7 +36,7 @@ native\sm11-monitor\build.bat
 
 Output: `native\sm11-monitor\out\sm11_monitor.exe`
 
-On qodesh, VS2013 has no native amd64 `vcvars64.bat`, so the script falls back to **Win32** (`-m32`) — verified on GeForce 8600 GT.
+On mvp-host, VS2013 has no native amd64 `vcvars64.bat`, so the script falls back to **Win32** (`-m32`) — verified on GeForce 8600 GT.
 
 ## Run
 
@@ -70,9 +70,9 @@ Flags:
 
 Expect text like `copy_ok=1 hash_ok=1` and `device0=GeForce 8600 GT sm_11`, plus `scrub_ok=1` / `seq_ok=1` / `cmp_ok=1` / `ring_ok=1` when those probes run.
 
-**Live proof (qodesh):** `copy_ok=1 hash_ok=1 cmp_ok=1 scrub_ok=1 seq_ok=1 ring_ok=1` on the 8600 GT with CUDA 6.5 / sm_11.
+**Live proof (mvp-host):** `copy_ok=1 hash_ok=1 cmp_ok=1 scrub_ok=1 seq_ok=1 ring_ok=1` on the 8600 GT with CUDA 6.5 / sm_11.
 
-## Stress / latency (qodesh, 2026-09-14)
+## Stress / latency (mvp-host, 2026-09-14)
 
 Cold **process spawn** dominates (~100 ms). In-process reuse is an order of magnitude warmer.
 
@@ -138,11 +138,11 @@ set GRZ_SM11=1
 node --test test/monitor-sm11-gpu.test.mjs
 ```
 
-**Soak+CI (qodesh, 2026-09-14, tip `ac90e9c`):** `sm11-soak --waves 30 --per-wave 64` → 3840 pushes, `fail=0`, mailbox/ipc `gpuOk=120`, `serveAlive`, `max_push_ms≈7.5`, `elapsed_ms≈860`; `sm11-ci.ps1` PASS; `monitor-sm11-gpu.test.mjs` 36/36.
+**Soak+CI (mvp-host, 2026-09-14, tip `ac90e9c`):** `sm11-soak --waves 30 --per-wave 64` → 3840 pushes, `fail=0`, mailbox/ipc `gpuOk=120`, `serveAlive`, `max_push_ms≈7.5`, `elapsed_ms≈860`; `sm11-ci.ps1` PASS; `monitor-sm11-gpu.test.mjs` 36/36.
 
 ## N-API / node-gyp spike (#17) — blocked; keep `--serve`
 
-Spike (qodesh, 2026-09-14, ~45 min): is a tiny **node-gyp / N-API** addon that links CUDA 6.5 and calls `cudaGetDeviceProperties` realistic next to this Win32 `sm11_monitor.exe`?
+Spike (mvp-host, 2026-09-14, ~45 min): is a tiny **node-gyp / N-API** addon that links CUDA 6.5 and calls `cudaGetDeviceProperties` realistic next to this Win32 `sm11_monitor.exe`?
 
 **Decision: no.** Keep the persistent **`--serve` stdin protocol** already wired in `src/monitor/sm11-gpu.mjs`. Do not scaffold `native/sm11-napi/`.
 

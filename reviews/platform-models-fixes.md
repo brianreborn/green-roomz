@@ -10,9 +10,9 @@ Sources: `/workspace/reviews/platform-models.md`.
 |---|---|---|
 | **PF-M1** | One on-disk basename per artifact = upstream HF name. Update `agents.cursor.json` code+text from `missing-qwen-instruct.gguf` → `Qwen2.5-0.5B-Instruct-Q4_K_M.gguf` (or whatever fetch installs). Keep validate fail-closed if file absent. | `config/agents.cursor.json`, optionally windows-mvp code alias |
 | **PF-M2** | Specialist commands use `${GRZ_EXE}`: `whisper-server${GRZ_EXE}`, `piper${GRZ_EXE}`, `sd-server${GRZ_EXE}` under `${GRZ_ROOT}/runtime/`. | cursor + windows-mvp manifests |
-| **PF-M3** | Termux/note9: same basenames under `${HOME}/grz-runtime/models/`; retire opaque `missing/text.gguf` once filled (or map via thin wrappers). Extend `termux-start.sh` / `note9-termux-setup.sh` / `deploy-android.sh` to copy **all** `models/*` (and optional runtime bins) from staging → HOME, not only nexus. | note9/android manifests + launchers |
+| **PF-M3** | Termux/android-legacy: same basenames under `${HOME}/grz-runtime/models/`; retire opaque `missing/text.gguf` once filled (or map via thin wrappers). Extend `termux-start.sh` / `termux-setup.sh` / `deploy-android.sh` to copy **all** `models/*` (and optional runtime bins) from staging → HOME, not only nexus. | android-legacy/android manifests + launchers |
 | **PF-M4** | Fetch family: generalize `fetch-tiny-instruct.cmd` pattern (curl fail-closed, `.partial`, min size) for whisper/piper/sd/vision — or one `scripts/fetch-models.cmd` + `.sh` driven by a table. Dest = `%GRZ_ROOT%\models` / `runtime`, **never** `C:\LocalAI`. | `scripts/` |
-| **PF-M5** | Docs + operator banner: qodesh/beta fill uses LocalAppData / `GRZ_ROOT`; `agents.windows.json` = shalom LocalAI overlay only. Fix **README.md** (still says default=`agents.windows.json` + `C:\LocalAI`) and soften `docs/deployment.md`. Pack `start.cmd` already defaults windows-mvp. | README.md, docs (Researcher may own) |
+| **PF-M5** | Docs + operator banner: mvp-host/beta fill uses LocalAppData / `GRZ_ROOT`; `agents.windows.json` = win-host LocalAI overlay only. Fix **README.md** (still says default=`agents.windows.json` + `C:\LocalAI`) and soften `docs/deployment.md`. Pack `start.cmd` already defaults windows-mvp. | README.md, docs (Researcher may own) |
 | **PF-M6** | Vision fill = model + mmproj pair; manifest both or skip agent. | manifests + fetch table |
 | **PF-M7** | Case-preserve; flat `models/`; quote all Win paths; Termux prefer `cp` over `ln -sf` when source is sdcard. | fetch + termux scripts |
 
@@ -26,7 +26,7 @@ Sources: `/workspace/reviews/platform-models.md`.
 ## Out of scope
 
 - Actually downloading multi-GB weights on this box.
-- CUDA 1.1 build for qodesh 8600 GT.
+- CUDA 1.1 build for mvp-host 8600 GT.
 - API-key product / Knox.
 - Git push (gh not logged in).
 

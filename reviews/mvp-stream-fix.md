@@ -3,7 +3,7 @@
 **When:** 2026-09-06 ~08:52–09:05 AM PT  
 **Tree:** `/workspace/green-roomz`  
 **Constraint:** no box `:8080`/`:8187` bounce; no GGUF on GPU; no git push; local commit OK.  
-**qodesh:** not connected this session (`ListMachines` empty) — live re-verify deferred.
+**mvp-host:** not connected this session (`ListMachines` empty) — live re-verify deferred.
 
 ---
 
@@ -46,9 +46,9 @@ Unit: `node --test --test-name-pattern='resident|stream|fallback|cold specialist
 
 ---
 
-## qodesh re-verify (when machine connected)
+## mvp-host re-verify (when machine connected)
 
-1. `CopyFromBox` into `C:\Users\brian\Documents\green-roomz`:
+1. `CopyFromBox` into `%USERPROFILE%\Documents\green-roomz`:
    - `src\gateway.mjs`
    - `test\gateway.test.mjs` (optional on Windows)
 2. PF-aware bounce: `stop.cmd` then `scripts\start-windows-mvp.cmd` (quoted `GRZ_LLAMA` / `GRZ_MANIFEST`). Wait for `:8080` + pre-warm `:8187`.
@@ -68,7 +68,7 @@ Or: `scripts\mvp-parity-battery.cmd` and confirm case E PASS.
 
 ## Parity board
 
-Case E: **FIXED in gateway (unit-verified)**; **live qodesh re-verify pending** (machine offline). See update in `qodesh-mvp-parity-battery.md`.
+Case E: **FIXED in gateway (unit-verified)**; **live mvp-host re-verify pending** (machine offline). See update in `mvp-host-parity-battery.md`.
 
 ---
 
@@ -98,7 +98,7 @@ data: {"choices":[{"delta":{"content":"hi-stream"}}]}
 data: [DONE]
 ```
 
-Live qodesh re-verify still pending (machine offline); box-side stream surface after a6be0f9 is confirmed.
+Live mvp-host re-verify still pending (machine offline); box-side stream surface after a6be0f9 is confirmed.
 
 ---
 

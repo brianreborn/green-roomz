@@ -127,7 +127,7 @@ test('replicaCount 1 cannot majority-reboot', () => {
     ticket: { hi: 0xCE50, lo: 21 },
     domain: localReplica,
     verb: 'reboot',
-    voter: 'qodesh-self',
+    voter: 'mvp-host-self',
     bootId: { hi: 2, lo: 2 },
   });
   assert.equal(ballots.ok, true);
@@ -231,9 +231,9 @@ test('three domain types are distinct', () => {
   assert.equal(VERBS.includes(rec.grade), false);
 });
 
-test('Note9 missing cap rejects secure_reboot', () => {
-  const note9 = createRespond({ platform: 'note9', aidRoot: false, bootId: { hi: 4, lo: 4 } });
-  const missing = note9.secure_reboot({ ticket: { hi: 0xCE50, lo: 41 } }, { callerRole: 'respond' });
+test('Android-legacy phone missing cap rejects secure_reboot', () => {
+  const androidLegacy = createRespond({ platform: 'android-legacy', aidRoot: false, bootId: { hi: 4, lo: 4 } });
+  const missing = androidLegacy.secure_reboot({ ticket: { hi: 0xCE50, lo: 41 } }, { callerRole: 'respond' });
   assert.equal(missing.kind, 'reject');
   assert.match(missing.reason, /missing capability/);
   assert.notEqual(missing.ok, true);

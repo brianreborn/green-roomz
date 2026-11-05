@@ -93,7 +93,7 @@ test('projector is prohibited on text-only agents', () => {
   assert.match(String(caught.details), /projector/);
 });
 
-test('default manifest is portable cursor (not windows/shalom)', async () => {
+test('default manifest is portable cursor (not windows/win-host)', async () => {
   const { readFileSync } = await import('node:fs');
   const raw = readFileSync(new URL('../config/agents.cursor.json', import.meta.url), 'utf8');
   assert.ok(!raw.includes('/workspace/green-roomz'), 'raw cursor json must be portable');

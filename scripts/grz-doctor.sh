@@ -83,8 +83,8 @@ if [[ -n "${GRZ_MANIFEST:-}" ]]; then
     *) MANIFEST_REL="$MANIFEST_ABS" ;;
   esac
 elif [[ "$OS" == "android/termux" ]]; then
-  if [[ -f "$GRZ_ROOT/config/agents.note9.json" ]]; then
-    MANIFEST_REL="config/agents.note9.json"
+  if [[ -f "$GRZ_ROOT/config/agents.android-termux.json" ]]; then
+    MANIFEST_REL="config/agents.android-termux.json"
   else
     MANIFEST_REL="config/agents.android.json"
   fi
@@ -187,7 +187,7 @@ fi
 NEXT=""
 if [[ "$LLAMA_STATUS" != "OK" ]]; then
   if [[ "$OS" == "android/termux" ]]; then
-    NEXT="install android-arm64 llama into runtime/ (deploy-android.sh / note9-termux-setup.sh)"
+    NEXT="install android-arm64 llama into runtime/ (deploy-android.sh / termux-setup.sh)"
   elif [[ "$OS" == "windows" ]]; then
     NEXT="place llama-server.exe under runtime/ (Win CPU llama zip)"
   elif [[ "$OS" == "darwin" ]]; then

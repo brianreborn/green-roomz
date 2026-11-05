@@ -64,11 +64,11 @@ B14/Fuzz-10 own the expand hole this P0. PF2 remainder is next cut. Boundary sti
 
 ## PF3 — portable cursor manifest in git; default is not windows.json
 
-**Invariant:** `loadManifest()` without `--manifest` loads a portable pack manifest, not shalom LocalAI. Git `config/agents.cursor.json` matches the pack (`GRZ_ROOT` + `GRZ_EXE` + relative models/). `agents.windows.json` remains a shalom overlay only.
+**Invariant:** `loadManifest()` without `--manifest` loads a portable pack manifest, not win-host LocalAI. Git `config/agents.cursor.json` matches the pack (`GRZ_ROOT` + `GRZ_EXE` + relative models/). `agents.windows.json` remains a win-host overlay only.
 
 **Files:** `src/constants.mjs:22`; `src/config.mjs:90`; `bin/green-roomz.mjs:43-44`; `package.json:11`; git `config/agents.cursor.json`; git `scripts/cursor-serve.sh`, `cursor-validate.sh`, `cursor-unit.sh`, `start-green-roomz.ps1`.
 
-- Change `DEFAULT_MANIFEST` to `agents.cursor.json` (portable). Windows overlay is `--manifest config/agents.windows.json` on shalom only.
+- Change `DEFAULT_MANIFEST` to `agents.cursor.json` (portable). Windows overlay is `--manifest config/agents.windows.json` on win-host only.
 - Rewrite git cursor json like the pack. Rewrite cursor-*.sh to use GRZ_ROOT=`cd "$(dirname "$0")/.." && pwd` instead of `/workspace/green-roomz`.
 - `start-green-roomz.ps1`: `$Root = $PSScriptRoot/..` or LocalAppData Green-Roomz; `where.exe node` / `$env:Path`, not hardcoded Program Files or Documents\\green-roomz.
 - package.json start script: `node ./bin/green-roomz.mjs serve --manifest config/agents.cursor.json` (PF2 supplies GRZ_ROOT if unset).
@@ -100,17 +100,17 @@ B14/Fuzz-10 own the expand hole this P0. PF2 remainder is next cut. Boundary sti
 
 **Invariant:** nothing Termux must exec or mmap is required to live under `/data/local/tmp`. Drop zone stays write-once for adb. `termux-start.sh` is the only phone entry (bash-read 644).
 
-**Files:** pack `termux-start.sh`; pack `deploy-android.sh`; `config/agents.note9.json`; `config/agents.android.json`; git `scripts/note9-run-llama-server.termux.sh`; git `scripts/note9-termux-setup.sh`; `src/benchmark.mjs:118`.
+**Files:** pack `termux-start.sh`; pack `deploy-android.sh`; `config/agents.android-termux.json`; `config/agents.android.json`; git `scripts/termux-run-llama-server.sh`; git `scripts/termux-setup.sh`; `src/benchmark.mjs:118`.
 
-- note9.json: command stays `${HOME}/grz-runtime/run-llama-server.sh`. Resident model `${HOME}/grz-runtime/models/Qwenstral-Small-3.1-0.5B.Q4_K_M.gguf`. missing-* specialists under `${HOME}/grz-runtime/missing/` or stay unavailable without tmp paths.
-- `termux-start.sh` already copies the GGUF to HOME; stop relying on mmap of tmp. Mirror git note9-termux-setup.sh sed, or ship HOME paths so sed is unnecessary.
-- Delete or rewrite `note9-run-llama-server.termux.sh` so it does not exec `/data/local/tmp/grz/bin/llama-server`.
-- agents.android.json command: same wrap as note9, or copy ELF into `$GRZ_ROOT/runtime/bin` and keep the json. Do not leave a third layout.
+- agents.android-termux.json: command stays `${HOME}/grz-runtime/run-llama-server.sh`. Resident model `${HOME}/grz-runtime/models/Qwenstral-Small-3.1-0.5B.Q4_K_M.gguf`. missing-* specialists under `${HOME}/grz-runtime/missing/` or stay unavailable without tmp paths.
+- `termux-start.sh` already copies the GGUF to HOME; stop relying on mmap of tmp. Mirror git termux-setup.sh sed, or ship HOME paths so sed is unnecessary.
+- Delete or rewrite `termux-run-llama-server.sh` so it does not exec `/data/local/tmp/grz/bin/llama-server`.
+- agents.android.json command: same wrap as android-legacy, or copy ELF into `$GRZ_ROOT/runtime/bin` and keep the json. Do not leave a third layout.
 - Wrap shebang: `#!/usr/bin/env bash` (path-audit P16) or spawn the ELF with LD_LIBRARY_PATH and skip the wrap.
 - `benchmark.mjs`: `bench_command` on the runtime block, or replace wrap basename `run-llama-server.sh` -> `llama-bench` next to the ELF, not a string replace on the wrap path.
 - `pkill -f` replaced by pidfile wait (PF1). Keep nohup. Wait 8080/8187 down before relaunch.
 
-**Tests:** note9.json after expand contains no `/data/local/tmp` for command or resident model. benchmark command for wrap is not the wrap script itself.
+**Tests:** agents.android-termux.json after expand contains no `/data/local/tmp` for command or resident model. benchmark command for wrap is not the wrap script itself.
 
 No Knox, no su, no exec-from-tmp.
 
@@ -128,7 +128,7 @@ No Knox, no su, no exec-from-tmp.
 - uninstall: call stop.cmd, wait until `runtime\\llama-server.exe` is not locked, then rmdir. Quote-escape VBS TargetPath (replace `"` ). Prefer .lnk; keep the Firefox .url warning.
 - Git `scripts/start-green-roomz.ps1` is not the pack installer; after PF3 it uses PSScriptRoot. Do not point it at agents.windows.json.
 
-**Tests:** grep start.cmd has no LocalAI string. install-windows.cmd has no goto llama_ok after curl errorlevel 1. Manual on qodesh is the real gate (this box is Linux).
+**Tests:** grep start.cmd has no LocalAI string. install-windows.cmd has no goto llama_ok after curl errorlevel 1. Manual on mvp-host is the real gate (this box is Linux).
 
 ---
 
@@ -191,9 +191,9 @@ Do not double-implement waitForReady (RACE-P1).
 
 ## Out of scope this pack
 
-- Proving FreeBSD/qodesh/Note9 on this Linux box.
+- Proving FreeBSD/mvp-host/Android-legacy phone on this Linux box.
 - Shipping a Windows llama-server.exe in the slim zip.
-- Adreno/Vulkan on Note9.
+- Adreno/Vulkan on Android-legacy phone.
 - translation-agent alias.
 - Knox/Magisk/root.
 - Security P0 src items (RF1-RF3, Fuzz-1..6, F4, F14, reject envelopes). Researcher owns those.

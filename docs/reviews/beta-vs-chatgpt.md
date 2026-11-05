@@ -1,4 +1,4 @@
-# Green-Roomz vs ChatGPT / Grok (qodesh beta, 2026-09-07)
+# Green-Roomz vs ChatGPT / Grok (mvp-host beta, 2026-09-07)
 
 Living estimate. **Not** a quality bench. Last battery: `data/mvp-parity-last.json` **7/7 PASS** 08:35–08:39 UTC (`agents.windows-mvp.json` on `127.0.0.1:8080`, health `degraded`).
 
@@ -15,7 +15,7 @@ Frontier Grok/ChatGPT is not the right quality bar for this box. The honest bar 
 
 ## Surface (what a ChatGPT-like client needs)
 
-| Feature | ChatGPT / Grok | GRZ qodesh tonight | Gap |
+| Feature | ChatGPT / Grok | GRZ mvp-host tonight | Gap |
 |---|---|---|---|
 | `GET /v1/models` | many | 11 aliases listed; most **unavailable** | health `degraded` |
 | Chat completions | yes | yes, Instruct 0.5B | ~17s one-shot (case C, 17198 ms, `parity-ok`) |
@@ -60,11 +60,11 @@ Without new downloads (beta tonight):
 3. Dogfood `scripts\chat-mvp.cmd` and slash `/text` `/auto`. Expect slow, small-model chat. Pin with `lock_alias` if the client can.
 4. Keep missing specialists as **503**, not fake ChatGPT.
 
-To move the **product** score (not tonight, needs RAM/models): 1.5B Instruct if free RAM allows; real `/code`; piper; optional Note 9 Termux worker. Still not frontier Grok.
+To move the **product** score (not tonight, needs RAM/models): 1.5B Instruct if free RAM allows; real `/code`; piper; optional Android-legacy phone Termux worker. Still not frontier Grok.
 
 ## E2E app loop (languages as needed)
 
-`green-roomz agent --goal "..." [--workspace dir] [--offline] [--lang py]` writes, runs, **tests**, and feeds compiler/runtime errors back. Language comes from the goal, `--lang`, or file extension. Unknown extensions can be registered (`runtime` tool) against an allowlisted bin on PATH — that is how it learns a language mid-session. Missing toolchains (Go/Rust/C on qodesh) return 127, they are not downloaded.
+`green-roomz agent --goal "..." [--workspace dir] [--offline] [--lang py]` writes, runs, **tests**, and feeds compiler/runtime errors back. Language comes from the goal, `--lang`, or file extension. Unknown extensions can be registered (`runtime` tool) against an allowlisted bin on PATH — that is how it learns a language mid-session. Missing toolchains (Go/Rust/C on mvp-host) return 127, they are not downloaded.
 
 Answers (agent + live eval) are budgeted at **60s**, not 3–5 minutes. `gateway.agent_chat_timeout_ms` is **60000**. Default eval is smoke + fail-fast + offline (seconds). One live gateway hit: `npm run eval:e2e:live`. Full 16 offline: `npm run eval:e2e:full`.
 

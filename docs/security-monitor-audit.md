@@ -4,14 +4,14 @@ Canonical spec: `docs/security-monitor-requirements.md`
 
 ## Executive
 
-Coherent PQ-style intent. Strange: several MUSTs cannot all be true on qodesh (Athlon 1+1) and stock Note 9.
+Coherent PQ-style intent. Strange: several MUSTs cannot all be true on mvp-host (Athlon 1+1) and stock Android-legacy phone.
 
 ## Blockers
 
-- **F1** 3-replica majority vs qodesh 1+1. Do not freeze REPLICAS=3. Quorum at n=1 unanswered.
+- **F1** 3-replica majority vs mvp-host 1+1. Do not freeze REPLICAS=3. Quorum at n=1 unanswered.
 - **F2** Three vote domains (local replicas, live peers, local-wipe-must-not-wait-on-WAN). Do not freeze one Vote{n=3}.
 - **F3** Copy-only vs mapped pinned host memory. GPU path: copy-engine private slot or host memcpy. Monitor↔monitor copy-only.
-- **F4** Highest-grade default secure_reboot vs Note 9 no AID_ROOT. Missing verbs reject, never no-op success.
+- **F4** Highest-grade default secure_reboot vs Android-legacy phone no AID_ROOT. Missing verbs reject, never no-op success.
 - **F5** Respond MUST live outside 8080; 8080 is the only process. v1: lockdown/reboot/secure_reboot uncallable stubs.
 - **F6** Same graph for machine and ifX. Need verb × target matrix. lockdown(ifX) / secure_reboot(eth0) must not type-check.
 - **F7** Android “same envelope” vs almost none of the call table. Freeze fields + capability mask; missing bit = reject.
@@ -28,6 +28,6 @@ Envelope fields; seq as logical 64-bit with {hi,lo} on sm_1.1; push non-blocking
 
 Replica/quorum, GPU ring choice, respond owner process, per-OS verb matrix, identity struct, ticket representation, second upcall queue body, encrypt-volumes, halt recovery, map-edit vote, enroll of node 1, vote TTL, waitable handle type.
 
-## sm_1.1 — implemented on qodesh (monitor-on-8600)
+## sm_1.1 — implemented on mvp-host (monitor-on-8600)
 
 **Usefulness bar met** for security-monitor hot path on the 8600 GT (#13 closed). `native/sm11-monitor` (CUDA 6.5 / sm_11, **Win32** VS2013 fallback): copy+cmp, FNV (+batch), scrub, seq `{hi,lo}`, fixed private-slot ring + host-authoritative meta mirror, `--loops` / warm `--serve`. JS `sm11-gpu.mjs` wires fat-hash + **`preferRing`** hot path (enqueue/drop/drain → ring assists when `--serve` is up) with scrub/seq/batch probe fallback; ring persists across serve cmds. Load/soak: `scripts/sm11-load.mjs`, `scripts/sm11-soak.mjs` (10k+ pushes). Place/respond/logger stay off CUDA. **#17 N-API wontfix** — keep `--serve`. Stretch leftovers (not bar): #16 Win32→x64; #14 optional 0.5B; deeper CUDA-owned index **wontfix** (meta mirror done). See `native/sm11-monitor/README.md`, `docs/fleet-targets.md` ship section.

@@ -4,7 +4,7 @@
   "notes": [
     "Families map to public evals: IFEval (verifiable constraints), MT-Bench turn-1 (constraint persist), OpenAI chat schema, specialist honesty.",
     "Not MMLU/GAIA/SWE-bench. Those need tools and a frontier model.",
-    "max_tokens stay tiny for qodesh ~3 tok/s."
+    "max_tokens stay tiny for mvp-host ~3 tok/s."
   ],
   "cases": [
     {

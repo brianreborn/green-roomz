@@ -2,7 +2,7 @@
  * Place: bind and yield only (scheduler/IPC callers).
  * In-memory: a worker can bind a core/slice id and yield it.
  *
- * qodesh 1+1: at most one place slot besides llama.
+ * mvp-host 1+1: at most one place slot besides llama.
  * Do not steal the llama/GPU floor.
  * MUST NOT as CUDA launch. MUST NOT call lockdown/reboot/secure_reboot.
  * Missing capability => reject. SAD cannot bind the respond slice.
@@ -29,8 +29,8 @@ export const FLOOR = Object.freeze([
   'respond',
 ]);
 
-/** qodesh Athlon II X2: llama vs one monitor slice. Not 3-replica. */
-export const QODESH = Object.freeze({
+/** Dual-core MVP host (Athlon II X2 class): llama vs one monitor slice. Not 3-replica. */
+export const MVP_HOST = Object.freeze({
   cores: 2,
   layout: '1+1',
   llama: true,
@@ -216,7 +216,7 @@ export function createPlace(options = {}) {
 
   const extraSlots = Number.isFinite(options.extraSlots)
     ? Number(options.extraSlots)
-    : QODESH.extraSlots;
+    : MVP_HOST.extraSlots;
 
   /** slice id -> occupancy record. llama floor is pre-occupied. */
   const occupied = new Map();

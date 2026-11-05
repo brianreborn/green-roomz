@@ -46,7 +46,7 @@ Configs (cors empty; Cursor nexus threads remain 4):
 - `config/agents.cursor.json`
 - `config/agents.windows.json`
 - `config/agents.android.json`
-- `config/agents.note9.json`
+- `config/agents.android-termux.json`
 
 Tests extended:
 

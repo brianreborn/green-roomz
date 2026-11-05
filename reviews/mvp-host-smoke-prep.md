@@ -1,8 +1,8 @@
-# qodesh Windows MVP smoke prep
+# mvp-host Windows MVP smoke prep
 
-**Machine:** qodesh (`19f2c19e-e100-49f0-8507-813d66727973`)  
+**Machine:** mvp-host (`<machine-id>`)  
 **When:** 2026-09-06 ~08:14–08:23 AM PT  
-**Tree:** `C:\Users\brian\Documents\green-roomz`  
+**Tree:** `%USERPROFILE%\Documents\green-roomz`  
 **Constraints honored:** never GGUF on 8600 GT; no Afterburner; CPU llama only; prefer cmd.exe under Documents; no git push; no LocalAI vulkan as primary llama; live `:8080` not bounced.
 
 ---
@@ -38,12 +38,12 @@ Copied from box `/workspace/green-roomz/...` (CopyFromBox) unless already presen
 ## 2) llama_server retarget (`config\agents.windows.json`)
 
 **Verified exe:**  
-`C:\Users\brian\Documents\green-roomz\runtime\llama-b10702-bin-win-cpu-x64\llama-server.exe` exists.  
+`%USERPROFILE%\Documents\green-roomz\runtime\llama-b10702-bin-win-cpu-x64\llama-server.exe` exists.  
 Size **9216** is the normal b10702 thin stub; companion `llama-server-impl.dll` ~8.87 MB in same folder (full CPU zip pack present).
 
 | Field | Before | After (verified) |
 |-------|--------|------------------|
-| `runtimes.llama_server.command` | `C:\LocalAI\llama-b10665-bin-win-vulkan-x64\llama-server.exe` | `C:\Users\brian\Documents\green-roomz\runtime\llama-b10702-bin-win-cpu-x64\llama-server.exe` |
+| `runtimes.llama_server.command` | `C:\LocalAI\llama-b10665-bin-win-vulkan-x64\llama-server.exe` | `%USERPROFILE%\Documents\green-roomz\runtime\llama-b10702-bin-win-cpu-x64\llama-server.exe` |
 | `env.GGML_VULKAN` | `1` | `0` |
 | `base_args` | included `--main-gpu 0` | `--host 127.0.0.1 --parallel 1 --prio -1 --split-mode none --flash-attn off --poll 0` |
 
@@ -90,7 +90,7 @@ Disk retarget of `agents.windows.json` does not change the running process until
 
 ### Next start (when operator chooses to bounce)
 
-From `C:\Users\brian\Documents\green-roomz` (cmd.exe), after stopping the current serve:
+From `%USERPROFILE%\Documents\green-roomz` (cmd.exe), after stopping the current serve:
 
 ```bat
 set GRZ_MANIFEST=%CD%\config\agents.windows-mvp.json
@@ -116,7 +116,7 @@ Expect CPU profiles only (`--device none` / `--n-gpu-layers 0`). **Never** map G
 
 ## VERIFIED (2026-09-06 ~09:07 AM PT)
 
-Rechecked on qodesh after prep claim DONE:
+Rechecked on mvp-host after prep claim DONE:
 
 | Check | Result |
 |-------|--------|
@@ -128,6 +128,6 @@ Rechecked on qodesh after prep claim DONE:
 | Live `:8080` (pre-parity bounce) | was PID 11484; later PF-bounced onto MVP |
 | 8600 GT / Afterburner / git push | not used |
 
-**Post-verify operator priority:** hybrid-chat parity battery required bounce onto MVP. See `qodesh-mvp-parity-battery.md`.
+**Post-verify operator priority:** hybrid-chat parity battery required bounce onto MVP. See `mvp-host-parity-battery.md`.
 
-**Athlon 2-core fix applied on disk:** MVP llama profiles changed from `--threads 4/6` → **`--threads 1`** (profile ids `cpu-1` / `cpu-1b`) so nexus+specialist Σ≤`nproc` (2). Manifest copied to qodesh; **serve bounce to pick up threads=1 was blocked** when qodesh disconnected mid-operation — re-bounce when host is back.
+**Athlon 2-core fix applied on disk:** MVP llama profiles changed from `--threads 4/6` → **`--threads 1`** (profile ids `cpu-1` / `cpu-1b`) so nexus+specialist Σ≤`nproc` (2). Manifest copied to mvp-host; **serve bounce to pick up threads=1 was blocked** when mvp-host disconnected mid-operation — re-bounce when host is back.

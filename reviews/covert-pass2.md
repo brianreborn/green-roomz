@@ -181,9 +181,9 @@ Cite check of pass1 items 1–10: **no drift**. e2e-fresh `src/` matches; portab
 - Pass1 CC-19 listed `src/util.mjs:148-155` next to envelope size. That line is `jsonResponse` (unpadded `content-length`). `packSlot` is `src/monitor/ids.mjs:7,97-106` (16-byte seq+ticket, unused by `CopyRing`). Live dump size is still the JSON `content-length` of `/v1/monitor/recent`.
 
 ### CC-P2-12 `--poll 0` is cursor-only (medium)
-- file: `config/agents.cursor.json:38-39` has `"--poll","0"`; android/windows/note9 `base_args` omit it; `src/process-manager.mjs` `buildLaunch` does not inject
+- file: `config/agents.cursor.json:38-39` has `"--poll","0"`; android/windows/android-legacy `base_args` omit it; `src/process-manager.mjs` `buildLaunch` does not inject
 - leaks: idle llama-server may busy-wait on those hosts (shared LLC / cache-line with co-resident agents)
-- to: co-resident process on android/windows/note9
+- to: co-resident process on android/windows/android-legacy
 - notes: Fixer F6. Live cursor serve **does** pass `--poll 0` (argv confirmed).
 
 ### CC-P2-13 `keepReasoning` skips `stripEscapes` on reasoning fields (medium)

@@ -115,7 +115,7 @@ Gateway/proxy/peek: `const unpin = this.processes.pin(alias)` around `ensure`+`p
 
 ## RF3 — machine thread budget (with covert F5)
 
-**Invariant (operator lock, Researcher 2026-09-03):** 4-thread resident **default**, 6-thread **sprint**. Σ `--threads` of live llama-server processes ≤ `os.cpus().length`. Empty profile still gets `--threads 4`. Never retry a higher thread count after timeout (P10). **Do not drop Cursor/Note9 nexus to 2.**
+**Invariant (operator lock, Researcher 2026-09-03):** 4-thread resident **default**, 6-thread **sprint**. Σ `--threads` of live llama-server processes ≤ `os.cpus().length`. Empty profile still gets `--threads 4`. Never retry a higher thread count after timeout (P10). **Do not drop Cursor/Android-legacy phone nexus to 2.**
 
 Arithmetic:
 

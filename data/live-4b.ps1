@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
-$root = 'C:\Users\brian\Documents\Codex\2026-08-28\files-pasted-by-the-user-1\outputs\green-roomz'
-$node = 'C:\Users\brian\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe'
+$root = Split-Path -Parent $PSScriptRoot
+$node = (Get-Command node -ErrorAction Stop).Source
 $curl = 'C:\Windows\System32\curl.exe'
 Set-Location $root
 $data = Join-Path $root 'data'

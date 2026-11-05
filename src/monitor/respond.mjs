@@ -2,12 +2,12 @@
  * Respond: record votes. Do not execute reboot-class bodies on v1.
  *
  * lockdown / reboot / secure_reboot are UNCALLABLE (reject, never spawn).
- * replicaCount is a host parameter defaulting to 1 (qodesh 1+1). NOT REPLICAS=3.
+ * replicaCount is a host parameter defaulting to 1 (mvp-host 1+1). NOT REPLICAS=3.
  * Three vote domains are distinct types: localReplica, livePeer, localEmergency.
  * A lone replica is not majority-of-itself for reboot-class.
  * 8080 / SAD / worker / logger cannot call lockdown/reboot/secure_reboot.
  * Grade is optional and separate from verb. SAD posts do not invoke respond.
- * Missing capability => reject. Note 9 / no AID_ROOT: secure_reboot rejects.
+ * Missing capability => reject. Android-legacy phone / no AID_ROOT: secure_reboot rejects.
  * halt(machine) is v1-illegal. Votes carry bootId; mismatch is not applied.
  * Vote TTL is caller-supplied (DEFAULT_VOTE_TTL_MS is undefined, not a SHALL).
  */
@@ -35,7 +35,7 @@ import {
 
 export { assertCaller, callerDeniedReason, GRADE, GRADES, VERBS };
 
-/** qodesh host default (1+1). Parameter, not a frozen replica topology. */
+/** mvp-host host default (1+1). Parameter, not a frozen replica topology. */
 export const replicaCount = 1;
 export const DEFAULT_REPLICA_COUNT = 1;
 
@@ -133,7 +133,8 @@ function hasAidRoot(opts, options) {
   if (explicit === true) return true;
   if (explicit === false) return false;
   const platform = String(opts.platform ?? options.platform ?? '').toLowerCase();
-  if (platform === 'note9' || platform === 'android' || platform === 'stock-note9') return false;
+  // Android family (stock or legacy phones): platform 'android', 'stock-android' or 'android-<model>'.
+  if (platform === 'android' || platform === 'stock-android' || platform.startsWith('android-')) return false;
   return true;
 }
 
