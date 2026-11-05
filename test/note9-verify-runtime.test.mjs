@@ -94,6 +94,27 @@ test('NOTE9-PID: pidfile kill only when /proc cmdline matches; pidfile mode 600'
   const r = spawnSync('bash', ['-c', script], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: root, GRZ_SERVE_PIDFILE: pf } });
   assert.match(r.stdout, /^600$/m); assert.match(r.stdout, /ALIVE/); assert.match(r.stderr, /not green-roomz serve; not killing/);
 });
+test('NOTE9-PID: kill -9 re-checks cmdline; pid-reuse after SIGTERM is not SIGKILL\'d', { skip: !hasBash || !existsSync('/proc/self/cmdline') }, () => {
+  const root = mkdtempSync(join(tmpdir(), 'grz-pid9-'));
+  const pf = join(root, 'grz-serve.pid');
+  const bin = join(root, 'bin'); mkdirSync(bin, { recursive: true });
+  // Looks like our serve in cmdline; on TERM, exec sleep so the pid is reused by a non-serve process.
+  writeFileSync(join(bin, 'green-roomz.mjs'), `#!/bin/bash\ntrap 'exec sleep 60' TERM\nwhile true; do sleep 1; done\n`, { mode: 0o755 });
+  const script = `
+    . "${PIDLIB}"
+    "${bin}/green-roomz.mjs" serve & sp=$!
+    grz_write_pid $sp
+    grz_stop_serve
+    if kill -0 $sp 2>/dev/null; then echo REUSED_ALIVE; else echo REUSED_DEAD; fi
+    kill -9 $sp 2>/dev/null || true
+  `;
+  const r = spawnSync('bash', ['-c', script], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: root, GRZ_SERVE_PIDFILE: pf } });
+  assert.match(r.stdout, /REUSED_ALIVE/, r.stdout + r.stderr);
+  assert.match(r.stderr, /no longer green-roomz serve after wait; not sending SIGKILL/);
+  const src = readFileSync(PIDLIB, 'utf8');
+  assert.match(src, /grz_pid_is_serve/);
+  assert.match(src, /Re-check before SIGKILL|re-check/i);
+});
 
 const RUNNER = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'note9-run-llama-server.termux.sh');
 function runRunner(f, env = {}) {
