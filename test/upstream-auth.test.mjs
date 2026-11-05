@@ -38,3 +38,33 @@ test('SD-32 (c): key redacted from error messages and gateway error bodies', asy
   const pm = readFileSync(join(ROOT, 'src', 'process-manager.mjs'), 'utf8');
   assert.match(pm, /this\.fetch = withUpstreamKey\(fetchImpl, upstreamApiKey\(manifest\), backendPorts\(manifest\)\)/);
 });
+test('keyed upstream fetch uses redirect:manual and refuses 3xx (never follows with the key)', async () => {
+  const calls = [];
+  const f = async (url, init) => {
+    calls.push({ url: String(url), redirect: init?.redirect, auth: new Headers(init?.headers ?? {}).get('authorization') });
+    return new Response('', { status: 302, headers: { location: 'http://evil.example/steal' } });
+  };
+  const up = withUpstreamKey(f, 'HOSTKEY', new Set([8081]));
+  await assert.rejects(
+    up('http://127.0.0.1:8081/v1/chat/completions'),
+    (e) => e?.code === 'upstream_protocol' && /redirect 302/.test(e.message) && !e.message.includes('HOSTKEY'),
+  );
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].redirect, 'manual');
+  assert.equal(calls[0].auth, 'Bearer HOSTKEY');
+  // Non-keyed loopback (path not allowlisted) must not force manual or throw on 3xx.
+  const loose = [];
+  const f2 = async (url, init) => { loose.push(init?.redirect); return new Response('', { status: 302 }); };
+  const up2 = withUpstreamKey(f2, 'HOSTKEY', new Set([8081]));
+  const res = await up2('http://127.0.0.1:8081/evil');
+  assert.equal(res.status, 302);
+  assert.equal(loose[0], undefined);
+});
+test('keyed upstream 200 still returns the response; redirect:manual is set', async () => {
+  let seen;
+  const up = withUpstreamKey(async (_url, init) => { seen = init; return new Response('{}', { status: 200 }); }, 'HOSTKEY', new Set([8081]));
+  const res = await up('http://127.0.0.1:8081/health');
+  assert.equal(res.status, 200);
+  assert.equal(seen.redirect, 'manual');
+  assert.equal(new Headers(seen.headers).get('authorization'), 'Bearer HOSTKEY');
+});

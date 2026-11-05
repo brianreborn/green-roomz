@@ -3,6 +3,7 @@
 // Authorization header is never forwarded upstream; clients are authenticated separately at
 // the gateway edge (identityFrom).
 import { readApiKeyFile } from './config.mjs';
+import { UpstreamProtocolError } from './errors.mjs';
 
 // (b) Fixed backend host and a fixed llama-server path allowlist; ports come from the manifest
 // (agents[].port and variants), never from a client.
@@ -43,7 +44,8 @@ export function redactKey(text, key) {
 }
 
 /** Wrap a fetch: for loopback (llama-server) URLs, drop any inbound Authorization and send
- * `Bearer <key>` when a key is set. Non-loopback URLs are passed through untouched. */
+ * `Bearer <key>` when a key is set. Keyed requests use redirect:'manual' and treat any 3xx as
+ * an error so the key is never followed onto another URL. Non-loopback URLs pass through. */
 export function withUpstreamKey(fetchFn, key, ports = null) {
   if (typeof fetchFn !== 'function' || fetchFn.__grzUpstreamKey) return fetchFn;
   const wrapped = async (url, init = {}) => {
@@ -52,9 +54,19 @@ export function withUpstreamKey(fetchFn, key, ports = null) {
     // Never forward a client Authorization to a local backend.
     const headers = new Headers(init?.headers ?? {});
     headers.delete('authorization');
-    if (key && keyEligible(url, ports)) headers.set('authorization', `Bearer ${key}`);
+    const keyed = Boolean(key && keyEligible(url, ports));
+    if (keyed) headers.set('authorization', `Bearer ${key}`);
+    const next = { ...init, headers: Object.fromEntries(headers.entries()) };
+    // Never follow a redirect while the host key is attached.
+    if (keyed) next.redirect = 'manual';
     try {
-      return await fetchFn(url, { ...init, headers: Object.fromEntries(headers.entries()) });
+      const res = await fetchFn(url, next);
+      if (keyed && res.status >= 300 && res.status < 400) {
+        throw new UpstreamProtocolError(`keyed upstream returned redirect ${res.status}; refusing to follow with the host key`, {
+          status: res.status,
+        });
+      }
+      return res;
     } catch (err) {
       if (key && err && typeof err.message === 'string' && err.message.includes(key)) err.message = redactKey(err.message, key);
       throw err;
