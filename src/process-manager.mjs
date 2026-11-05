@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { backendPorts, upstreamApiKey, withUpstreamKey } from './upstream-auth.mjs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -197,7 +198,7 @@ export class ProcessManager {
     this.manifest = manifest;
     this.registry = registry;
     this.hostAdapter = hostAdapter;
-    this.fetch = fetchImpl;
+    this.fetch = withUpstreamKey(fetchImpl, upstreamApiKey(manifest), backendPorts(manifest)); // SD-32: health/slots/probes carry the host key
     this.spawn = spawnImpl;
     this.selectedProfiles = selectedProfiles;
     this.processes = new Map();

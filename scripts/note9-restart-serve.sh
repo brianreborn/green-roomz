@@ -1,15 +1,32 @@
-#!/data/data/com.termux/files/usr/bin/bash
-set -e
-cp /data/local/tmp/grz/green-roomz/src/memory.mjs "$HOME/green-roomz/src/memory.mjs"
-if [[ -f $HOME/grz-serve.pid ]]; then
-  kill "$(cat "$HOME/grz-serve.pid")" 2>/dev/null || true
-fi
-sleep 1
-export LD_LIBRARY_PATH="$HOME/grz-runtime/lib:$HOME/grz-runtime/bin"
-cd "$HOME/green-roomz"
-nohup node ./bin/green-roomz.mjs serve --manifest ./config/agents.note9.json --host 127.0.0.1 --port 8080 \
-  >"$HOME/grz-serve.out.log" 2>"$HOME/grz-serve.err.log" &
-echo $! | tee "$HOME/grz-serve.pid" /sdcard/Download/grz/serve.pid
+#!/usr/bin/env bash
+# Portable shebang (NewTermux may use a non-com.termux $PREFIX). Invoke as: bash <script>.sh
+: "${LANG:=C.UTF-8}"; export LANG
+# Restart serve only, from the verified tree resolved through $HOME/grz.current (no stored
+# runtime path). To update sources use note9-refresh-src.sh (verify + flip).
+set -euo pipefail
+umask 077
+SELF_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=note9-common.sh
+. "$SELF_DIR/note9-common.sh"
+grz_sdk_check || exit 1
+grz_state_init || exit 1
+grz_resolve_current || exit 1
+# Helpers come from the verified tree, not from wherever this script was read.
+# shellcheck source=note9-serve-pid.sh
+. "$GRZ_TREE/scripts/note9-serve-pid.sh"
+OPTIN=$(grz_log_opt_in "$GRZ_TREE") || { echo "ERROR: host override refused" >&2; exit 1; }
+PORT=$(grz_port "$GRZ_TREE") || exit 1
+KEYSRC=$(grz_key_check "$GRZ_TREE") || { echo "ERROR: no valid API key; not (re)starting the gateway" >&2; exit 1; }
+# Race R2: same install lock as the verifier — serialize stop+start vs install / another restart.
+grz_install_lock_acquire || exit 1
+# shellcheck disable=SC2329
+_grz_restart_cleanup() { grz_install_lock_release; }
+trap _grz_restart_cleanup EXIT
+grz_stop_serve
+grz_serve_start "$PORT" "$OPTIN"
+grz_install_lock_assert_held || { echo "ERROR: install lock lost during restart; refusing" >&2; exit 1; }
+echo "serve_pid=$GRZ_SERVE_PID tree=$GRZ_TREE logs=$([[ $OPTIN == 1 ]] && echo "$GRZ_STATE/logs" || echo off)"
+[[ ${GRZ_RESTART_NO_PROBE:-0} == 1 ]] && exit 0
 sleep 10
-node -e "fetch('http://127.0.0.1:8080/v1/models').then(async r=>console.log((await r.text()).slice(0,800)))"
+grz_probe "http://127.0.0.1:$PORT/v1/models" "$KEYSRC" 1 || true
 echo RESTART_DONE

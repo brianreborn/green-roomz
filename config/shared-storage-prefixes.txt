@@ -1,0 +1,11 @@
+# Android shared / adb-writable storage. Single source of truth for the shared-storage refusal
+# used by scripts/note9-shared-storage.sh (verifier, setup, runner) and src/config.mjs.
+# Compared against fully resolved (realpath) paths: a path is refused if it equals a prefix
+# (minus trailing slash) or lies under it.
+/storage/
+/sdcard
+/mnt/sdcard
+/mnt/user/
+/mnt/media_rw/
+/data/media/
+/data/local/tmp

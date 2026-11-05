@@ -9,7 +9,8 @@ import { AgentRegistry } from '../src/registry.mjs';
 import { ProcessManager } from '../src/process-manager.mjs';
 import { PolicyGate } from '../src/scheduler.mjs';
 import { SessionLedger } from '../src/sessions.mjs';
-import { Gateway, prepareInferenceBody } from '../src/gateway.mjs';
+import { Gateway, prepareInferenceBody, requireClientKeyWhenUpstreamKeyed } from '../src/gateway.mjs';
+import { ValidationError } from '../src/errors.mjs';
 import { sampleManifest, writeTinyF32Gguf } from './helpers.mjs';
 import { NEXUS_CHAT_SYSTEM, REQUIRED_ALIASES } from '../src/constants.mjs';
 
@@ -1838,5 +1839,42 @@ test('/v1/images/generations generates images via image-generation-agent', async
   assert.equal(res.status, 200);
   assert.ok(res.body.data[0].b64_json);
   assert.equal(res.headers['x-green-roomz-effective-alias'], 'image-generation-agent');
+});
+
+
+// SD-32 (d): the gateway authenticates the client itself; a backend that would accept anything
+// is never reached without the client key, and the upstream call carries the host key, not
+// whatever the client sent.
+test('SD-32: no client key -> 401 from the gateway even though the backend would accept it; upstream gets the host key', async (t) => {
+  const calls = [];
+  const { server } = await withServer(t, { GREEN_ROOMZ_API_KEY: 'host-key-123' }, {
+    ready: ['general-text-speculator'],
+    stubEnsure: true,
+    fetchImpl: async (url, init) => { calls.push({ url: String(url), auth: new Headers(init?.headers ?? {}).get('authorization') }); return jsonFetch({ choices: [{ message: { role: 'assistant', content: 'pong' } }] }); },
+  });
+  const body = { model: 'general-text-speculator', lock_alias: true, messages: [{ role: 'user', content: 'ping' }] };
+  for (const headers of [{}, { authorization: 'Bearer wrong' }, { authorization: 'host-key-123' }]) {
+    const r = await request(server, { path: '/v1/chat/completions', method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body });
+    assert.equal(r.status, 401); assert.ok(!JSON.stringify(r.body).includes('host-key-123'));
+  }
+  assert.equal(calls.length, 0, 'nothing forwarded before client auth');
+  const ok = await request(server, { path: '/v1/chat/completions', method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer host-key-123' }, body });
+  assert.equal(ok.status, 200);
+  assert.ok(calls.length >= 1);
+  for (const c of calls) { assert.match(c.url, /^http:\/\/127\.0\.0\.1:\d+\//); assert.equal(c.auth, 'Bearer host-key-123'); }
+});
+
+test('Boundary: llama upstream key set + empty client apiKey refuses keyless mode', () => {
+  assert.throws(
+    () => requireClientKeyWhenUpstreamKeyed('', 'llama-host-key'),
+    (e) => e instanceof ValidationError && /refusing keyless client mode/.test(e.message),
+  );
+  assert.throws(
+    () => requireClientKeyWhenUpstreamKeyed(null, 'k'),
+    (e) => e instanceof ValidationError,
+  );
+  assert.doesNotThrow(() => requireClientKeyWhenUpstreamKeyed('client', 'llama'));
+  assert.doesNotThrow(() => requireClientKeyWhenUpstreamKeyed('', ''));
+  assert.doesNotThrow(() => requireClientKeyWhenUpstreamKeyed('client', ''));
 });
 

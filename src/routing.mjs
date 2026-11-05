@@ -1,3 +1,4 @@
+import { stripControls } from './util.mjs';
 import { ValidationError } from './errors.mjs';
 import {
   CONFIDENCE_MOODS,
@@ -152,7 +153,7 @@ export function resolveExplicitModelPin(model, registry, { lockAlias = false } =
       }
       allowed.sort();
     }
-    throw new ValidationError(`Unknown agent alias: ${alias}`, { allowed });
+    throw new ValidationError(`Unknown agent alias: ${stripControls(alias)}`, { allowed });
   }
   const status = registry.status(alias);
   const unavailable = status?.state === 'unavailable';

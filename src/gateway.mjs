@@ -5,7 +5,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { fieldVote, similarityVote, resolveJudgeChoice, judgePrompt } from './council.mjs';
 import { AGENCY_ROLE, DEFAULT_FAITH, DEFAULT_FEAR, FALLBACK_ALIAS, HANDOFF_PEEK_CHARS, HANDOFF_PEEK_TIMEOUT_MS, MAX_SPECIALIST_HOPS, MONITOR_ALIAS, NEXUS_ALIAS, NEXUS_CHAT_SYSTEM, NEXUS_MAX_TOKENS, REBUKE_OP, UPSTREAM_MAX_BUFFER_BYTES, UPSTREAM_TIMEOUT_MS, YOLO_TOKEN } from './constants.mjs';
-import { loadDeclaredKernel } from './config.mjs';
+import { loadDeclaredKernel, readApiKeyFile } from './config.mjs';
+import { backendPorts, redactKey, upstreamApiKey, withUpstreamKey } from './upstream-auth.mjs';
 import { compileStockPrompt } from './compile-prompt.mjs';
 import { Mailbox } from './mailbox.mjs';
 import { CAP, MonitorIpc } from './monitor/ipc.mjs';
@@ -18,6 +19,7 @@ import { isIntrospectionProbe, introspectionFacts } from './introspect.mjs';
 import { proxyJson } from './proxy.mjs';
 import { aliasCanAdmit, audioDataFromBody, detectModalities, hardRuleRoute, isGenericChatRequest, isRoutableAlias, latestUserMessageText, NATIVE_CHAT, parseSlashCommand, stripSlashCommand } from './routing.mjs';
 import { contentChars, contextCharBudget, formatMemoryHeader, injectWorkingSet, memoryBounds } from './session-memory.mjs';
+import { assertModalityGate, modalityGateViolation } from './modality-gate.mjs';
 import { deadlineSignal, headerSafe, isTimeoutAbort, jsonResponse, readCappedText, redact, secureEquals, sleep, stripControls } from './util.mjs';
 import { holdMs, resolveTimingPrivacy } from './timing-quant.mjs';
 
@@ -43,6 +45,13 @@ const UNICORN_PAGE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..
 
 /** 8080 may post/observe hops. No vote / lockdown / reboot / respond rights. */
 export const GATEWAY_IPC_RIGHTS = (CAP.POST | CAP.OBSERVE | CAP.SNAPSHOT) >>> 0;
+
+// SD-23: api_key_file from the validated host override (path checked at load; content via one fd).
+function readOverrideApiKey(manifest) {
+  const file = manifest?._meta?.hostOverride?.api_key_file;
+  if (!file) return '';
+  return readApiKeyFile(file, { HOME: manifest._meta.hostHome ?? process.env.HOME }); // one O_NOFOLLOW open: fstat + read through the same fd
+}
 
 function identityFrom(request, apiKey) {
   const header = request.headers.authorization ?? '';
@@ -260,13 +269,31 @@ export function prepareInferenceBody(body, agent, extras = {}) {
   return payload;
 }
 
-function wantsRoutePlan(body, pathname) {
-  return body?.route_plan_only === true || String(pathname ?? '').endsWith('/route');
+// BND-01: the only route-plan path, and a fixed gateway-route -> upstream-path map.
+// The client pathname is never forwarded to a backend.
+const ROUTE_PLAN_PATH = '/v1/chat/completions/route';
+const CHAT_PATHS = new Set(['/v1/chat/completions', ROUTE_PLAN_PATH]);
+const UPSTREAM_PATHS = Object.freeze({
+  '/v1/chat/completions': '/v1/chat/completions',
+  [ROUTE_PLAN_PATH]: '/v1/chat/completions',
+  '/v1/embeddings': '/v1/embeddings',
+  '/v1/rerank': '/v1/rerank',
+  '/v1/moderations': '/v1/moderations',
+  '/v1/images/generations': '/v1/images/generations',
+});
+
+export function upstreamPathFor(pathname) {
+  const path = Object.prototype.hasOwnProperty.call(UPSTREAM_PATHS, pathname) ? UPSTREAM_PATHS[pathname] : null;
+  if (!path) throw new ValidationError('Route has no upstream mapping');
+  return path;
 }
 
-function isChatPath(pathname) {
-  const path = String(pathname ?? '').replace(/\/route$/, '') || '/v1/chat/completions';
-  return path === '/v1/chat/completions' || path.endsWith('/chat/completions');
+export function wantsRoutePlan(body, pathname) {
+  return body?.route_plan_only === true || pathname === ROUTE_PLAN_PATH;
+}
+
+export function isChatPath(pathname) {
+  return CHAT_PATHS.has(pathname);
 }
 
 function wrapNativeAsChat(alias, nativeJson, kind) {
@@ -356,6 +383,13 @@ function nativeRequestInit(kind, payload, signal) {
   };
 }
 
+/** Boundary: if a llama upstream key is configured, refuse keyless client modes. */
+export function requireClientKeyWhenUpstreamKeyed(apiKey, upstreamKey) {
+  if (upstreamKey && !apiKey) {
+    throw new ValidationError('llama upstream key is set but gateway has no API key; refusing keyless client mode');
+  }
+}
+
 export class Gateway {
   constructor({ manifest, registry, processes, sessions, policy, hostAdapter, fetchImpl, mailbox, ipc, logger, interrupts, brainz }) {
     this.manifest = manifest;
@@ -364,8 +398,12 @@ export class Gateway {
     this.sessions = sessions;
     this.policy = policy;
     this.hostAdapter = hostAdapter;
-    this.fetchImpl = fetchImpl ?? fetch;
-    this.apiKey = process.env.GREEN_ROOMZ_API_KEY || '';
+    // Client auth (edge) and upstream auth (llama-server) are separate: SD-32.
+    this.apiKey = process.env.GREEN_ROOMZ_API_KEY || readOverrideApiKey(manifest);
+    this.upstreamKey = upstreamApiKey(manifest);
+    // If llama is keyed, clients must authenticate too (no loopback-dev / allowlisted-peer).
+    requireClientKeyWhenUpstreamKeyed(this.apiKey, this.upstreamKey);
+    this.fetchImpl = withUpstreamKey(fetchImpl ?? fetch, this.upstreamKey, backendPorts(manifest));
     this.startedAt = Date.now();
     this.mailbox = mailbox ?? new Mailbox();
     this.ipc = ipc ?? new MonitorIpc({
@@ -554,7 +592,7 @@ export class Gateway {
       const identity = identityFrom(request, this.apiKey);
       if (!identity) return jsonResponse(response, 401, { error: { message: 'Unauthorized', type: 'auth_error' } }, cors);
       const modelRoute = modelsRoute(url.pathname);
-      if (!EXPLICIT_ROUTES.has(url.pathname) && !url.pathname.endsWith('/route') && !modelRoute) {
+      if (!EXPLICIT_ROUTES.has(url.pathname) && !modelRoute) {
         return jsonResponse(response, 404, { error: { message: 'Not found', type: 'not_found' } }, cors);
       }
       const headJson = (status, body) => {
@@ -655,9 +693,9 @@ export class Gateway {
         : {};
       return jsonResponse(response, status, {
         error: {
-          message: redact(error.message),
+          message: redactKey(redact(error.message), this.upstreamKey),
           type: error.code ?? 'internal_error',
-          details: error.details,
+          details: error.details === undefined ? undefined : JSON.parse(redactKey(JSON.stringify(error.details), this.upstreamKey)),
         },
       }, { ...cors, ...retryAfter, ...extraHeaders });
     }
@@ -964,7 +1002,7 @@ export class Gateway {
     try {
     const issuedSession = session?.id ?? this.sessions.create({ identity, agentAlias: spec.aliases[0], modality: detectModalities(body) });
     const stripped = stripSlashCommand(body);
-    const path = String((pathname ?? request.url.split('?')[0])).replace(/\/route$/, '') || '/v1/chat/completions';
+    const path = upstreamPathFor(pathname ?? new URL(request.url, 'http://127.0.0.1').pathname);
 
     const runOne = async (alias) => {
       const t0 = Date.now();
@@ -1157,13 +1195,14 @@ export class Gateway {
   async handleInference(request, response, body, identity, cors, pathname) {
     const sessionId = request.headers['x-session-id'] || body.session_id;
     const session = this.sessions.get(sessionId, identity);
-    const planOnly = wantsRoutePlan(body, pathname ?? request.url?.split('?')[0]);
+    pathname = pathname ?? new URL(request.url, 'http://127.0.0.1').pathname;
+    const planOnly = wantsRoutePlan(body, pathname);
     if (planOnly) {
       return this.handleRoutePlan(request, response, body, identity, session, cors);
     }
 
-    if (!isChatPath(pathname ?? request.url?.split('?')[0])) {
-      return this.handleDirectAlias(request, response, body, identity, session, cors);
+    if (!isChatPath(pathname)) {
+      return this.handleDirectAlias(request, response, body, identity, session, cors, pathname);
     }
 
     if (body.model === MONITOR_ALIAS) {
@@ -1287,12 +1326,15 @@ export class Gateway {
     }, this.routeHeaders(issuedSession, routed, cors, { hops: '' }));
   }
 
-  async handleDirectAlias(request, response, body, identity, session, cors) {
+  async handleDirectAlias(request, response, body, identity, session, cors, pathname) {
     const alias = body.model;
-    if (!alias || !this.registry.agents.has(alias)) throw new ValidationError(`Unknown agent alias: ${alias}`);
+    if (typeof alias !== 'string' || !alias || !this.registry.agents.has(alias)) throw new ValidationError(`Unknown agent alias: ${headerSafe(alias)}`);
+    const upstreamPath = upstreamPathFor(pathname);
     const availability = this.registry.status(alias);
     if (availability.state === 'unavailable') throw new UnavailableError(`${alias} is unavailable`, availability.missing);
     const agent = this.registry.get(alias);
+    // BND-03: direct alias skips hardRuleRoute, so gate modality + endpoint here.
+    assertModalityGate(agent, detectModalities(body), pathname);
     const issuedSession = session?.id ?? this.sessions.create({
       identity,
       agentAlias: alias,
@@ -1309,7 +1351,7 @@ export class Gateway {
       const unpin = this.processes.pin(alias);
       try {
         const payload = this.prepareTurn(body, agent, issuedSession);
-        const path = String(request.url.split('?')[0]).replace(/\/route$/, '') || '/v1/chat/completions';
+        const path = upstreamPath;
         const proxied = await proxyJson({
           request,
           response,
@@ -1341,6 +1383,11 @@ export class Gateway {
     const notes = [];
     const preferResident = preferResidentChat(this.manifest?.gateway ?? this.processes?.manifest?.gateway);
     const hard = hardRuleRoute(body, this.registry);
+    const upstreamPath = upstreamPathFor(pathname);
+    // BND-03: a client-forced first hop (lock_alias pin / slash / modality override) must be feedable.
+    if (hard.effectiveAlias && hard.effectiveAlias !== NEXUS_ALIAS && this.registry.agents.has(hard.effectiveAlias)) {
+      assertModalityGate(this.registry.get(hard.effectiveAlias), hard.modality ?? detectModalities(body));
+    }
     const issuedSession = session?.id ?? this.sessions.create({
       identity,
       agentAlias: hard.effectiveAlias ?? FALLBACK_ALIAS,
@@ -1511,7 +1558,7 @@ export class Gateway {
         }
 
         const payload = this.prepareTurn(body, agent, issuedSession);
-        const path = String((pathname ?? request.url.split('?')[0])).replace(/\/route$/, '') || '/v1/chat/completions';
+        const path = upstreamPathFor(pathname ?? new URL(request.url, 'http://127.0.0.1').pathname);
         const target = `http://127.0.0.1:${agent.port}${path}`;
         // A slash or lock_alias already chose the model. Peeking for HANDOFF
         // would throw that choice away and hold the policy until the peek ends.
@@ -1662,7 +1709,7 @@ export class Gateway {
           const unpin = this.processes.pin(FALLBACK_ALIAS);
           try {
             const payload = this.prepareTurn(body, agent, issuedSession);
-            const path = String((pathname ?? request.url.split('?')[0])).replace(/\/route$/, '') || '/v1/chat/completions';
+            const path = upstreamPathFor(pathname ?? new URL(request.url, 'http://127.0.0.1').pathname);
             this.sessions.setAgentAlias(issuedSession, FALLBACK_ALIAS);
             const headers = hopHeaders(FALLBACK_ALIAS, 'text_fallback');
             this.applyRouteHeaders(response, headers);
