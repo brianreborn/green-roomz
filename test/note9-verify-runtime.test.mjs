@@ -553,7 +553,9 @@ test('SD-26: empty pid = held (refused); stale lock renamed aside then re-acquir
   writeFileSync(join(lock, 'pid'), 'abc'); r = run(f); assert.notEqual(r.code, 0); assert.match(r.out, /bad pid/);
   writeFileSync(join(lock, 'pid'), '999999999'); r = run(f); assert.equal(r.code, 0, r.out); assert.match(r.out, /taking over stale lock/);
   assert.equal(readdirSync(f.home).some((n) => n.startsWith('.grz-install.lock')), false, 'lock and aside both gone');
-  const src = readFileSync(SCRIPT, 'utf8'); assert.match(src, /"\$MV" -T -- "\$LOCK" "\$ASIDE"/);
+  const common = readFileSync(join(SCRIPTS, 'note9-common.sh'), 'utf8');
+  assert.match(common, /"\$MV_BIN" -T -- "\$GRZ_LOCK" "\$ASIDE"/);
+  assert.match(readFileSync(SCRIPT, 'utf8'), /grz_install_lock_acquire/);
 });
 test('SWEEP: grz.unverified.<t>.<p>.old.<n> real dirs are swept too', { skip: !hasBash }, () => {
   const f = installed(); const n = 'grz.unverified.1700000000.123.old.9'; mkdirSync(join(f.home, n));
@@ -656,19 +658,21 @@ test('SD-29: runner refuses a DRYRUN / model-less manifest in an installed tree'
   h = reinstall(orig.split('\n').filter((l) => !/ models\//.test(l)).join('\n'));
   r = runRunner(f, { GRZ_MANIFEST_SHA256: h }); assert.notEqual(r.code, 0); assert.match(r.out, /no models\/ line; refusing to start/);
 });
-test('SD-30: stale-lock takeover aborts if the moved lock pid differs from the dead pid read earlier', { skip: !hasBash }, () => {
+test('SD-30/R1: stale-lock takeover aborts on pid mismatch; restores aside→LOCK when vacant', { skip: !hasBash }, () => {
   const f = fixture(); mkdirSync(f.home, { recursive: true });
   const lock = join(f.home, '.grz-install.lock'); mkdirSync(lock); writeFileSync(join(lock, 'pid'), '999999999');
   const bin = join(f.root, 'mvstub'); mkdirSync(bin);
   const realMv = spawnSync('bash', ['-c', 'command -v mv'], { encoding: 'utf8' }).stdout.trim();
   writeFileSync(join(bin, 'mv'), `#!/bin/bash\n"${realMv}" "$@"; rc=$?\nfor a in "$@"; do last=$a; done\ncase "$last" in *.grz-install.lock.stale.*) echo 424242 > "$last/pid";; esac\nexit $rc\n`, { mode: 0o755 });
   const r = run(f, { PATH: `${bin}:${process.env.PATH}` });
-  assert.notEqual(r.code, 0); assert.match(r.out, /lock changed hands during takeover \(pid '999999999' -> '424242'\).*left at .*\.grz-install\.lock\.stale\.\d+ \(not restored\).*refusing/);
-  // SD-33: the moved copy stays put (no mv back); the original lock path is not recreated.
-  assert.equal(existsSync(lock), false, 'lock not moved back');
-  const aside = readdirSync(f.home).filter((n) => n.startsWith('.grz-install.lock.stale.'));
-  assert.equal(aside.length, 1); assert.equal(readFileSync(join(f.home, aside[0], 'pid'), 'utf8').trim(), '424242');
-  assert.doesNotMatch(readFileSync(SCRIPT, 'utf8'), /"\$MV" -T -- "\$ASIDE" "\$LOCK"/);
+  assert.notEqual(r.code, 0);
+  assert.match(r.out, /lock changed hands during takeover \(pid '999999999' -> '424242'\).*restored to .*\.grz-install\.lock when vacant.*refusing/);
+  // R1: vacant name gets the live holder's lock back (pid 424242 from the stub).
+  assert.equal(existsSync(lock), true, 'lock restored when vacant');
+  assert.equal(readFileSync(join(lock, 'pid'), 'utf8').trim(), '424242');
+  assert.equal(readdirSync(f.home).filter((n) => n.startsWith('.grz-install.lock.stale.')).length, 0);
+  const common = readFileSync(join(SCRIPTS, 'note9-common.sh'), 'utf8');
+  assert.match(common, /"\$MV_BIN" -T -- "\$ASIDE" "\$GRZ_LOCK"/);
 });
 
 test('KEY: runner unsets LLAMA_API_KEY, LLAMA_ARG_API_KEY_FILE and every LLAMA_ARG_* before exec', { skip: !hasBash }, () => {
@@ -687,6 +691,73 @@ test('Boundary nit: verifier refuses a manifest with no hash lines at all (comme
   const f = fixture({ manifest: ['# npm-deps: none', '# nothing listed'] });
   let r = run(f); assert.notEqual(r.code, 0); assert.match(r.out, /has no hash lines; refusing/);
   r = run(f, { GRZ_ALLOW_UNVERIFIED_RUNTIME: '1' }); assert.notEqual(r.code, 0); assert.match(r.out, /has no hash lines/);
+});
+
+
+test('R1: two concurrent installs (no flock): exactly one wins; loser’s release does not delete winner’s lock', { skip: !hasBash }, () => {
+  const f = fixture(); mkdirSync(f.home, { recursive: true });
+  // Hold a live lock as this test process so both children refuse, then free it and race two installs.
+  const lock = join(f.home, '.grz-install.lock'); mkdirSync(lock); writeFileSync(join(lock, 'pid'), String(process.pid));
+  let r = run(f); assert.notEqual(r.code, 0); assert.match(r.out, /holds .*\.grz-install\.lock; refusing/);
+  writeFileSync(join(lock, 'pid'), '999999999'); // dead → both may race takeover
+  const out1 = join(f.root, 'c1.out'); const out2 = join(f.root, 'c2.out');
+  const raced = spawnSync('bash', ['-c', `
+    unset PREFIX
+    bash "${SCRIPT}" "${f.stage}" "${f.tsrc}" >"${out1}" 2>&1 & p1=$!
+    bash "${SCRIPT}" "${f.stage}" "${f.tsrc}" >"${out2}" 2>&1 & p2=$!
+    wait $p1; e1=$?
+    wait $p2; e2=$?
+    echo "E1=$e1 E2=$e2"
+  `], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: f.home, GRZ_MANIFEST_SHA256: f.manSha } });
+  assert.equal(raced.status, 0, raced.stdout + raced.stderr);
+  const m = /E1=(\d+) E2=(\d+)/.exec(raced.stdout);
+  assert.ok(m, raced.stdout);
+  const codes = [Number(m[1]), Number(m[2])].sort();
+  assert.deepEqual(codes, [0, 1], `expected one win one refuse, got ${m[0]}; out1=${readFileSync(out1,'utf8').slice(-400)} out2=${readFileSync(out2,'utf8').slice(-400)}`);
+  assert.equal(existsSync(lock), false, 'winner released its own lock');
+  assert.equal(readlinkSync(f.cur), `grz.${f.manSha}`);
+  // Owner-token cleanup: simulate a holder whose lock dir was stolen; release must not rm the new owner.
+  mkdirSync(lock); writeFileSync(join(lock, 'pid'), '111');
+  const rel = spawnSync('bash', ['-c', `
+    . "${join(SCRIPTS, 'note9-common.sh')}"
+    GRZ_LOCK="${lock}"
+    # pretend we are pid 222 releasing; lock owned by 111
+    grz_install_lock_release
+    test -d "${lock}" && echo STILL || echo GONE
+  `], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: f.home } });
+  assert.match(rel.stdout, /STILL/);
+  assert.equal(readFileSync(join(lock, 'pid'), 'utf8').trim(), '111');
+});
+
+test('R2: restart-serve holds the install lock; a held lock refuses restart; two concurrent restarts: one wins', { skip: !hasBash }, () => {
+  const f = realTree(); assert.equal(run(f).code, 0);
+  const restart = join(f.dst, 'scripts/note9-restart-serve.sh');
+  const commonSrc = readFileSync(join(SCRIPTS, 'note9-common.sh'), 'utf8');
+  const restartSrc = readFileSync(join(SCRIPTS, 'note9-restart-serve.sh'), 'utf8');
+  assert.match(restartSrc, /grz_install_lock_acquire/);
+  assert.match(restartSrc, /grz_install_lock_release/);
+  assert.match(commonSrc, /grz_install_lock_acquire/);
+  // Live lock blocks restart
+  const lock = join(f.home, '.grz-install.lock'); mkdirSync(lock); writeFileSync(join(lock, 'pid'), String(process.pid));
+  let r = spawnSync('bash', [restart], { encoding: 'utf8', env: envFor(f) });
+  assert.notEqual(r.status, 0); assert.match(r.stderr + r.stdout, /holds .*\.grz-install\.lock; refusing|install lock refused/);
+  // Free lock, race two restarts
+  writeFileSync(join(lock, 'pid'), '999999999');
+  const out1 = join(f.root, 'r1.out'); const out2 = join(f.root, 'r2.out');
+  const raced = spawnSync('bash', ['-c', `
+    unset PREFIX
+    bash "${restart}" >"${out1}" 2>&1 & p1=$!
+    bash "${restart}" >"${out2}" 2>&1 & p2=$!
+    wait $p1; e1=$?
+    wait $p2; e2=$?
+    echo "E1=$e1 E2=$e2"
+  `], { encoding: 'utf8', env: envFor(f) });
+  assert.equal(raced.status, 0, raced.stdout + raced.stderr);
+  const m = /E1=(\d+) E2=(\d+)/.exec(raced.stdout);
+  assert.ok(m, raced.stdout);
+  const codes = [Number(m[1]), Number(m[2])].sort();
+  assert.ok(codes[0] === 0 && codes[1] !== 0, `expected one win one refuse, got ${m[0]}; out1=${readFileSync(out1,'utf8').slice(-500)} out2=${readFileSync(out2,'utf8').slice(-500)}`);
+  assert.equal(existsSync(lock), false);
 });
 
 const FLOCK = spawnSync('bash', ['-c', 'command -v flock'], { encoding: 'utf8' }).stdout.trim();

@@ -13,7 +13,8 @@
 #   verified inside the temp dir. Plain entries are relative to runtime/ (bin/llama-server,
 #   bin/libggml.so, models/x.gguf); "tree/" entries are relative to tree/.
 # Trust anchor: GRZ_MANIFEST_SHA256 (operator-supplied out of band) must equal sha256(manifest).
-# Install lock: mkdir $HOME/.grz-install.lock (SD-24); a lock whose pid is dead is taken over.
+# Install lock: $HOME/.grz-install.lock via grz_install_lock_* in note9-common.sh (SD-24/33, Race R1);
+#   same lock used by note9-restart-serve.sh (Race R2). Dead-pid locks are taken over; release is pid-checked.
 # Startup sweep (SD-20): only real dirs named grz.<64hex>.old.<n>, grz.unverified.<t>.<p>.old.<n>
 #   or .grz-verify.XXXXXX (ours);
 #   never a bare *.old.*, never a symlink.
@@ -28,8 +29,8 @@
 set -euo pipefail
 umask 077
 _grz_vdir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-# shellcheck source=note9-shared-storage.sh
-source "$_grz_vdir/note9-shared-storage.sh"
+# shellcheck source=note9-common.sh
+source "$_grz_vdir/note9-common.sh"
 STAGE=${1:?stage root}; TSRC=${2:?tree src}
 MAN_REL=config/note9-runtime.SHA256SUMS
 die() { echo "ERROR: $*" >&2; exit 1; }
@@ -84,50 +85,12 @@ STATE=$HOME_REAL/.green-roomz-state
 [[ -L $STATE ]] && die "$STATE is a symlink; refusing"
 [[ -d $STATE ]] || mkdir -m 700 -- "$STATE" || die "cannot create $STATE"
 HIST=$STATE/install-history
-# SD-24/SD-26: one install at a time. mkdir is the atomic acquire. A held lock with a live or
-# EMPTY pid (owner may not have written it yet) is refused; a dead pid's lock is renamed aside
-# atomically (mv -T) before a fresh mkdir, so two takers cannot both win.
-LOCK=$HOME_REAL/.grz-install.lock
-# SD-33: prefer flock(1) when Termux ships it ($PREFIX/bin/flock): the kernel drops the lock when
-# the holder dies, so there is no stale-pid takeover at all. A leftover mkdir lock is then
-# stale unless its pid is alive (an older installer without flock).
-if [[ -n ${PREFIX:-} && -x ${PREFIX}/bin/flock ]]; then
-  FLOCKF=$HOME_REAL/.grz-install.flock
-  [[ -L $FLOCKF ]] && die "$FLOCKF is a symlink; refusing"
-  ( umask 077; : >> "$FLOCKF" ) || die "cannot create $FLOCKF"
-  exec 9>>"$FLOCKF"
-  "$PREFIX/bin/flock" -n 9 || die "another install holds $FLOCKF (flock); refusing"
-  if [[ -e $LOCK || -L $LOCK ]]; then
-    [[ -L $LOCK || ! -d $LOCK ]] && die "$LOCK is not a plain directory; refusing"
-    owner=$(cat -- "$LOCK/pid" 2>/dev/null || true)
-    if [[ $owner =~ ^[0-9]+$ ]] && kill -0 "$owner" 2>/dev/null; then die "another install (pid $owner) holds $LOCK; refusing"; fi
-    echo "removing stale $LOCK (flock held; pid '${owner}' not running)" >&2
-    rm -rf -- "$LOCK"
-  fi
-  mkdir -m 700 -- "$LOCK" 2>/dev/null || die "cannot take $LOCK; refusing"
-elif ! mkdir -m 700 -- "$LOCK" 2>/dev/null; then
-  [[ -L $LOCK || ! -d $LOCK ]] && die "$LOCK is not a plain directory; refusing"
-  owner=$(cat -- "$LOCK/pid" 2>/dev/null || true)
-  [[ -n $owner ]] || die "$LOCK held (pid not written yet); refusing"
-  [[ $owner =~ ^[0-9]+$ ]] || die "$LOCK has a bad pid '$owner'; refusing"
-  kill -0 "$owner" 2>/dev/null && die "another install (pid $owner) holds $LOCK; refusing"
-  ASIDE=$HOME_REAL/.grz-install.lock.stale.$$
-  "$MV" -T -- "$LOCK" "$ASIDE" 2>/dev/null || die "lost the race to take over $LOCK; refusing"
-  # SD-30: the dir we moved must still be the dead owner's lock (not one re-taken in between).
-  # SD-33: on a mismatch do NOT move it back (that could clobber a lock taken in the meantime);
-  # leave the moved copy where it is and stop.
-  moved=$(cat -- "$ASIDE/pid" 2>/dev/null || true)
-  if [[ $moved != "$owner" ]]; then
-    die "lock changed hands during takeover (pid '$owner' -> '$moved'); the moved lock was left at $ASIDE (not restored). If pid '$moved' is not running, remove $ASIDE and retry; refusing"
-  fi
-  echo "taking over stale lock $LOCK (pid $owner gone)" >&2
-  rm -rf -- "$ASIDE"
-  mkdir -m 700 -- "$LOCK" 2>/dev/null || die "another install took $LOCK first; refusing"
-fi
-echo $$ > "$LOCK/pid"
+# SD-24/SD-26/SD-33 + Race R1: shared grz_install_lock_* (note9-common.sh). Same lock as restart.
+grz_install_lock_acquire || die "install lock refused"
+LOCK=$GRZ_LOCK
 WORK=""
 # shellcheck disable=SC2329 # invoked via trap
-cleanup() { if [[ -n ${WORK:-} ]]; then rm -rf -- "$WORK"; fi; rm -rf -- "$LOCK"; }
+cleanup() { if [[ -n ${WORK:-} ]]; then rm -rf -- "$WORK"; fi; grz_install_lock_release; }
 trap cleanup EXIT
 # SD-20: sweep only our own leftovers, real dirs only.
 shopt -s nullglob
@@ -245,6 +208,7 @@ fi
 "$MV" -T -- "$WORK" "$DEST" || die "cannot place $DEST"
 WORK=""
 chmod 700 "$DEST"
+grz_install_lock_assert_held || die "install lock lost before flip; refusing"
 TMPL=$HOME_REAL/.grz-current.tmp.$$
 ln -s -- "$NAME" "$TMPL" || die "ln -s $TMPL failed"
 "$MV" -T -- "$TMPL" "$CUR" || { rm -f -- "$TMPL"; die "flip of $CUR failed; previous current kept"; }

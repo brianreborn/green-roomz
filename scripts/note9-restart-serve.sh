@@ -17,8 +17,14 @@ grz_resolve_current || exit 1
 OPTIN=$(grz_log_opt_in "$GRZ_TREE") || { echo "ERROR: host override refused" >&2; exit 1; }
 PORT=$(grz_port "$GRZ_TREE") || exit 1
 KEYSRC=$(grz_key_check "$GRZ_TREE") || { echo "ERROR: no valid API key; not (re)starting the gateway" >&2; exit 1; }
+# Race R2: same install lock as the verifier — serialize stop+start vs install / another restart.
+grz_install_lock_acquire || exit 1
+# shellcheck disable=SC2329
+_grz_restart_cleanup() { grz_install_lock_release; }
+trap _grz_restart_cleanup EXIT
 grz_stop_serve
 grz_serve_start "$PORT" "$OPTIN"
+grz_install_lock_assert_held || { echo "ERROR: install lock lost during restart; refusing" >&2; exit 1; }
 echo "serve_pid=$GRZ_SERVE_PID tree=$GRZ_TREE logs=$([[ $OPTIN == 1 ]] && echo "$GRZ_STATE/logs" || echo off)"
 [[ ${GRZ_RESTART_NO_PROBE:-0} == 1 ]] && exit 0
 sleep 10
