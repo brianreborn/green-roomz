@@ -5,3 +5,5 @@ Default: transcribe in the spoken language.
 `technical_normalized`: convert high-confidence spoken technical notation while preserving the original phrase in optional alignment metadata.
 Ignore non-speech hum and isolated ambient dropouts unless sound-event notation is requested.
 Mark low-confidence or unintelligible speech explicitly. Do not translate automatically.
+
+Refuse work unless the attached audio passed gateway media-scan (magic, size, no trailing bytes).

@@ -96,3 +96,53 @@ export function writeGgufBlockCount(filePath, n, { key = 'qwen2.block_count', pr
   chunks.push(u32(3), u64(0), u64(kvs.length), ...kvs);
   writeFileSync(filePath, Buffer.concat(chunks));
 }
+
+
+function crc32(buf) {
+  let c = ~0;
+  for (let i = 0; i < buf.length; i += 1) {
+    c ^= buf[i];
+    for (let k = 0; k < 8; k += 1) c = (c >>> 1) ^ (0xedb88320 & -(c & 1));
+  }
+  return ~c >>> 0;
+}
+
+function pngChunk(type, data) {
+  const len = Buffer.alloc(4);
+  len.writeUInt32BE(data.length);
+  const t = Buffer.from(type);
+  const crcBuf = Buffer.alloc(4);
+  crcBuf.writeUInt32BE(crc32(Buffer.concat([t, data])));
+  return Buffer.concat([len, t, data, crcBuf]);
+}
+
+/** Tiny structurally-valid PNG ending at IEND (header-only fixture). */
+export function tinyPng() {
+  const sig = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(1, 0);
+  ihdr.writeUInt32BE(1, 4);
+  ihdr[8] = 8;
+  ihdr[9] = 2;
+  const idat = Buffer.from([0x08, 0xd7, 0x63, 0xf8, 0xff, 0xff, 0xff, 0x3f, 0x00, 0x05, 0xfe, 0x02, 0xfe]);
+  return Buffer.concat([sig, pngChunk('IHDR', ihdr), pngChunk('IDAT', idat), pngChunk('IEND', Buffer.alloc(0))]);
+}
+
+/** Tiny WAV with matching RIFF size (header-only, zero data). */
+export function tinyWav() {
+  const wav = Buffer.alloc(44);
+  wav.write('RIFF', 0);
+  wav.writeUInt32LE(36, 4);
+  wav.write('WAVE', 8);
+  wav.write('fmt ', 12);
+  wav.writeUInt32LE(16, 16);
+  wav.writeUInt16LE(1, 20);
+  wav.writeUInt16LE(1, 22);
+  wav.writeUInt32LE(8000, 24);
+  wav.writeUInt32LE(8000, 28);
+  wav.writeUInt16LE(1, 32);
+  wav.writeUInt16LE(8, 34);
+  wav.write('data', 36);
+  wav.writeUInt32LE(0, 40);
+  return wav;
+}

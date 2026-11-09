@@ -8,7 +8,7 @@ import { ProcessManager } from '../src/process-manager.mjs';
 import { PolicyGate } from '../src/scheduler.mjs';
 import { SessionLedger } from '../src/sessions.mjs';
 import { Gateway, decodeDataUrl } from '../src/gateway.mjs';
-import { sampleManifest } from './helpers.mjs';
+import { sampleManifest, tinyPng, tinyWav } from './helpers.mjs';
 
 const REPO = path.resolve(fileURLToPath(new URL('../', import.meta.url)));
 
@@ -45,7 +45,7 @@ test('the whisper native path posts multipart/form-data and unwraps { text }', a
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       model: 'audio-transcription-agent', lock_alias: true,
-      messages: [{ role: 'user', content: [{ type: 'input_audio', input_audio: { data: 'data:audio/wav;base64,' + Buffer.from('RIFFxxxx').toString('base64') } }] }],
+      messages: [{ role: 'user', content: [{ type: 'input_audio', input_audio: { data: 'data:audio/wav;base64,' + tinyWav().toString('base64') } }] }],
     }),
   });
   assert.equal(res.status, 200);
@@ -55,6 +55,24 @@ test('the whisper native path posts multipart/form-data and unwraps { text }', a
   const json = await res.json();
   assert.equal(json.choices[0].message.content, 'Hello world.', 'trimmed transcription');
   assert.equal(res.headers.get('x-green-roomz-effective-alias'), 'audio-transcription-agent');
+});
+
+test('the whisper path refuses non-WAV garbage with validation_error', async (t) => {
+  let reached = false;
+  const { server, base } = await audioGateway(async () => { reached = true; return { status: 200, text: async () => JSON.stringify({ text: 'nope' }) }; });
+  t.after(() => server.close());
+  const res = await fetch(base + '/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      model: 'audio-transcription-agent', lock_alias: true,
+      messages: [{ role: 'user', content: [{ type: 'input_audio', input_audio: { data: 'data:audio/wav;base64,' + Buffer.from('RIFFxxxx').toString('base64') } }] }],
+    }),
+  });
+  assert.equal(res.status, 400);
+  const body = await res.json();
+  assert.equal(body.error?.type ?? body.error?.code ?? body.code, 'validation_error');
+  assert.equal(reached, false, 'must not reach whisper upstream');
 });
 
 test('the whisper path rejects a non-decodable audio part cleanly (no crash)', async (t) => {
@@ -117,7 +135,7 @@ test('the image native path posts a txt2img prompt and wraps b64_json as an imag
   let seen;
   const gateway = new Gateway({
     manifest, registry, processes, sessions: new SessionLedger(), policy: new PolicyGate('maximize'),
-    fetchImpl: async (_url, init) => { seen = JSON.parse(init.body); return { status: 200, text: async () => JSON.stringify({ data: [{ b64_json: 'aGVsbG8=' }] }) }; },
+    fetchImpl: async (_url, init) => { seen = JSON.parse(init.body); return { status: 200, text: async () => JSON.stringify({ data: [{ b64_json: tinyPng().toString('base64') }] }) }; },
   });
   const server = await gateway.listen('127.0.0.1', 0);
   t.after(() => server.close());
@@ -129,5 +147,28 @@ test('the image native path posts a txt2img prompt and wraps b64_json as an imag
   assert.equal(seen.prompt, 'a red apple on a table');
   const content = (await res.json()).choices[0].message.content;
   assert.equal(content[0].type, 'image_url');
-  assert.match(content[0].image_url.url, /^data:image\/png;base64,aGVsbG8=$/);
+  assert.match(content[0].image_url.url, /^data:image\/png;base64,/);
+  assert.equal(content[0].image_url.url, 'data:image/png;base64,' + tinyPng().toString('base64'));
+});
+
+test('image native path refuses trailing-byte PNG output', async (t) => {
+  const manifest = sampleManifest();
+  const registry = await new AgentRegistry(manifest).inspect();
+  registry.setStatus('image-generation-agent', 'ready');
+  const processes = new ProcessManager({ manifest, registry, spawnImpl() { throw new Error('no spawn'); } });
+  processes.ensure = async (a) => ({ alias: a.alias, state: 'ready' });
+  const bad = Buffer.concat([tinyPng(), Buffer.from([0x00])]).toString('base64');
+  const gateway = new Gateway({
+    manifest, registry, processes, sessions: new SessionLedger(), policy: new PolicyGate('maximize'),
+    fetchImpl: async () => ({ status: 200, text: async () => JSON.stringify({ data: [{ b64_json: bad }] }) }),
+  });
+  const server = await gateway.listen('127.0.0.1', 0);
+  t.after(() => server.close());
+  const res = await fetch(`http://127.0.0.1:${server.address().port}/v1/chat/completions`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ model: 'image-generation-agent', lock_alias: true, messages: [{ role: 'user', content: '/image x' }] }),
+  });
+  assert.equal(res.status, 400);
+  const body = await res.json();
+  assert.equal(body.error?.type ?? body.error?.code ?? body.code, 'validation_error');
 });

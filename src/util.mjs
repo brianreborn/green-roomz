@@ -182,10 +182,21 @@ const C0_C1 = /[\u0000-\u001F\u007F-\u009F]/g;
 const CSI = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
 const OSC = /\u001b\][\s\S]*?(?:\u0007|\u001b\\)/g;
 const LS_PS = /[\u2028\u2029]/g;
-const BIDI_ISOLATES = /[\u2066-\u2069]/g;
+// Format + bidi + BOM + ZW* + word joiner + TAG + variation selectors used as tags
+const COVERT_FORMAT = /[\u00AD\u034F\u061C\u180E\u200B-\u200F\u2028-\u202E\u2060-\u2064\u2066-\u206F\uFEFF\uFFF9-\uFFFB]/g; // includes U+2028 LS, U+2029 PS
+const TAG_CHARS = /\uDB40[\uDC00-\uDC7F]/g; // U+E0000–U+E007F as UTF-16
+const VS_SUP = /\uDB40[\uDD00-\uDDEF]/g;         // U+E0100–U+E01EF
 
 export function stripControls(value) {
-  return String(value ?? '').replace(C0_C1, ' ').replace(LS_PS, ' ').replace(BIDI_ISOLATES, '').replace(/[ \t]{2,}/g, ' ').trim();
+  // LS/PS become spaces (existing header-safe behavior); remaining COVERT_FORMAT deleted.
+  return String(value ?? '')
+    .replace(C0_C1, ' ')
+    .replace(LS_PS, ' ')
+    .replace(COVERT_FORMAT, '')
+    .replace(TAG_CHARS, '')
+    .replace(VS_SUP, '')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
 }
 
 export function stripEscapes(value) {
@@ -193,8 +204,10 @@ export function stripEscapes(value) {
     .replace(OSC, '')
     .replace(CSI, '')
     .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, '')
-    .replace(LS_PS, '')
-    .replace(BIDI_ISOLATES, '');
+    .replace(COVERT_FORMAT, '')
+    .replace(TAG_CHARS, '')
+    .replace(VS_SUP, '')
+    .replace(/[ \t]+$/gm, ''); // trailing space/tab only; keep LF
 }
 
 export function headerSafe(value, maxBytes = 240) {

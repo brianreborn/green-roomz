@@ -9,7 +9,7 @@ import { SessionLedger } from '../src/sessions.mjs';
 import { Gateway } from '../src/gateway.mjs';
 import { isHandoffContent, parseHandoffContent } from '../src/handoff.mjs';
 import { consultNexus, offlineNexusEnabled, offlinePlan, preferResidentChat } from '../src/nexus.mjs';
-import { sampleManifest } from './helpers.mjs';
+import { sampleManifest, tinyPng } from './helpers.mjs';
 
 async function withServer(t, extras = {}) {
   const manifest = sampleManifest();
@@ -222,7 +222,7 @@ test('actual image part still routes to vision without asking the nexus', async 
     headers: { 'content-type': 'application/json' },
     body: {
       model: 'qwenstral-code-speculator',
-      messages: [{ role: 'user', content: [{ type: 'image_url', image_url: { url: 'data:image/png;base64,xxxx' } }] }],
+      messages: [{ role: 'user', content: [{ type: 'image_url', image_url: { url: 'data:image/png;base64,' + tinyPng().toString('base64') } }] }],
     },
   });
   assert.equal(result.status, 200);
