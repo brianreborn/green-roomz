@@ -17,7 +17,8 @@ import { planRoute } from './logical-router.mjs';
 import { proxyJson } from './proxy.mjs';
 import { aliasCanAdmit, audioDataFromBody, detectModalities, hardRuleRoute, isGenericChatRequest, isRoutableAlias, latestUserMessageText, NATIVE_CHAT, parseSlashCommand, stripSlashCommand } from './routing.mjs';
 import { contentChars, contextCharBudget, formatMemoryHeader, injectWorkingSet, memoryBounds } from './session-memory.mjs';
-import { deadlineSignal, headerSafe, isTimeoutAbort, jsonResponse, readCappedText, redact, secureEquals, sleep, stripControls } from './util.mjs';
+import { deadlineSignal, headerSafe, isTimeoutAbort, jsonResponse, readCappedText, redact, secureEquals, sleep, stripControls, stripEscapes } from './util.mjs';
+import { scanMedia } from './media-scan.mjs';
 import { holdMs, resolveTimingPrivacy } from './timing-quant.mjs';
 
 const EXPLICIT_ROUTES = new Set([
@@ -249,11 +250,23 @@ function isChatPath(pathname) {
 
 function wrapNativeAsChat(alias, nativeJson, kind) {
   let content;
-  if (typeof nativeJson === 'string') content = nativeJson;
-  else if (kind === 'whisper' && typeof nativeJson?.text === 'string') content = nativeJson.text.trim();
+  if (typeof nativeJson === 'string') content = stripEscapes(nativeJson);
+  else if (kind === 'whisper' && typeof nativeJson?.text === 'string') content = stripEscapes(nativeJson.text.trim());
   else if (kind === 'image') {
     const item = nativeJson?.data?.[0] ?? {};
-    const url = item.url ?? (item.b64_json ? `data:image/png;base64,${item.b64_json}` : null);
+    let url = item.url ?? null;
+    if (!url && item.b64_json) {
+      const bytes = Buffer.from(String(item.b64_json), 'base64');
+      const scanned = scanMedia(bytes, { alias: 'image-generation-agent', declaredMime: 'image/png' });
+      if (!scanned.ok) throw new ValidationError(scanned.reason || 'media rejected');
+      url = `data:image/png;base64,${scanned.bytes.toString('base64')}`;
+    } else if (typeof url === 'string' && url.toLowerCase().startsWith('data:image/')) {
+      const decoded = decodeDataUrl(url);
+      if (!decoded) throw new ValidationError('image part is not a decodable data: URL');
+      const scanned = scanMedia(decoded.bytes, { alias: 'image-generation-agent', declaredMime: decoded.mime });
+      if (!scanned.ok) throw new ValidationError(scanned.reason || 'media rejected');
+      url = `data:${scanned.mime};base64,${scanned.bytes.toString('base64')}`;
+    }
     content = url
       ? [{ type: 'image_url', image_url: { url } }]
       : JSON.stringify(nativeJson);
@@ -315,13 +328,32 @@ export function decodeDataUrl(dataUrl) {
   return { bytes, mime, ext };
 }
 
+/** Scan data:image parts against the vision media policy before a llama vision hop. */
+export function assertInboundImageMedia(body, alias = 'vision-layout-agent') {
+  const messages = Array.isArray(body?.messages) ? body.messages : [];
+  for (const message of messages) {
+    if (!Array.isArray(message?.content)) continue;
+    for (const part of message.content) {
+      if (!part || typeof part !== 'object') continue;
+      const url = typeof part.image_url === 'string' ? part.image_url : part.image_url?.url;
+      if (typeof url !== 'string' || !url.toLowerCase().startsWith('data:image/')) continue;
+      const decoded = decodeDataUrl(url);
+      if (!decoded) throw new ValidationError('image part is not a decodable data: URL');
+      const scanned = scanMedia(decoded.bytes, { alias, declaredMime: decoded.mime });
+      if (!scanned.ok) throw new ValidationError(scanned.reason || 'media rejected');
+    }
+  }
+}
+
 /** Shape the outbound request per native backend: whisper wants multipart, the rest JSON. */
 function nativeRequestInit(kind, payload, signal) {
   if (kind === 'whisper') {
     const decoded = decodeDataUrl(payload.audio_data);
     if (!decoded) throw new ValidationError('audio part is not a decodable data: URL');
+    const scanned = scanMedia(decoded.bytes, { alias: 'audio-transcription-agent', declaredMime: decoded.mime });
+    if (!scanned.ok) throw new ValidationError(scanned.reason || 'media rejected');
     const form = new FormData();
-    form.set('file', new Blob([decoded.bytes], { type: decoded.mime }), `audio.${decoded.ext}`);
+    form.set('file', new Blob([scanned.bytes], { type: scanned.mime }), `audio.${(scanned.mime.split('/')[1] || 'bin').replace(/[^a-z0-9]/gi, '') || 'bin'}`);
     form.set('response_format', 'json');
     form.set('temperature', '0');
     return { method: 'POST', body: form, signal, headers: { connection: 'close' } };
@@ -437,6 +469,7 @@ export class Gateway {
   }
 
   prepareTurn(body, agent, issuedSession) {
+    if (agent?.alias === 'vision-layout-agent') assertInboundImageMedia(body, agent.alias);
     const session = issuedSession ? this.sessions.workingSet(issuedSession) : null;
     const payload = prepareInferenceBody(body, agent, { session });
     if (issuedSession) {

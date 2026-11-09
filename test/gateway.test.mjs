@@ -11,7 +11,7 @@ import { PolicyGate } from '../src/scheduler.mjs';
 import { SessionLedger } from '../src/sessions.mjs';
 import { Gateway, prepareInferenceBody } from '../src/gateway.mjs';
 import { hardRuleRoute, resolveExplicitModelPin, isPinnableAlias, isAutoModelFamily } from '../src/routing.mjs';
-import { sampleManifest } from './helpers.mjs';
+import { sampleManifest, tinyPng } from './helpers.mjs';
 import { NEXUS_CHAT_SYSTEM, REQUIRED_ALIASES } from '../src/constants.mjs';
 
 async function withServer(t, env = {}, extras = {}) {
@@ -1241,7 +1241,7 @@ test('mixed image and audio on chat is not 400', async (t) => {
     headers: { 'content-type': 'application/json' },
     body: {
       messages: [{ role: 'user', content: [
-        { type: 'image_url', image_url: { url: 'data:image/png;base64,x' } },
+        { type: 'image_url', image_url: { url: 'data:image/png;base64,' + tinyPng().toString('base64') } },
         { type: 'input_audio', input_audio: { data: 'data:audio/wav;base64,x' } },
       ] }],
     },
@@ -1540,7 +1540,7 @@ test('an image request whose vision backend will not start is a 503, never a tex
     path: '/v1/chat/completions', method: 'POST', headers: { 'content-type': 'application/json' },
     body: { model: 'vision-layout-agent', messages: [{ role: 'user', content: [
       { type: 'text', text: 'what is this' },
-      { type: 'image_url', image_url: { url: 'data:image/png;base64,iVBORw0KGgo=' } },
+      { type: 'image_url', image_url: { url: 'data:image/png;base64,' + tinyPng().toString('base64') } },
     ] }] },
   });
   assert.equal(res.status, 503);
