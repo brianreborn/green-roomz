@@ -93,8 +93,11 @@ if (Test-Path -LiteralPath $benchPath) {
 # 7 - Scheduled task (hourly)
 $taskName = Get-GrzSetting -Name 'GRZ_MAINTENANCE_TASK' -Default 'GrzMvpMaintenance'
 $thisScript = $MyInvocation.MyCommand.Path
-Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue |
-    Unregister-ScheduledTask -Confirm:$false -ErrorAction SilentlyContinue
+# G1: also drop the pre-rename task so a re-run does not leave two hourly maintainers.
+foreach ($legacy in @($taskName, 'QodeshMaintenance')) {
+    Get-ScheduledTask -TaskName $legacy -ErrorAction SilentlyContinue |
+        Unregister-ScheduledTask -Confirm:$false -ErrorAction SilentlyContinue
+}
 $action    = New-ScheduledTaskAction -Execute "powershell.exe" `
     -Argument ("-NoProfile -ExecutionPolicy Bypass -File `"" + $thisScript + "`"")
 $trigger   = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
