@@ -1,6 +1,6 @@
 /**
  * sm_1.1 CUDA assist for mailbox/monitor hash + private-slot copy verify.
- * Spawns native/sm11-monitor/out/sm11_monitor.exe --json; CPU FNV-1a fallback.
+ * Spawns the platform-native sm11-monitor executable; CPU FNV-1a fallback.
  * Scrub / seq / batch / private-slot ring probes; optional persistent --serve session.
  */
 
@@ -33,7 +33,8 @@ const REPO_ROOT = path.resolve(fileURLToPath(new URL('../..', import.meta.url)))
 export const SM11_FAT_LIMIT = FAT_LIMIT;
 
 export function defaultExePath() {
-  return path.join(REPO_ROOT, 'native', 'sm11-monitor', 'out', 'sm11_monitor.exe');
+  const binary = process.platform === 'win32' ? 'sm11_monitor.exe' : 'sm11_monitor';
+  return path.join(REPO_ROOT, 'native', 'sm11-monitor', 'out', binary);
 }
 
 export function envSm11Enabled(env = process.env) {
