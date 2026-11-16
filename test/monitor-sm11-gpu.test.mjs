@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
+import path from 'node:path';
 import { Mailbox } from '../src/mailbox.mjs';
 import {
   defaultExePath,
@@ -43,6 +44,13 @@ const KNOWN = 'green-roomz-mailbox-probe';
 const KNOWN_HASH = '0x3909d6f79a48ee3c';
 const EXE = defaultExePath();
 const HAS_EXE = existsSync(EXE);
+
+test('default native executable path uses the platform filename', () => {
+  assert.equal(
+    path.basename(EXE),
+    process.platform === 'win32' ? 'sm11_monitor.exe' : 'sm11_monitor',
+  );
+});
 
 test('CPU FNV-1a matches sm11_monitor known probe hash', () => {
   assert.equal(fnv1a64Hex(KNOWN), KNOWN_HASH);
@@ -628,7 +636,7 @@ test('preferRing hot path falls back to seq/scrub/batch when ring throws', async
 });
 
 test('live Mailbox ring hot-path under --serve when exe present', {
-  skip: HAS_EXE ? false : 'native/sm11-monitor/out/sm11_monitor.exe missing',
+  skip: HAS_EXE ? false : 'native sm11-monitor binary missing',
   timeout: 90_000,
 }, async () => {
   const box = new Mailbox({
@@ -817,8 +825,8 @@ test('sm11 hotEvents and failByKind harden existing enqueue/drop/drain path', as
   ]);
 });
 
-test('live sm11_monitor.exe --json on 8600 when present', {
-  skip: HAS_EXE ? false : 'native/sm11-monitor/out/sm11_monitor.exe missing',
+test('live sm11 monitor --json on 8600 when present', {
+  skip: HAS_EXE ? false : 'native sm11-monitor binary missing',
   timeout: 60_000,
 }, async () => {
   const result = await probeSm11({ timeoutMs: 30_000 });
@@ -834,7 +842,7 @@ test('live sm11_monitor.exe --json on 8600 when present', {
 });
 
 test('live scrub/seq/batch probes when exe present', {
-  skip: HAS_EXE ? false : 'native/sm11-monitor/out/sm11_monitor.exe missing',
+  skip: HAS_EXE ? false : 'native sm11-monitor binary missing',
   timeout: 60_000,
 }, async () => {
   const scrub = await verifyScrub({ batch: 8, envBytes: 64, timeoutMs: 30_000 });
@@ -899,7 +907,7 @@ test('createSm11ServeSession mock multiplexes JSON replies', async () => {
 });
 
 test('live --serve session is warmer than cold spawn when exe present', {
-  skip: HAS_EXE ? false : 'native/sm11-monitor/out/sm11_monitor.exe missing',
+  skip: HAS_EXE ? false : 'native sm11-monitor binary missing',
   timeout: 90_000,
 }, async () => {
   const assist = createSm11Assist({
@@ -936,7 +944,7 @@ test('live --serve session is warmer than cold spawn when exe present', {
 });
 
 test('live --loops reports in-process ms_* when exe present', {
-  skip: HAS_EXE ? false : 'native/sm11-monitor/out/sm11_monitor.exe missing',
+  skip: HAS_EXE ? false : 'native sm11-monitor binary missing',
   timeout: 60_000,
 }, async () => {
   const result = await verifyPayload(KNOWN, {
@@ -1085,7 +1093,7 @@ test('createSm11Assist assistRing* is non-blocking with CPU fallback', async () 
 });
 
 test('live private-slot ring push/hash/scrub/drain/verify when exe present', {
-  skip: HAS_EXE ? false : 'native/sm11-monitor/out/sm11_monitor.exe missing',
+  skip: HAS_EXE ? false : 'native sm11-monitor binary missing',
   timeout: 90_000,
 }, async () => {
   const assist = createSm11Assist({

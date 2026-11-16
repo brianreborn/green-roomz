@@ -38,6 +38,23 @@ Output: `native\sm11-monitor\out\sm11_monitor.exe`
 
 On qodesh, VS2013 has no native amd64 `vcvars64.bat`, so the script falls back to **Win32** (`-m32`) — verified on GeForce 8600 GT.
 
+## POSIX hosts
+
+On FreeBSD or another POSIX host with an `nvcc` that supports `sm_11`, run:
+
+```sh
+sh native/sm11-monitor/build.sh
+```
+
+Set `CUDA_HOME` (or `CUDA_PATH`) when `nvcc` is not on `PATH`; set `CCBIN` to select
+the host compiler when the toolkit requires it. The output is
+`native/sm11-monitor/out/sm11_monitor` (no `.exe` suffix).
+
+This adds a build and runtime path, not a FreeBSD GPU compatibility claim. The
+FreeBSD host compiler, NVIDIA driver, and CUDA runtime combination has not been
+validated on hardware; the 8600 GT smoke/soak results below were collected on
+qodesh with Windows and CUDA 6.5.
+
 ## Run
 
 ```bat
@@ -119,7 +136,7 @@ Occasional multi-second outliers on scrub/seq are driver/context hiccups under c
 
 ### When is `preferRing` on?
 
-- **Default on** whenever assist opens a persistent `--serve` session (exe present, `preferGpu` not false, `serve` not false). That is the normal `GRZ_SM11=1` / `{ sm11: true }` path when `out/sm11_monitor.exe` exists.
+- **Default on** whenever assist opens a persistent `--serve` session (native binary present, `preferGpu` not false, `serve` not false). That is the normal `GRZ_SM11=1` / `{ sm11: true }` path when `out/sm11_monitor[.exe]` exists.
 - Explicit `{ preferRing: true|false }` always wins.
 - Without a serve session (no exe / `serve: false` / `preferGpu: false`), `preferRing` stays off and the hot path uses seq/scrub/batch probes only (CPU twin OK).
 
