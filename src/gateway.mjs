@@ -242,6 +242,12 @@ export function prepareInferenceBody(body, agent, extras = {}) {
   const dogfood = stripped.dogfood === true;
   const base = { ...stripped, model: agent.alias };
   delete base.dogfood;
+  // `reasoning_effort` is an OpenAI-client control, not a llama-server
+  // /v1/chat/completions field. Hermes and other clients may include it;
+  // consume it at the gateway boundary instead of forwarding a request that
+  // the backend rejects. Model-specific thinking controls use
+  // `enable_thinking`/`chat_template_kwargs` below.
+  delete base.reasoning_effort;
   // Nexus routing kernel (tool-router.md) is only for consultNexus via withNexusPolicy.
   // User-facing resident completions get a tiny chat prompt so the 0.5B does not dump baked identity.
   const payload = dogfood
