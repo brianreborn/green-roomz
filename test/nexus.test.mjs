@@ -281,6 +281,50 @@ test('route-plan endpoint skips Nexus for an admissible high-confidence intent',
   assert.deepEqual(modelCalls, []);
 });
 
+test('consultNexus retains model selection for low-confidence default intent', async (t) => {
+  const modelCalls = [];
+  const { registry, processes } = await withServer(t, {
+    ready: ['tool-router-agent', 'general-text-speculator', 'semantic-embedding-agent'],
+  });
+  const result = await consultNexus({
+    processes,
+    registry,
+    fetchImpl: async (url) => {
+      modelCalls.push(String(url));
+      return jsonFetch({ choices: [{ message: { content: JSON.stringify({
+        route: 'semantic-embedding-agent', confidence: 0.9, reason: 'selected by decision model',
+      }) } }] });
+    },
+    body: { messages: [{ role: 'user', content: 'Can you help me think through this?' }] },
+  });
+  assert.equal(result.route, 'semantic-embedding-agent');
+  assert.equal(modelCalls.length, 1);
+  assert.match(modelCalls[0], /:18187\//);
+});
+
+test('consultNexus does not fast-path an unavailable high-confidence route', async (t) => {
+  const modelCalls = [];
+  const { registry, processes } = await withServer(t, {
+    ready: ['tool-router-agent', 'general-text-speculator', 'semantic-embedding-agent'],
+  });
+  registry.setStatus('semantic-embedding-agent', 'unavailable', { missing: ['artifact missing'] });
+  const result = await consultNexus({
+    processes,
+    registry,
+    fetchImpl: async (url, init) => {
+      modelCalls.push(String(url));
+      const body = JSON.parse(Buffer.from(init.body).toString());
+      assert.equal(body.json_schema.properties.route.enum.includes('semantic-embedding-agent'), false);
+      return jsonFetch({ choices: [{ message: { content: JSON.stringify({
+        route: 'general-text-speculator', confidence: 0.9, reason: 'available fallback',
+      }) } }] });
+    },
+    body: { messages: [{ role: 'user', content: 'generate embeddings for this sentence' }] },
+  });
+  assert.equal(result.route, 'general-text-speculator');
+  assert.equal(modelCalls.length, 1);
+});
+
 test('wrong security dispatch (/sast on threat-model) hands off and reissues to general-text', async (t) => {
   let specialistCalls = 0;
   const { server } = await withServer(t, {
