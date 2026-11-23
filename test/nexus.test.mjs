@@ -259,25 +259,32 @@ test('consultNexus omits impractical aliases from AVAILABLE the way unused visio
   assert.ok(enums.length >= 1);
 });
 
-test('route-plan endpoint skips Nexus for an admissible high-confidence intent', async (t) => {
+test('route-plan endpoint skips Nexus for admissible high-confidence intents', async (t) => {
   const modelCalls = [];
   const { server } = await withServer(t, {
-    ready: ['tool-router-agent', 'semantic-embedding-agent', 'general-text-speculator'],
+    ready: ['tool-router-agent', 'semantic-embedding-agent', 'retrieval-rerank-agent', 'general-text-speculator'],
   }, {
     fetchImpl: async (url) => {
       modelCalls.push(String(url));
       throw new Error('high-confidence embedding intent should not call Nexus');
     },
   });
-  const result = await request(server, {
-    path: '/v1/chat/completions/route',
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: { messages: [{ role: 'user', content: 'generate embeddings for this sentence' }] },
-  });
-  assert.equal(result.status, 200);
-  assert.equal(result.headers['x-green-roomz-effective-alias'], 'semantic-embedding-agent');
-  assert.equal(result.headers['x-green-roomz-route-reason'], 'fast_plan_embedding_intent');
+  const cases = [
+    ['generate embeddings for this sentence', 'semantic-embedding-agent', 'fast_plan_embedding_intent'],
+    ['rerank these passages by relevance', 'retrieval-rerank-agent', 'fast_plan_rerank_intent'],
+    ['translate this sentence into French', 'general-text-speculator', 'fast_plan_translation_request'],
+  ];
+  for (const [prompt, alias, reason] of cases) {
+    const result = await request(server, {
+      path: '/v1/chat/completions/route',
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: { messages: [{ role: 'user', content: prompt }] },
+    });
+    assert.equal(result.status, 200, prompt);
+    assert.equal(result.headers['x-green-roomz-effective-alias'], alias, prompt);
+    assert.equal(result.headers['x-green-roomz-route-reason'], reason, prompt);
+  }
   assert.deepEqual(modelCalls, []);
 });
 
