@@ -14,6 +14,11 @@ import { planRoute } from './logical-router.mjs';
 import { aliasCanAdmit, availableAliases, detectModalities, isRoutableAlias, latestUserMessageText, NATIVE_CHAT, stripSlashCommand } from './routing.mjs';
 import { stripControls } from './util.mjs';
 
+// Avoid a second model call when the lightweight planner has a specific route
+// and the chosen specialist is currently admissible. Generic chat stays below
+// this confidence floor and continues through the existing resident/Nexus path.
+const FAST_PLAN_CONFIDENCE = 0.8;
+
 /** In actor runtimes, kernel faith is the `confidence` field. Gateway /faith is a separate knob. */
 export function clampFaith(value) {
   const n = Number(value);
@@ -285,6 +290,21 @@ export async function consultNexus({ processes, registry, fetchImpl = fetch, bod
       return offlinePlan(stripped, registry, visited);
     }
   };
+
+  const quickPlan = planRoute({ messages: [{ role: 'user', content: latestUserMessageText(stripped) }] });
+  if (
+    quickPlan?.route
+    && quickPlan.confidence >= FAST_PLAN_CONFIDENCE
+    && isRoutableAlias(registry, quickPlan.route)
+    && !visited.has(quickPlan.route)
+    && admitOk(quickPlan.route)
+  ) {
+    return {
+      route: quickPlan.route,
+      confidence: quickPlan.confidence,
+      reason: `fast_plan_${quickPlan.reason_code ?? 'specific_intent'}`,
+    };
+  }
 
   let plan = await ask();
   let bad = routeIsBad(plan, registry, visited, stripped);
