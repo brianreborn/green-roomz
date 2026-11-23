@@ -25,7 +25,7 @@
       ],
       "bytes": 2091
     },
-    "qwenstral-code-speculator": {
+    "code-generation-agent": {
       "sha256": "09fbabdf91ca6c1a265bdb7d5a375330e9b07f0a70a05a07eaf64afeadfbf2fb",
       "layers": [
         "agency",

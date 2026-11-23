@@ -1,9 +1,12 @@
 import { ValidationError } from './errors.mjs';
 
-// BND-03: request-time capability gate. Manifest vocab (config/agents.windows.json):
-// detected modality `image` -> gateway_accepted_capabilities `image`, `audio` -> `audio`.
+// BND-03: request-time capability gate. Input media must be accepted by the
+// selected role; output media is checked against native output capabilities by
+// the route planner.
 // Text-only turns are never blocked here (audio-transcription accepts no `text`).
-const MODALITY_CAPABILITY = Object.freeze({ image: 'image', audio: 'audio' });
+const MODALITY_CAPABILITY = Object.freeze({
+  image: 'image', audio: 'audio', video: 'video', model3d: 'model3d', spatial: 'spatial', document: 'file',
+});
 
 const REQUIRED_PART = Object.freeze({
   'vision-layout-agent': 'image',
@@ -19,12 +22,13 @@ const ENDPOINT_NATIVE = Object.freeze({
 export function modalityGateViolation(agent, modality = {}) {
   if (!agent) return 'unknown agent';
   const alias = agent.alias;
-  if (modality.image && modality.audio) return 'mixed image and audio input requires an explicitly qualified workflow';
+  const input = modality.input ?? modality;
+  if (input.image && input.audio) return 'mixed image and audio input requires an explicitly qualified workflow';
   const required = REQUIRED_PART[alias];
-  if (required && !modality[required]) return `${alias} requires an ${required} part (${required === 'image' ? 'vision without image part' : 'audio without audio part'})`;
+  if (required && !input[required]) return `${alias} requires an ${required} part (${required === 'image' ? 'vision without image part' : 'audio without audio part'})`;
   const accepted = Array.isArray(agent.gateway_accepted_capabilities) ? agent.gateway_accepted_capabilities : [];
   for (const [kind, capability] of Object.entries(MODALITY_CAPABILITY)) {
-    if (modality[kind] && !accepted.includes(capability)) return `${alias} does not accept ${kind} input`;
+    if (input[kind] && !accepted.includes(capability)) return `${alias} does not accept ${kind} input`;
   }
   return null;
 }

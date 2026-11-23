@@ -46,7 +46,7 @@ test('inspect marks a memory-tight specialist unavailable unless admit_when_tigh
   try {
     const manifest = sampleManifest();
     manifest.runtimes.llama_server.command = process.execPath;
-    const agent = manifest.agents.find((item) => item.alias === 'qwenstral-code-speculator');
+    const agent = manifest.agents.find((item) => item.alias === 'code-generation-agent');
     agent.model = model;
     agent.draft_enabled = false;
     agent.profiles = [
@@ -56,7 +56,7 @@ test('inspect marks a memory-tight specialist unavailable unless admit_when_tigh
     const registry = await new AgentRegistry(manifest).inspect({
       hostAdapter: { sampleResources() { return { freeMemoryBytes: 1 }; } },
     });
-    const status = registry.status('qwenstral-code-speculator');
+    const status = registry.status('code-generation-agent');
     // Default admit_when_tight=refuse: too-big specialist is unavailable (impractical), not "page anyway".
     assert.equal(status.state, 'unavailable');
     assert.ok((status.missing ?? []).some((reason) => String(reason).startsWith('impractical')));
@@ -65,7 +65,7 @@ test('inspect marks a memory-tight specialist unavailable unless admit_when_tigh
     const paged = await new AgentRegistry(manifest).inspect({
       hostAdapter: { sampleResources() { return { freeMemoryBytes: 1 }; } },
     });
-    const pagedStatus = paged.status('qwenstral-code-speculator');
+    const pagedStatus = paged.status('code-generation-agent');
     assert.notEqual(pagedStatus.state, 'unavailable', 'admit_when_tight=page keeps it available (OS pages)');
     assert.ok(!(pagedStatus.missing ?? []).some((reason) => String(reason).startsWith('impractical')));
   } finally {

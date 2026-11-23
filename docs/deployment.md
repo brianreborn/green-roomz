@@ -15,7 +15,7 @@ you never call those directly.
 | 8187 | `tool-router-agent` — resident 0.5B CPU nexus | pre-warmed at serve start, stays loaded |
 | 8181 | `vision-layout-agent` | on first use (cold start) |
 | 8182 | `audio-transcription-agent` (whisper-server) | on first use |
-| 8183 | `qwenstral-code-speculator` | on first use |
+| 8183 | `code-generation-agent` | on first use |
 | 8184 | `general-text-speculator` | on first use |
 | 8185 | `semantic-embedding-agent` | on first use |
 | 8186 | `retrieval-rerank-agent` | on first use |

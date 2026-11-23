@@ -33,7 +33,7 @@ test('headroom is 2 GiB on PCs and 256 MiB under 8 GiB total', () => {
 test('CPU profile is rejected when 4.4 GiB file plus pad and 2 GiB headroom exceed 5 GiB free', () => {
   const { model, cleanup } = withModel();
   try {
-    const agent = { alias: 'qwenstral-code-speculator', model, draft_enabled: false };
+    const agent = { alias: 'code-generation-agent', model, draft_enabled: false };
     const profile = cpuProfile();
     const estimate = estimateResidentBytes(agent, profile, { includeDraft: false });
     assert.equal(estimate, Math.round(MODEL_BYTES * 1.6 + 512 * 1024 * 1024));
@@ -51,7 +51,7 @@ test('CPU profile is rejected when 4.4 GiB file plus pad and 2 GiB headroom exce
 test('same CPU profile is admitted when 20 GiB is free', () => {
   const { model, cleanup } = withModel();
   try {
-    const agent = { alias: 'qwenstral-code-speculator', model };
+    const agent = { alias: 'code-generation-agent', model };
     const admitted = profileAdmitted(agent, cpuProfile(), { freeMemoryBytes: 20 * GiB, includeDraft: false });
     assert.equal(admitted.ok, true);
     assert.equal(admitted.reason, 'admitted');
@@ -64,7 +64,7 @@ test('same CPU profile is admitted when 20 GiB is free', () => {
 test('GPU profile is admitted even when free memory is tight', () => {
   const { model, cleanup } = withModel();
   try {
-    const agent = { alias: 'qwenstral-code-speculator', model };
+    const agent = { alias: 'code-generation-agent', model };
     const admitted = profileAdmitted(agent, gpuProfile(), { freeMemoryBytes: 1, includeDraft: false });
     assert.equal(admitted.ok, true);
     assert.equal(admitted.estimateBytes, null);
@@ -75,7 +75,7 @@ test('GPU profile is admitted even when free memory is tight', () => {
 });
 
 test('missing model is admitted as unknown rather than rejected', () => {
-  const agent = { alias: 'qwenstral-code-speculator', model: path.join(os.tmpdir(), 'grz-missing-code.gguf') };
+  const agent = { alias: 'code-generation-agent', model: path.join(os.tmpdir(), 'grz-missing-code.gguf') };
   const admitted = profileAdmitted(agent, cpuProfile(), { freeMemoryBytes: 1, includeDraft: false });
   assert.equal(admitted.ok, true);
   assert.equal(admitted.estimateBytes, null);
@@ -86,7 +86,7 @@ test('agentCanAdmit is false when CPU is impractical even if a GPU profile is un
   const { model, cleanup } = withModel();
   try {
     const agent = {
-      alias: 'qwenstral-code-speculator',
+      alias: 'code-generation-agent',
       model,
       draft_enabled: false,
       profiles: [cpuProfile(), gpuProfile()],

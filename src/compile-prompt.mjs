@@ -26,7 +26,7 @@ const SAFETY_ALIAS = 'safety-policy-agent';
  * a fact about the roster, not a rollout knob — a future working-set agent is a
  * cognitive agent by definition. See docs/stock-prompts.md.
  */
-const MFL_ALIASES = new Set(['general-text-speculator', 'qwenstral-code-speculator']);
+const MFL_ALIASES = new Set(['general-text-speculator', 'code-generation-agent']);
 
 /**
  * Agents whose job is narrow enough that a wrong turn should be a hard HANDOFF,
@@ -35,7 +35,7 @@ const MFL_ALIASES = new Set(['general-text-speculator', 'qwenstral-code-speculat
  * are frozen. The four here previously each carried an identical inline preamble.
  */
 const HANDOFF_ALIASES = new Set([
-  'qwenstral-code-speculator',
+  'code-generation-agent',
   'vision-layout-agent',
   'audio-transcription-agent',
   'image-generation-agent',

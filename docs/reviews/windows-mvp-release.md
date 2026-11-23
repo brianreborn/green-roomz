@@ -48,7 +48,7 @@ Landed (see `data/wave1-503-summary.md`). Explicit native/speech hops no longer 
 - `/draw` `/imagine` and `model: image-generation-agent` → **503** when image-gen cannot admit.
 - `/tts` missing piper → **503** (empty `/tts` text is still **400** if speech is admittable).
 - `/embed` `/rerank` `/audio` slash to a missing native → same 503 path.
-- `/code` on impractical/missing `qwenstral-code-speculator` still **200 resident 0.5B** (unchanged).
+- `/code` on impractical/missing `code-generation-agent` still **200 resident 0.5B** (unchanged).
 - `/route` still 200-names an unavailable native; only `/v1/chat/completions` 503s.
 
 Tests noted with that patch: 66 run, Wave 1 cases green; **5 unrelated pre-existing reds** (intent regex vs nexus, public-bind error text, session stickiness). Do not treat those as this cut’s ship gate.
@@ -80,7 +80,7 @@ On the Windows MVP manifest, most of the 11 aliases are **placeholders**. Typica
 |---|---|
 | `vision-layout-agent` | `models/missing-vision.gguf` |
 | `audio-transcription-agent` | `runtime/missing-whisper-server` (ggml-small.bin **is** on disk; whisper-server binary is not) |
-| `qwenstral-code-speculator` | `models/missing-qwen-instruct.gguf` — cold until RAM allows; `/code` falls back to resident |
+| `code-generation-agent` | `models/missing-qwen-instruct.gguf` — cold until RAM allows; `/code` falls back to resident |
 | `semantic-embedding-agent` | `models/missing-embed.gguf` |
 | `retrieval-rerank-agent` | `models/missing-rerank.gguf` |
 | `safety-policy-agent` | `models/missing-guard.gguf` |

@@ -50,7 +50,7 @@ async function withServer(t, extras = {}) {
   if (extras.env) Object.assign(process.env, extras.env);
   const manifest = sampleManifest(extras.manifestOverrides ?? {});
   const registry = await new AgentRegistry(manifest).inspect();
-  const ready = extras.ready ?? ['qwenstral-code-speculator', 'general-text-speculator', 'tool-router-agent'];
+  const ready = extras.ready ?? ['code-generation-agent', 'general-text-speculator', 'tool-router-agent'];
   for (const alias of ready) registry.setStatus(alias, 'ready');
   const hostAdapter = extras.hostAdapter ?? { sampleResources() { return { freeMemoryBytes: 1 }; } };
   const processes = new ProcessManager({
@@ -301,7 +301,7 @@ test('fuzz: concurrent chat and route requests complete without 500 or hung sock
 
 test('fuzz: parseRouteJson sandwich, nested braces, first-JSON-only, OSC/CSI', () => {
   const first = { route: 'general-text-speculator', confidence: 0.9, reason: 'first' };
-  const second = { route: 'qwenstral-code-speculator', confidence: 0.1, reason: 'second' };
+  const second = { route: 'code-generation-agent', confidence: 0.1, reason: 'second' };
   const sandwich = `prefix ${JSON.stringify(first)} junk ${JSON.stringify(second)}`;
   const parsed = parseRouteJson(sandwich);
   assert.equal(parsed.route, 'general-text-speculator');
@@ -338,13 +338,13 @@ test('fuzz: parseRouteJson sandwich, nested braces, first-JSON-only, OSC/CSI', (
 });
 
 test('fuzz: parseHandoffContent sandwich, unallowlisted suggest, OSC/CSI', () => {
-  const sandwich = '{"handoff":true,"reason":"first","suggest":"general-text-speculator"}{"handoff":true,"reason":"second","suggest":"qwenstral-code-speculator"}';
+  const sandwich = '{"handoff":true,"reason":"first","suggest":"general-text-speculator"}{"handoff":true,"reason":"second","suggest":"code-generation-agent"}';
   const parsed = parseHandoffContent(sandwich);
   assert.equal(parsed?.handoff, true);
   assert.equal(parsed.reason, 'first');
   assert.equal(parsed.suggest, 'general-text-speculator');
 
-  const trailing = parseHandoffContent('HANDOFF {"reason":"ok","suggest":"general-text-speculator"} extra {"suggest":"qwenstral-code-speculator"}');
+  const trailing = parseHandoffContent('HANDOFF {"reason":"ok","suggest":"general-text-speculator"} extra {"suggest":"code-generation-agent"}');
   assert.equal(trailing.handoff, true);
   assert.equal(trailing.reason, 'ok');
   assert.equal(trailing.suggest, 'general-text-speculator');

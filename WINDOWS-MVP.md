@@ -78,7 +78,7 @@ incompatible GPU build.
 |---|---|---|
 | `tool-router-agent` (nexus) | existing `Qwenstral-Small-3.1-0.5B.Q4_K_M.gguf` | English JSON **router only** (PF8) |
 | `general-text-speculator` | `Qwen2.5-0.5B-Instruct-Q4_K_M.gguf` | Chat / writing — **CPU** |
-| `qwenstral-code-speculator` | cold / missing | Until RAM allows |
+| `code-generation-agent` | cold / missing | Until RAM allows |
 
 Optional later: Qwen2.5-**1.5B**-Instruct Q4_K_M (~1 GB) when free RAM allows.
 

@@ -1,1 +1,1 @@
-{"model":"qwenstral-code-speculator","messages":[{"role":"user","content":"Write a one-line Python hello world."}],"max_tokens":24,"temperature":0}
+{"model":"code-generation-agent","messages":[{"role":"user","content":"Write a one-line Python hello world."}],"max_tokens":24,"temperature":0}

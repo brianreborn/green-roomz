@@ -8,7 +8,7 @@
  *   node scripts/agent-e2e-eval.mjs --live
  *   node scripts/agent-e2e-eval.mjs --full --no-fail-fast --offline-only
  *
- * Env: GRZ_BASE_URL, GRZ_MODEL (defaults to qwenstral-code-speculator), GRZ_CHAT_TIMEOUT_MS
+ * Env: GRZ_BASE_URL, GRZ_MODEL (defaults to code-generation-agent), GRZ_CHAT_TIMEOUT_MS
  * Flags: --smoke (default) --full --id E1,E4 --fail-fast (default) --no-fail-fast
  *        --offline-only (default) --live --live-only
  */
@@ -24,7 +24,7 @@ const root = path.resolve(here, '..');
 const suitePath = path.join(root, 'eval', 'agent-e2e.json');
 const outPath = process.env.GRZ_E2E_OUT || path.join(root, 'data', 'agent-e2e-last.json');
 const base = (process.env.GRZ_BASE_URL || 'http://127.0.0.1:8080').replace(/\/$/, '');
-const defaultModel = process.env.GRZ_MODEL || 'qwenstral-code-speculator';
+const defaultModel = process.env.GRZ_MODEL || 'code-generation-agent';
 const argv = process.argv.slice(2);
 function flagValue(flag) {
   const i = argv.indexOf(flag);

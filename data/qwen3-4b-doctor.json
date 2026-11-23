@@ -4,7 +4,7 @@
   "required_aliases": [
     "vision-layout-agent",
     "audio-transcription-agent",
-    "qwenstral-code-speculator",
+    "code-generation-agent",
     "general-text-speculator",
     "semantic-embedding-agent",
     "retrieval-rerank-agent",
@@ -103,7 +103,7 @@
       "experimental_features": []
     },
     {
-      "id": "qwenstral-code-speculator",
+      "id": "code-generation-agent",
       "object": "model",
       "owned_by": "green-roomz",
       "native_capabilities": [

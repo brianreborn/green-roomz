@@ -22,7 +22,7 @@
     "impractical_threshold": "leave enough RAM for other apps; ~0.6 GB remaining is unusable; ~1.9 GB still no concurrent-app headroom on this 16 GB laptop"
   },
   "profiles": {
-    "qwenstral-code-speculator": {
+    "code-generation-agent": {
       "winner_practical": "vulkan-all",
       "profiles": [
         {

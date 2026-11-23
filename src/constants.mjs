@@ -1,7 +1,7 @@
 export const REQUIRED_ALIASES = Object.freeze([
   'vision-layout-agent',
   'audio-transcription-agent',
-  'qwenstral-code-speculator',
+  'code-generation-agent',
   'general-text-speculator',
   'semantic-embedding-agent',
   'retrieval-rerank-agent',
@@ -57,7 +57,7 @@ export const UPSTREAM_MAX_BUFFER_BYTES = 8 * 1024 * 1024;
 export const KERNEL_BASENAME = Object.freeze({
   'vision-layout-agent': 'vision-layout.md',
   'audio-transcription-agent': 'audio-transcription.md',
-  'qwenstral-code-speculator': 'code-structured.md',
+  'code-generation-agent': 'code-structured.md',
   'general-text-speculator': 'general-text.md',
   'tool-router-agent': 'tool-router.md',
   'safety-policy-agent': 'safety.md',

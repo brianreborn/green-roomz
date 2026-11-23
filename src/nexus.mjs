@@ -104,7 +104,7 @@ export function parseRouteJson(text) {
 
 const ALIAS_HINTS = {
   'general-text-speculator': 'stories, poems, chat, translation, default',
-  'qwenstral-code-speculator': 'programming, C++, Python, functions, source code',
+  'code-generation-agent': 'programming, C++, Python, functions, source code',
   'image-generation-agent': 'generate or draw a new picture/image',
   'vision-layout-agent': 'user attached an image to look at',
   'speech-synthesis-agent': 'speak or read aloud',
@@ -292,9 +292,12 @@ export async function consultNexus({ processes, registry, fetchImpl = fetch, bod
   };
 
   const quickPlan = planRoute({ messages: [{ role: 'user', content: latestUserMessageText(stripped) }] });
+  const modalities = detectModalities(stripped);
   if (
     quickPlan?.route
     && quickPlan.confidence >= FAST_PLAN_CONFIDENCE
+    && !modalities.image
+    && !modalities.audio
     && isRoutableAlias(registry, quickPlan.route)
     && !visited.has(quickPlan.route)
     && admitOk(quickPlan.route)

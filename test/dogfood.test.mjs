@@ -113,7 +113,7 @@ test('a valid one-file diff is applied when apply=true and tests return 0', asyn
     assert.match(seen[0].body.messages[0].content, /```diff/);
     assert.match(seen[0].body.messages[1].content, /replace old with new/);
     assert.match(DOGFOOD_SYSTEM, /```diff/);
-    assert.equal(PREFERRED_MODEL, 'qwenstral-code-speculator');
+    assert.equal(PREFERRED_MODEL, 'code-generation-agent');
     assert.equal(FALLBACK_MODEL, 'general-text-speculator');
   } finally {
     rmSync(root, { recursive: true, force: true });

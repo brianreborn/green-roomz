@@ -1,5 +1,5 @@
 ﻿{
-    "routed_agent":  "qwenstral-code-speculator",
+    "routed_agent":  "code-generation-agent",
     "notes":  "Gateway-path live POST. vulkan-all-only temp manifest ctx=1024. Patched request-close abort. No Qwen3-4B fetch. No grok login.",
     "leftover_after_stop":  false,
     "profile":  "vulkan-all",

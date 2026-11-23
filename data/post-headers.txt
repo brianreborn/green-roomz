@@ -1,7 +1,7 @@
 HTTP/1.1 200 OK
 x-session-id: 6e77b4b4-8166-460f-a803-0ae08e805ad5
-x-green-roomz-requested-alias: qwenstral-code-speculator
-x-green-roomz-effective-alias: qwenstral-code-speculator
+x-green-roomz-requested-alias: code-generation-agent
+x-green-roomz-effective-alias: code-generation-agent
 x-green-roomz-route-reason: requested_alias
 access-control-allow-origin: 
 content-length: 707

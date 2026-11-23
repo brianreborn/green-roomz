@@ -46,7 +46,7 @@ Commands:
                             live max_tokens/timeout come from gateway.agent_max_tokens and
                             gateway.agent_chat_timeout_ms unless the flags are set)
   dogfood --goal TEXT   (one unified diff from the gateway; dry-run unless GRZ_DOGFOOD_APPLY=1.
-                           model qwenstral-code-speculator, or GRZ_DOGFOOD_MODEL=general-text-speculator)
+                           model code-generation-agent, or GRZ_DOGFOOD_MODEL=general-text-speculator)
   stop [--manifest path]   (SIGTERM gateway from data/serve.pid; reap owned children.json PIDs)
 `;
 }
@@ -497,7 +497,7 @@ async function cmdAgent(args) {
     workspace,
     goal,
     chat,
-    model: argValue(args, '--model') || 'qwenstral-code-speculator',
+    model: argValue(args, '--model') || 'code-generation-agent',
     lang: argValue(args, '--lang'),
     maxSteps: Number.isFinite(maxSteps) && maxSteps > 0 ? maxSteps : 12,
     maxTokens,

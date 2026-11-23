@@ -45,7 +45,7 @@ export function planRoute(body) {
     return plan('retrieval-rerank-agent', 0.8, 'rerank_intent', ['text']);
   }
   if (CODE_INTENT.test(text)) {
-    return plan('qwenstral-code-speculator', 0.75, 'code_intent', ['text']);
+    return plan('code-generation-agent', 0.75, 'code_intent', ['text']);
   }
   if (IMAGE_GENERATION_INTENT.test(text)) {
     return plan('image-generation-agent', 0.7, 'image_generation_intent', ['text']);

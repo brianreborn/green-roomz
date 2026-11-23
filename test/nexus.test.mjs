@@ -92,7 +92,7 @@ function nexusThenSpecialists(nexusReplies, specialistFn) {
 }
 
 const imageAskAfterCpp = {
-  model: 'qwenstral-code-speculator',
+  model: 'code-generation-agent',
   messages: [
     { role: 'user', content: 'write a C++ program about a hero who saves a village' },
     { role: 'assistant', content: '#include <iostream>\nint main() { std::cout << "hero"; }\n' },
@@ -114,7 +114,7 @@ test('image ask after a C++ story hits nexus, skips missing image-gen, does not 
     { route: 'general-text-speculator', confidence: 0.7, reason: 'image-gen unavailable' },
   ];
   const { server, processes } = await withServer(t, {
-    ready: ['tool-router-agent', 'qwenstral-code-speculator', 'general-text-speculator'],
+    ready: ['tool-router-agent', 'code-generation-agent', 'general-text-speculator'],
     fetchImpl: nexusThenSpecialists(nexusReplies, (href) => {
       assert.equal(href.includes(':18183'), false, 'must not start the code specialist');
       assert.match(href, /18184/);
@@ -135,19 +135,19 @@ test('image ask after a C++ story hits nexus, skips missing image-gen, does not 
   assert.equal(result.status, 200);
   assert.equal(result.headers['x-green-roomz-effective-alias'], 'general-text-speculator');
   assert.equal(result.headers['x-green-roomz-nexus'], 'tool-router-agent');
-  assert.doesNotMatch(result.headers['x-green-roomz-hops'] ?? '', /qwenstral-code-speculator/);
+  assert.doesNotMatch(result.headers['x-green-roomz-hops'] ?? '', /code-generation-agent/);
   assert.match(result.body.choices[0].message.content, /hero|cannot draw/i);
-  assert.equal(ensured.includes('qwenstral-code-speculator'), false);
+  assert.equal(ensured.includes('code-generation-agent'), false);
   assert.equal(ensured.includes('image-generation-agent'), false);
 });
 
 test('HANDOFF in first specialist tokens routes to a second specialist', async (t) => {
   let specialistCalls = 0;
   const { server } = await withServer(t, {
-    ready: ['tool-router-agent', 'qwenstral-code-speculator', 'general-text-speculator'],
+    ready: ['tool-router-agent', 'code-generation-agent', 'general-text-speculator'],
     fetchImpl: nexusThenSpecialists(
       [
-        { route: 'qwenstral-code-speculator', confidence: 0.8, reason: 'looks like code' },
+        { route: 'code-generation-agent', confidence: 0.8, reason: 'looks like code' },
         { route: 'general-text-speculator', confidence: 0.8, reason: 'code handed off' },
       ],
       (href) => {
@@ -163,11 +163,11 @@ test('HANDOFF in first specialist tokens routes to a second specialist', async (
     path: '/v1/chat/completions',
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: { model: 'qwenstral-code-speculator', messages: [{ role: 'user', content: 'tell me a short hero story' }] },
+    body: { model: 'code-generation-agent', messages: [{ role: 'user', content: 'tell me a short hero story' }] },
   });
   assert.equal(result.status, 200);
   assert.equal(result.headers['x-green-roomz-effective-alias'], 'general-text-speculator');
-  assert.match(result.headers['x-green-roomz-hops'], /qwenstral-code-speculator/);
+  assert.match(result.headers['x-green-roomz-hops'], /code-generation-agent/);
   assert.match(result.headers['x-green-roomz-hops'], /general-text-speculator/);
   assert.match(result.body.choices[0].message.content, /Once upon a time/);
   assert.equal(specialistCalls, 2);
@@ -176,10 +176,10 @@ test('HANDOFF in first specialist tokens routes to a second specialist', async (
 test('visited blocks looping the same specialist', async (t) => {
   const ensured = [];
   const { server, processes } = await withServer(t, {
-    ready: ['tool-router-agent', 'qwenstral-code-speculator', 'general-text-speculator'],
+    ready: ['tool-router-agent', 'code-generation-agent', 'general-text-speculator'],
     fetchImpl: nexusThenSpecialists(
-      [{ route: 'qwenstral-code-speculator', confidence: 1, reason: 'always code' }],
-      () => sseFetch('HANDOFF {"reason":"not my job","suggest":"qwenstral-code-speculator"}'),
+      [{ route: 'code-generation-agent', confidence: 1, reason: 'always code' }],
+      () => sseFetch('HANDOFF {"reason":"not my job","suggest":"code-generation-agent"}'),
     ),
   });
   const original = processes.ensure;
@@ -196,16 +196,16 @@ test('visited blocks looping the same specialist', async (t) => {
     headers: { 'content-type': 'application/json' },
     body: { model: 'tool-router-agent', messages: [{ role: 'user', content: 'write a function' }] },
   });
-  assert.equal(ensured.filter((alias) => alias === 'qwenstral-code-speculator').length, 1);
+  assert.equal(ensured.filter((alias) => alias === 'code-generation-agent').length, 1);
   assert.equal(result.status, 200);
   assert.equal(result.headers['x-green-roomz-route-reason'], 'resident_fallback');
-  assert.match(result.headers['x-green-roomz-hops'] ?? '', /qwenstral-code-speculator/);
+  assert.match(result.headers['x-green-roomz-hops'] ?? '', /code-generation-agent/);
 });
 
 test('actual image part still routes to vision without asking the nexus', async (t) => {
   let nexusHits = 0;
   const { server } = await withServer(t, {
-    ready: ['vision-layout-agent', 'tool-router-agent', 'qwenstral-code-speculator'],
+    ready: ['vision-layout-agent', 'tool-router-agent', 'code-generation-agent'],
     fetchImpl: async (url) => {
       const href = String(url);
       if (href.includes(':18187')) {
@@ -221,7 +221,7 @@ test('actual image part still routes to vision without asking the nexus', async 
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: {
-      model: 'qwenstral-code-speculator',
+      model: 'code-generation-agent',
       messages: [{ role: 'user', content: [{ type: 'image_url', image_url: { url: 'data:image/png;base64,xxxx' } }] }],
     },
   });
@@ -234,20 +234,20 @@ test('actual image part still routes to vision without asking the nexus', async 
 test('consultNexus omits impractical aliases from AVAILABLE the way unused vision/audio are omitted', async (t) => {
   const enums = [];
   const { server, registry } = await withServer(t, {
-    ready: ['tool-router-agent', 'qwenstral-code-speculator', 'general-text-speculator'],
+    ready: ['tool-router-agent', 'code-generation-agent', 'general-text-speculator'],
     fetchImpl: async (url, init) => {
       const href = String(url);
       const body = JSON.parse(Buffer.from(init.body).toString());
       if (href.includes(':18187')) {
         enums.push(body.json_schema?.properties?.route?.enum ?? []);
-        assert.equal(enums.at(-1).includes('qwenstral-code-speculator'), false);
+        assert.equal(enums.at(-1).includes('code-generation-agent'), false);
         assert.equal(enums.at(-1).includes('vision-layout-agent'), false);
         return jsonFetch({ choices: [{ message: { role: 'assistant', content: JSON.stringify({ route: 'general-text-speculator', confidence: 0.7, reason: 'text' }) } }] });
       }
       return jsonFetch({ choices: [{ message: { role: 'assistant', content: 'hello from text' } }] });
     },
   });
-  registry.setStatus('qwenstral-code-speculator', 'unavailable', { missing: ['impractical:estimate 9800000000 + headroom 2147483648 > free 11000000000'] });
+  registry.setStatus('code-generation-agent', 'unavailable', { missing: ['impractical:estimate 9800000000 + headroom 2147483648 > free 11000000000'] });
   const result = await request(server, {
     path: '/v1/chat/completions',
     method: 'POST',
@@ -332,10 +332,38 @@ test('consultNexus does not fast-path an unavailable high-confidence route', asy
   assert.equal(modelCalls.length, 1);
 });
 
+test('consultNexus keeps modality selection for multimodal high-confidence text intents', async (t) => {
+  const modelCalls = [];
+  const { registry, processes } = await withServer(t, {
+    ready: ['tool-router-agent', 'general-text-speculator', 'vision-layout-agent'],
+  });
+  const result = await consultNexus({
+    processes,
+    registry,
+    fetchImpl: async (url, init) => {
+      modelCalls.push(String(url));
+      const body = JSON.parse(Buffer.from(init.body).toString());
+      assert.equal(body.json_schema.properties.route.enum.includes('vision-layout-agent'), true);
+      return jsonFetch({ choices: [{ message: { content: JSON.stringify({
+        route: 'vision-layout-agent', confidence: 0.9, reason: 'image content requires visual route',
+      }) } }] });
+    },
+    body: { messages: [{
+      role: 'user',
+      content: [
+        { type: 'text', text: 'translate this label into English' },
+        { type: 'image_url', image_url: { url: 'data:image/png;base64,AAAA' } },
+      ],
+    }] },
+  });
+  assert.equal(result.route, 'vision-layout-agent');
+  assert.equal(modelCalls.length, 1);
+});
+
 test('wrong security dispatch (/sast on threat-model) hands off and reissues to general-text', async (t) => {
   let specialistCalls = 0;
   const { server } = await withServer(t, {
-    ready: ['tool-router-agent', 'qwenstral-code-speculator', 'general-text-speculator'],
+    ready: ['tool-router-agent', 'code-generation-agent', 'general-text-speculator'],
     fetchImpl: async (url, init) => {
       const href = String(url);
       specialistCalls += 1;
@@ -369,7 +397,7 @@ test('wrong security dispatch (/sast on threat-model) hands off and reissues to 
 
   assert.equal(result.status, 200);
   assert.equal(result.headers['x-green-roomz-effective-alias'], 'general-text-speculator');
-  assert.match(result.headers['x-green-roomz-hops'], /qwenstral-code-speculator/);
+  assert.match(result.headers['x-green-roomz-hops'], /code-generation-agent/);
   assert.match(result.headers['x-green-roomz-hops'], /general-text-speculator/);
   assert.match(result.body.choices[0].message.content, /STRIDE Threat Model/);
   assert.equal(specialistCalls, 2, 'called wrong specialist first, then reissued to suggested specialist');
@@ -378,14 +406,14 @@ test('wrong security dispatch (/sast on threat-model) hands off and reissues to 
 test('wrong security dispatch (/threatmodel on C buffer overflow) hands off to code specialist', async (t) => {
   let specialistCalls = 0;
   const { server } = await withServer(t, {
-    ready: ['tool-router-agent', 'qwenstral-code-speculator', 'general-text-speculator'],
+    ready: ['tool-router-agent', 'code-generation-agent', 'general-text-speculator'],
     fetchImpl: nexusThenSpecialists(
-      [{ route: 'qwenstral-code-speculator', confidence: 0.9, reason: 'code SAST fix' }],
+      [{ route: 'code-generation-agent', confidence: 0.9, reason: 'code SAST fix' }],
       (href) => {
         specialistCalls += 1;
         // First hop: /threatmodel routed to text specialist (port 18184)
         if (href.includes(':18184')) {
-          return sseFetch('HANDOFF {"reason":"raw C buffer overflow patch is code SAST","suggest":"qwenstral-code-speculator"}');
+          return sseFetch('HANDOFF {"reason":"raw C buffer overflow patch is code SAST","suggest":"code-generation-agent"}');
         }
         // Reissued second hop: code specialist (port 18183) provides the secure fix
         if (href.includes(':18183')) {
@@ -413,9 +441,9 @@ test('wrong security dispatch (/threatmodel on C buffer overflow) hands off to c
   });
 
   assert.equal(result.status, 200);
-  assert.equal(result.headers['x-green-roomz-effective-alias'], 'qwenstral-code-speculator');
+  assert.equal(result.headers['x-green-roomz-effective-alias'], 'code-generation-agent');
   assert.match(result.headers['x-green-roomz-hops'], /general-text-speculator/);
-  assert.match(result.headers['x-green-roomz-hops'], /qwenstral-code-speculator/);
+  assert.match(result.headers['x-green-roomz-hops'], /code-generation-agent/);
   assert.match(result.body.choices[0].message.content, /secure_copy/);
   assert.equal(specialistCalls, 2);
 });
@@ -444,7 +472,7 @@ test('GRZ_OFFLINE_NEXUS consultNexus returns offlinePlan without calling fetchIm
     const manifest = sampleManifest();
     const hostAdapter = { sampleResources() { return { freeMemoryBytes: 32 * 1024 * 1024 * 1024 }; } };
     const registry = await new AgentRegistry(manifest).inspect({ hostAdapter });
-    for (const alias of ['tool-router-agent', 'qwenstral-code-speculator', 'general-text-speculator']) {
+    for (const alias of ['tool-router-agent', 'code-generation-agent', 'general-text-speculator']) {
       registry.setStatus(alias, 'ready', { missing: [] });
     }
     const processes = new ProcessManager({

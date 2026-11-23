@@ -16,7 +16,7 @@ Pickup file for the next turn. Local-exec dropped workers mid-edit. Do not re-do
 - Models: C:\LocalAI  HTTP file server 192.168.1.251:8765 (keep alive; python eagle3-venv bind 192.168.1.251 cwd C:\LocalAI)
 - Patched both trees: slash map, /auto unlocks client pin+session, vision-without-image / audio-without-audio rejected, json_schema, ESC/CRLF strip on reasons, HANDOFF suggest allowlist, USER fenced, first JSON only, slash ignored in fences
 - Last /route 8/8 aliases (pinned general-text-speculator):
-  1 cpp -> qwenstral-code-speculator
+  1 cpp -> code-generation-agent
   2 limerick -> general-text-speculator
   3 apple-text -> general-text-speculator
   4 /code slash_code

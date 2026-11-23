@@ -11,24 +11,101 @@ import {
 } from './constants.mjs';
 import { admitWhenTightOf, agentCanAdmit } from './memory.mjs';
 
+const MEDIA_TYPES = Object.freeze(['image', 'audio', 'video', 'model3d', 'spatial', 'document']);
+const MEDIA_SLASH_INTENTS = Object.freeze({
+  video: { kind: 'video' }, 'summarize-video': { kind: 'video', direction: 'input' }, 'describe-video': { kind: 'video', direction: 'input' },
+  'generate-video': { kind: 'video', direction: 'output' }, 'make-video': { kind: 'video', direction: 'output' }, 'create-video': { kind: 'video', direction: 'output' },
+  '3d': { kind: 'model3d' }, 'inspect-3d': { kind: 'model3d', direction: 'input' }, 'describe-3d': { kind: 'model3d', direction: 'input' },
+  'generate-3d': { kind: 'model3d', direction: 'output' }, 'create-3d': { kind: 'model3d', direction: 'output' }, 'make-3d': { kind: 'model3d', direction: 'output' },
+});
+const OUTPUT_CAPABILITY = Object.freeze({ image: 'image-output', audio: 'audio-output', video: 'video-output', model3d: 'model3d-output', spatial: 'spatial-output' });
+
+function markInput(found, kind) {
+  if (MEDIA_TYPES.includes(kind)) {
+    found.input[kind] = true;
+    // Preserve the original public flags while callers migrate to input/output.
+    if (kind === 'image' || kind === 'audio') found[kind] = true;
+  }
+}
+
+function mediaKindFromMime(value) {
+  const mime = String(value ?? '').split(';', 1)[0].trim().toLowerCase();
+  if (mime.startsWith('image/')) return 'image';
+  if (mime.startsWith('audio/')) return 'audio';
+  if (mime.startsWith('video/')) return 'video';
+  if (/^(model\/(?:gltf|gltf-binary|obj|stl|vnd\.usdz)|application\/(?:vnd\.gltf\+json|vnd\.gltf\.binary|x-ply|ply|vnd\.ms-pki\.stl|vnd\.usdz\+zip))$/.test(mime)) return 'model3d';
+  if (/^(application\/(?:pdf|rtf|msword|vnd\.|x-odt)|text\/(?:markdown|csv)|application\/epub\+zip)$/.test(mime)) return 'document';
+  return null;
+}
+
+function mediaKindFromName(value) {
+  const name = String(value ?? '').split(/[?#]/, 1)[0].toLowerCase();
+  const ext = name.slice(name.lastIndexOf('.') + 1);
+  if (['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'tif', 'tiff', 'avif', 'heic'].includes(ext)) return 'image';
+  if (['wav', 'mp3', 'm4a', 'ogg', 'flac', 'aac', 'opus'].includes(ext)) return 'audio';
+  if (['mp4', 'm4v', 'mov', 'webm', 'mkv', 'avi', 'mpeg', 'mpg'].includes(ext)) return 'video';
+  if (['glb', 'gltf', 'obj', 'stl', 'ply', 'usdz', 'fbx', 'dae', '3mf'].includes(ext)) return 'model3d';
+  if (['pdf', 'doc', 'docx', 'odt', 'rtf', 'md', 'csv', 'ppt', 'pptx', 'xls', 'xlsx', 'epub'].includes(ext)) return 'document';
+  return null;
+}
+
 function inspectContentPart(part, found) {
   if (!part || typeof part !== 'object') return;
   const type = String(part.type ?? '').toLowerCase();
-  if (type === 'image_url' || type === 'input_image') found.image = true;
-  if (type === 'input_audio' || type === 'audio') found.audio = true;
+  const typeKind = new Map([
+    ['image_url', 'image'], ['input_image', 'image'], ['image', 'image'],
+    ['input_audio', 'audio'], ['audio', 'audio'],
+    ['video_url', 'video'], ['input_video', 'video'], ['video', 'video'], ['video_frame', 'video'],
+    ['input_3d', 'model3d'], ['model_3d', 'model3d'], ['3d_model', 'model3d'], ['mesh', 'model3d'], ['point_cloud', 'spatial'],
+    ['file', 'document'], ['input_file', 'document'],
+  ]).get(type);
+  if (typeKind) markInput(found, typeKind);
   const url = typeof part.image_url === 'string' ? part.image_url : part.image_url?.url;
-  if (typeof url === 'string' && url.toLowerCase().startsWith('data:image/')) found.image = true;
-  const audio = part.input_audio?.data ?? part.audio_url;
-  if (typeof audio === 'string' && audio.toLowerCase().startsWith('data:audio/')) found.audio = true;
+  const media = [url, part.input_audio?.data, part.audio_url, part.video_url?.url, part.video_url, part.input_video?.data,
+    part.model_3d?.url, part.model_url, part.file_url, part.file?.url, part.file?.filename, part.filename, part.name];
+  for (const value of media) {
+    if (typeof value !== 'string') continue;
+    const dataMime = /^data:([^;,]+)/i.exec(value)?.[1];
+    const kind = mediaKindFromMime(dataMime) ?? mediaKindFromName(value);
+    if (kind) markInput(found, kind);
+  }
+  const spatialFields = ['point_cloud', 'depth_map', 'pose', 'joints', 'keypoints', 'trajectory', 'transforms'];
+  if (spatialFields.some((key) => part[key] != null)) markInput(found, 'spatial');
 }
 
 export function detectModalities(body) {
-  const found = { image: false, audio: false };
+  const input = Object.fromEntries(MEDIA_TYPES.map((kind) => [kind, false]));
+  const output = Object.fromEntries([...MEDIA_TYPES, 'text'].map((kind) => [kind, false]));
+  const found = { image: false, audio: false, video: false, model3d: false, spatial: false, document: false, input, output };
+  const declaredOutput = [body?.modalities, body?.output_modalities, body?.response_modalities].flatMap((value) => Array.isArray(value) ? value : []);
+  for (const value of declaredOutput) {
+    const kind = String(value).toLowerCase().replace(/[-_]/g, '');
+    const canonical = ({ image: 'image', audio: 'audio', video: 'video', text: 'text', model3d: 'model3d', spatial: 'spatial' })[kind];
+    if (canonical) output[canonical] = true;
+  }
+  const requestText = latestUserMessageText(body);
+  if (/\b(?:generate|create|draw|render|paint|make)\b[^.!?\n]{0,100}\b(?:image|picture|illustration|artwork)\b/i.test(requestText)) output.image = true;
+  if (/\b(?:speak|read|say)\b[^.!?\n]{0,80}\b(?:aloud|out loud|as audio|in audio)\b|\b(?:text[- ]to[- ]speech|generate|create|produce)\b[^.!?\n]{0,80}\b(?:speech|spoken audio|audio clip)\b/i.test(requestText)) output.audio = true;
+  if (/\b(?:generate|create|make|render|produce|animate)\b[^.!?\n]{0,100}\b(?:video|clip|animation)\b/i.test(requestText)) output.video = true;
+  if (/\b(?:generate|create|make|build|export|design)\b[^.!?\n]{0,100}\b(?:3d\s+(?:model|mesh|scene|asset)|mesh|point cloud)\b/i.test(requestText)) output.model3d = true;
   const messages = Array.isArray(body?.messages) ? body.messages : [];
   for (const message of messages) {
-    if (!Array.isArray(message?.content)) continue;
-    for (const part of message.content) inspectContentPart(part, found);
+    if (typeof message?.content === 'string' && message.content.trim()) input.text = true;
+    if (Array.isArray(message?.content)) {
+      for (const part of message.content) {
+        if (typeof part === 'string' && part.trim()) input.text = true;
+        else if (part?.type === 'text' && typeof part.text === 'string' && part.text.trim()) input.text = true;
+        inspectContentPart(part, found);
+      }
+    }
   }
+  const command = /^\s*\/([a-z0-9-]+)\b/i.exec(latestUserMessageText(body))?.[1]?.toLowerCase();
+  const mediaIntent = MEDIA_SLASH_INTENTS[command];
+  if (mediaIntent?.direction === 'output') output[mediaIntent.kind] = true;
+  if (mediaIntent?.direction === 'input' && !input[mediaIntent.kind]) input[mediaIntent.kind] = false;
+  const generalOutputCommand = ({ image: 'image', draw: 'image', imagine: 'image', tts: 'audio', speak: 'audio' })[command];
+  if (generalOutputCommand) output[generalOutputCommand] = true;
+  for (const kind of MEDIA_TYPES) found[kind] = input[kind];
   return found;
 }
 
@@ -183,8 +260,10 @@ export function isGenericChatRequest(body) {
 const SLASH_ALIASES = Object.freeze({
   vision: 'vision-layout-agent',
   audio: 'audio-transcription-agent',
-  code: 'qwenstral-code-speculator',
-  cpp: 'qwenstral-code-speculator',
+  transcribe: 'audio-transcription-agent',
+  transcript: 'audio-transcription-agent',
+  code: 'code-generation-agent',
+  cpp: 'code-generation-agent',
   text: 'general-text-speculator',
   chat: 'general-text-speculator',
   embed: 'semantic-embedding-agent',
@@ -198,9 +277,9 @@ const SLASH_ALIASES = Object.freeze({
   imagine: 'image-generation-agent',
   draw: 'image-generation-agent',
   // Security & Audit Dispatches
-  sast: 'qwenstral-code-speculator',
-  audit: 'qwenstral-code-speculator',
-  cwe: 'qwenstral-code-speculator',
+  sast: 'code-generation-agent',
+  audit: 'code-generation-agent',
+  cwe: 'code-generation-agent',
   threatmodel: 'general-text-speculator',
   stride: 'general-text-speculator',
   osint: 'general-text-speculator',
@@ -209,14 +288,14 @@ const SLASH_ALIASES = Object.freeze({
   ioc: 'general-text-speculator',
   forensics: 'general-text-speculator',
   dfir: 'general-text-speculator',
-  siem: 'qwenstral-code-speculator',
-  rules: 'qwenstral-code-speculator',
-  sigma: 'qwenstral-code-speculator',
-  yara: 'qwenstral-code-speculator',
+  siem: 'code-generation-agent',
+  rules: 'code-generation-agent',
+  sigma: 'code-generation-agent',
+  yara: 'code-generation-agent',
   harden: 'general-text-speculator',
   sysprep: 'general-text-speculator',
-  sbom: 'qwenstral-code-speculator',
-  deps: 'qwenstral-code-speculator',
+  sbom: 'code-generation-agent',
+  deps: 'code-generation-agent',
   monitor: MONITOR_ALIAS,
   secmon: MONITOR_ALIAS,
   auto: 'auto',
@@ -340,13 +419,14 @@ export function parseSlashCommand(body) {
   const text = latestUserCommandText(body).trim();
   if (!text) return null;
   const unfenced = text.replace(/```[\s\S]*?```/g, '').trim();
-  const match = /^\/([a-z]+)(?:\s+([\s\S]*))?$/i.exec(unfenced);
+  const match = /^\/([a-z0-9][a-z0-9-]*)(?:\s+([\s\S]*))?$/i.exec(unfenced);
   if (!match) return null;
   const token = match[1].toLowerCase();
   const rawRest = (match[2] ?? '').trim();
   if (token === 'forget') {
     throw new ValidationError('/forget is not a proven phenomenon; use /rebuke to correct');
   }
+  if (MEDIA_SLASH_INTENTS[token]) return { token, alias: null, rest: rawRest, modalityIntent: MEDIA_SLASH_INTENTS[token] };
   if (token === 'faith') {
     const parsed = parseFaithLevel(rawRest);
     return { token, alias: null, rest: parsed.rest, setting: 'faith', faith: parsed.level, settingOnly: !parsed.rest };

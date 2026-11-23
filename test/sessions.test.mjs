@@ -29,8 +29,8 @@ test('oldest session is evicted at the limit', () => {
 test('setAgentAlias updates the stored session', () => {
   const ledger = new SessionLedger();
   const id = ledger.create({ identity: 'a', agentAlias: 'general-text-speculator', modality: {} });
-  assert.equal(ledger.setAgentAlias(id, 'qwenstral-code-speculator'), true);
-  assert.equal(ledger.get(id, 'a').agentAlias, 'qwenstral-code-speculator');
+  assert.equal(ledger.setAgentAlias(id, 'code-generation-agent'), true);
+  assert.equal(ledger.get(id, 'a').agentAlias, 'code-generation-agent');
 });
 
 test('session memory survives a second turn and keeps the last specialist', () => {

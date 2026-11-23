@@ -118,7 +118,7 @@ export function validateManifest(manifest, env = process.env) {
       if (ports.has(agent.port)) issues.push(`agents ${ports.get(agent.port)} and ${agent.alias} share port ${agent.port}`);
       ports.set(agent.port, agent.alias);
     }
-    if (['qwenstral-code-speculator', 'general-text-speculator'].includes(agent.alias) && agent.projector) issues.push(`text-only agent ${agent.alias} cannot declare a projector`);
+    if (['code-generation-agent', 'general-text-speculator'].includes(agent.alias) && agent.projector) issues.push(`text-only agent ${agent.alias} cannot declare a projector`);
     issues.push(...kernelBindingIssues(agent));
   }
 

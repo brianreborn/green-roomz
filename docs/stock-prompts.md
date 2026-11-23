@@ -59,7 +59,7 @@ nexus emits a route, not a handoff.
 | Alias | Frames | Why |
 |---|---|---|
 | `general-text-speculator` | agency + **memory** + confidence | the conversational catch-all; carries a working set across turns |
-| `qwenstral-code-speculator` | agency + **memory** + confidence + **handoff** | working set of task/files/schema; narrow job |
+| `code-generation-agent` | agency + **memory** + confidence + **handoff** | working set of task/files/schema; narrow job |
 | `vision-layout-agent` | agency + confidence + **handoff** | single-shot transducer: image → OCR, nothing recalled |
 | `audio-transcription-agent` | agency + confidence + **handoff** | single-shot transducer: audio → text |
 | `image-generation-agent` | agency + confidence + **handoff** | single-shot transducer: text → image |

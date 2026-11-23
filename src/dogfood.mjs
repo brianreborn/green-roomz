@@ -2,7 +2,7 @@
  * One unified diff from the local gateway. Dry-run unless GRZ_DOGFOOD_APPLY=1.
  *
  * POST {GRZ_BASE_URL|http://127.0.0.1:8080}/v1/chat/completions with lock_alias.
- * Model is qwenstral-code-speculator unless GRZ_DOGFOOD_MODEL is set.
+ * Model is code-generation-agent unless GRZ_DOGFOOD_MODEL is set.
  * Fallback when that alias is cold: GRZ_DOGFOOD_MODEL=general-text-speculator.
  * Apply is in-process. A non-zero test run restores the previous file bytes.
  */
@@ -11,8 +11,8 @@ import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from '
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const PREFERRED_MODEL = 'qwenstral-code-speculator';
-/** Set GRZ_DOGFOOD_MODEL to this when qwenstral-code-speculator is cold. */
+export const PREFERRED_MODEL = 'code-generation-agent';
+/** Set GRZ_DOGFOOD_MODEL to this when code-generation-agent is cold. */
 export const FALLBACK_MODEL = 'general-text-speculator';
 
 export const DOGFOOD_SYSTEM = [

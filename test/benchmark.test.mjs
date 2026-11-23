@@ -18,7 +18,7 @@ test('qualify continues after a thrown profile and still returns a winner from t
   try {
     const manifest = sampleManifest();
     manifest._meta = { digest: 'test-digest' };
-    const agent = manifest.agents.find((item) => item.alias === 'qwenstral-code-speculator');
+    const agent = manifest.agents.find((item) => item.alias === 'code-generation-agent');
     agent.profiles = [
       { id: 'cpu-4', args: ['--device', 'none', '--n-gpu-layers', '0'] },
       { id: 'vulkan-all', args: ['--device', 'Vulkan0', '--n-gpu-layers', 'all'] },
@@ -57,17 +57,17 @@ test('winnersFromStore picks vulkan-all from a benchmarks.json-shaped fixture', 
     schema_version: 1,
     results: {
       e4a43e47e079607352a1eace04594b4afc07138609a9e1c182254375ac8c406f: {
-        alias: 'qwenstral-code-speculator',
+        alias: 'code-generation-agent',
         profile: { id: 'vulkan-all' },
         metrics: { promptTps: 27.22, generationTps: 2.55, coldStartMs: 122162 },
       },
       '2583b4a651aa7b5e9a65f57efcc84e63dd4e697478ec30053c16c7f615a375a9': {
-        alias: 'qwenstral-code-speculator',
+        alias: 'code-generation-agent',
         profile: { id: 'hybrid-12' },
         metrics: { promptTps: 22.93, generationTps: 3.56, coldStartMs: 106207 },
       },
       '7a3d60421340e02dbe039b210cb732f9629730fba03c659836ce6fc5912ba8f3': {
-        alias: 'qwenstral-code-speculator',
+        alias: 'code-generation-agent',
         profile: { id: 'cpu-4' },
         skipped: true,
         reason: 'impractical',
@@ -90,7 +90,7 @@ test('winnersFromStore picks vulkan-all from a benchmarks.json-shaped fixture', 
     },
   };
   const winners = winnersFromStore(storeData, 'throughput');
-  assert.equal(winners.get('qwenstral-code-speculator'), 'vulkan-all');
+  assert.equal(winners.get('code-generation-agent'), 'vulkan-all');
   assert.equal(winners.get('general-text-speculator'), 'vulkan-all');
   assert.equal(winners.size, 2);
 });
@@ -111,7 +111,7 @@ test('qualify uses expanded hybrid ids from GGUF block_count 28', async () => {
   try {
     const manifest = sampleManifest();
     manifest._meta = { digest: 'test-digest' };
-    const agent = manifest.agents.find((item) => item.alias === 'qwenstral-code-speculator');
+    const agent = manifest.agents.find((item) => item.alias === 'code-generation-agent');
     agent.model = model;
     agent.profiles = threeProfiles();
     const registry = new AgentRegistry(manifest);
@@ -148,7 +148,7 @@ test('qualify without --quick refines a hybrid winner then full-benches top 2', 
   try {
     const manifest = sampleManifest();
     manifest._meta = { digest: 'test-digest' };
-    const agent = manifest.agents.find((item) => item.alias === 'qwenstral-code-speculator');
+    const agent = manifest.agents.find((item) => item.alias === 'code-generation-agent');
     agent.model = model;
     agent.profiles = threeProfiles();
     const registry = new AgentRegistry(manifest);
@@ -186,7 +186,7 @@ test('qualifyMissingAgents runs only available llama_server agents without a win
   try {
     const manifest = sampleManifest();
     manifest._meta = { digest: 'test-digest' };
-    const agent = manifest.agents.find((item) => item.alias === 'qwenstral-code-speculator');
+    const agent = manifest.agents.find((item) => item.alias === 'code-generation-agent');
     agent.model = model;
     agent.profiles = threeProfiles();
     const textAgent = manifest.agents.find((item) => item.alias === 'general-text-speculator');
@@ -215,7 +215,7 @@ test('qualifyMissingAgents runs only available llama_server agents without a win
     });
     assert.ok(ran.includes('99'));
     assert.ok(ran.includes('7'));
-    assert.equal(selectedProfiles.get('qwenstral-code-speculator'), 'vulkan-all');
+    assert.equal(selectedProfiles.get('code-generation-agent'), 'vulkan-all');
     assert.equal(selectedProfiles.has('general-text-speculator'), false);
     assert.equal(skipped.some((row) => row.alias === 'general-text-speculator'), true);
   } finally {

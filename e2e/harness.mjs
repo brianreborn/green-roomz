@@ -162,7 +162,7 @@ export function writeTestManifest({ dir, nexusPort, specialistPort, gatewayPort,
         required_artifacts: ['model'],
       },
       {
-        alias: 'qwenstral-code-speculator',
+        alias: 'code-generation-agent',
         description: 'e2e stub',
         runtime: 'llama_server',
         port: specialistPort + 13,

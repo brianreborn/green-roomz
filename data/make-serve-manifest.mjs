@@ -16,7 +16,7 @@ for (const agent of manifest.agents) {
     agent.context_size = 1024;
     agent.draft_enabled = false;
   }
-  if (agent.alias === 'qwenstral-code-speculator') {
+  if (agent.alias === 'code-generation-agent') {
     agent.context_size = 1024;
   }
 }

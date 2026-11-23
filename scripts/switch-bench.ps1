@@ -18,7 +18,7 @@ function Invoke-Grz([string]$Name, [string]$Json) {
 
 $routeCode = '{"model":"tool-router-agent","messages":[{"role":"user","content":"Write a Python function hello() that returns 42."}]}'
 $routeTr = '{"model":"tool-router-agent","messages":[{"role":"user","content":"Translate this sentence to Spanish: The morning light was quiet and kind."}]}'
-$liveCode = '{"model":"qwenstral-code-speculator","messages":[{"role":"user","content":"Write a Python function hello() that returns 42. Code only."}],"max_tokens":48}'
+$liveCode = '{"model":"code-generation-agent","messages":[{"role":"user","content":"Write a Python function hello() that returns 42. Code only."}],"max_tokens":48}'
 $liveTr = '{"model":"general-text-speculator","messages":[{"role":"user","content":"Translate this sentence to Spanish: The morning light was quiet and kind."}],"max_tokens":48}'
 
 Invoke-Grz 'route-code' $routeCode

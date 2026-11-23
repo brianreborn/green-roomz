@@ -131,7 +131,7 @@ flowchart TD
   hard -->|audio| asr["audio-transcription-agent"]
   hard -->|image| vis["vision-layout-agent"]
   hard -->|text| plan["planRoute / resident nexus<br/>tool-router-agent"]
-  plan --> code["qwenstral-code-speculator"]
+  plan --> code["code-generation-agent"]
   plan --> emb["semantic-embedding-agent /<br/>retrieval-rerank-agent"]
   plan --> img["image-generation-agent"]
   plan --> gen["general-text-speculator<br/>(default and fallback)"]

@@ -3,7 +3,7 @@
   "results": {
     "e4a43e47e079607352a1eace04594b4afc07138609a9e1c182254375ac8c406f": {
       "key": "e4a43e47e079607352a1eace04594b4afc07138609a9e1c182254375ac8c406f",
-      "alias": "qwenstral-code-speculator",
+      "alias": "code-generation-agent",
       "profile": {
         "id": "vulkan-all",
         "args": [
@@ -39,7 +39,7 @@
     },
     "2583b4a651aa7b5e9a65f57efcc84e63dd4e697478ec30053c16c7f615a375a9": {
       "key": "2583b4a651aa7b5e9a65f57efcc84e63dd4e697478ec30053c16c7f615a375a9",
-      "alias": "qwenstral-code-speculator",
+      "alias": "code-generation-agent",
       "profile": {
         "id": "hybrid-12",
         "args": [

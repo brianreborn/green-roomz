@@ -139,7 +139,7 @@ test('peekSpecialist gives up on a specialist that never emits, marking it degra
     fetchImpl: async () => ({ status: 200, headers: new Headers({ 'content-type': 'text/event-stream' }), body: neverEmits }),
     request: { method: 'POST', headers: {} },
     target: 'http://127.0.0.1:9/v1/chat/completions',
-    body: { model: 'qwenstral-code-speculator', messages: [] },
+    body: { model: 'code-generation-agent', messages: [] },
     peekTimeoutMs: 60,
   });
   assert.ok(Date.now() - started < 2000, 'must not hang');
@@ -160,7 +160,7 @@ test('peekSpecialist still returns a fast handoff before the deadline', async ()
     fetchImpl: async () => ({ status: 200, headers: new Headers({ 'content-type': 'text/event-stream' }), body: sse }),
     request: { method: 'POST', headers: {} },
     target: 'http://127.0.0.1:9/v1/chat/completions',
-    body: { model: 'qwenstral-code-speculator', messages: [] },
+    body: { model: 'code-generation-agent', messages: [] },
     peekTimeoutMs: 5000,
   });
   assert.equal(peek.handoff?.handoff, true);

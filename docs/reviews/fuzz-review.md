@@ -31,11 +31,11 @@ Wave 1 contract holds: missing **native** slash (`/draw` `/imagine` `/tts`) and 
 
 Not this patch. Same set as Wave 1:
 
-1. **`pinned general-text C++ program still proxies to the code alias`** (`test/gateway.test.mjs`) — actual `general-text-speculator`, expected `qwenstral-code-speculator`. Tests still assume CODE_INTENT regex hops; `hardRuleRoute` now leaves a pinned general-text pin unless slash/lock says otherwise.
+1. **`pinned general-text C++ program still proxies to the code alias`** (`test/gateway.test.mjs`) — actual `general-text-speculator`, expected `code-generation-agent`. Tests still assume CODE_INTENT regex hops; `hardRuleRoute` now leaves a pinned general-text pin unless slash/lock says otherwise.
 2. **`session started on general-text switches to code on a python function`** — same pin vs regex mismatch; follow-up stays on general-text.
 3. **`public bind is rejected without explicit security flags`** — still throws; message is `Binding to all interfaces requires GREEN_ROOMZ_ALLOW_PUBLIC=1; prefer a specific host + gateway.allow_peers`, test still wants `/Public\/non-loopback/`.
-4. **`plain follow-up after /code consults nexus instead of staying on code`** — actual `qwenstral-code-speculator`, expected `general-text-speculator`. Requested `model: qwenstral-code-speculator` is pinned; nexus is not consulted.
-5. **`text-only turns do not regex C++ or image intent; nexus decides`** (`test/routing.test.mjs`, not in the two-file run) — `routeRequest` returns `qwenstral-code-speculator` / `requested_alias` because that alias is routable; test expects `null` / `nexus`.
+4. **`plain follow-up after /code consults nexus instead of staying on code`** — actual `code-generation-agent`, expected `general-text-speculator`. Requested `model: code-generation-agent` is pinned; nexus is not consulted.
+5. **`text-only turns do not regex C++ or image intent; nexus decides`** (`test/routing.test.mjs`, not in the two-file run) — `routeRequest` returns `code-generation-agent` / `requested_alias` because that alias is routable; test expects `null` / `nexus`.
 
 ## P0: `messages=42` still 400
 

@@ -145,7 +145,7 @@
       "profiles": []
     },
     {
-      "alias": "qwenstral-code-speculator",
+      "alias": "code-generation-agent",
       "pinned": true,
       "description": "Code specialist — Qwenstral Small 3.1 0.5B on CPU (Windows MVP)",
       "runtime": "llama_server",

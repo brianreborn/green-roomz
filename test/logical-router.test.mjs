@@ -4,7 +4,7 @@ import { planRoute } from '../src/logical-router.mjs';
 
 test('C++ program matches code_intent even without a trailing word boundary on ++', () => {
   const plan = planRoute({ messages: [{ role: 'user', content: 'generate a small limerick-like C++ program' }] });
-  assert.equal(plan.route, 'qwenstral-code-speculator');
+  assert.equal(plan.route, 'code-generation-agent');
   assert.equal(plan.reason_code, 'code_intent');
 });
 

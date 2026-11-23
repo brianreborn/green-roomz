@@ -53,7 +53,7 @@ Done:
       → committed `build/prompts/` + `index.json` (commit 4de9056). Kernel-text
       guards extracted to `src/kernel-text.mjs` to break the import cycle.
 - [x] **Frame selection** — cognitive agents (working-set reasoners) get the MFL
-      frame: `general-text-speculator`, `qwenstral-code-speculator`. Transducers
+      frame: `general-text-speculator`, `code-generation-agent`. Transducers
       (vision/audio/image) get agency+confidence only. Nexus + critical kernels
       get kernel only.
 

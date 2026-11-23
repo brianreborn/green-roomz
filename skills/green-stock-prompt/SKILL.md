@@ -32,7 +32,7 @@ Joined outermost → innermost into one system message:
 | kernel | `policies/<KERNEL_BASENAME[alias]>` | every agent, verbatim, innermost |
 
 **Cognitive agents** reason over a working set across turns, so the memory frame
-is behaviour they can run: `general-text-speculator`, `qwenstral-code-speculator`.
+is behaviour they can run: `general-text-speculator`, `code-generation-agent`.
 Single-shot transducers (`vision-layout-agent`, `audio-transcription-agent`,
 `image-generation-agent`) carry agency + confidence + handoff. The nexus
 (`tool-router-agent`, 512-char bound) and the critical kernels
@@ -94,7 +94,7 @@ Selection: `MFL_ALIASES` / `HANDOFF_ALIASES` / `stockPromptLayers()` in
    llama-server for each target.
    ```
    GREEN_ROOMZ_CHECKPOINT_DIR=./data/checkpoints \
-     node bin/green-roomz.mjs prime --only general-text-speculator,qwenstral-code-speculator
+     node bin/green-roomz.mjs prime --only general-text-speculator,code-generation-agent
    ```
    Starts each agent with its compiled prompt, runs one token
    (`max_tokens: 1`, `cache_prompt: true`), snapshots the KV as
@@ -108,10 +108,10 @@ Selection: `MFL_ALIASES` / `HANDOFF_ALIASES` / `stockPromptLayers()` in
 
 ```
 node bin/green-roomz.mjs compile
-cat build/prompts/qwenstral-code-speculator.md          # code agent: has the memory frame
-# remove 'qwenstral-code-speculator' from MFL_ALIASES in src/compile-prompt.mjs
+cat build/prompts/code-generation-agent.md          # code agent: has the memory frame
+# remove 'code-generation-agent' from MFL_ALIASES in src/compile-prompt.mjs
 node bin/green-roomz.mjs compile
-git diff build/prompts/qwenstral-code-speculator.md     # the memory frame drops out
+git diff build/prompts/code-generation-agent.md     # the memory frame drops out
 git checkout src/compile-prompt.mjs build/prompts/      # put it back
 ```
 

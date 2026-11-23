@@ -4,15 +4,15 @@
   "leftover": "none",
   "tests": { "box": "51/51", "windows": "51/51" },
   "expanded_profile_ids": {
-    "qwenstral-code-speculator": { "nLayers": 28, "ids": ["vulkan-all", "hybrid-7", "hybrid-14", "hybrid-21", "cpu-4"] },
+    "code-generation-agent": { "nLayers": 28, "ids": ["vulkan-all", "hybrid-7", "hybrid-14", "hybrid-21", "cpu-4"] },
     "general-text-speculator": { "nLayers": 36, "ids": ["vulkan-all", "hybrid-9", "hybrid-18", "hybrid-27", "cpu-4"] }
   },
   "winners": {
-    "qwenstral-code-speculator": "vulkan-all",
+    "code-generation-agent": "vulkan-all",
     "general-text-speculator": "vulkan-all"
   },
   "new_hybrid_measurements": {
-    "qwenstral-code-speculator": {
+    "code-generation-agent": {
       "vulkan-all": { "promptTps": 27.22, "generationTps": 2.55, "source": "cached-full", "score": 17.84719 },
       "hybrid-7": { "promptTps": 20.4, "generationTps": 4.18, "quick": true, "coldStartMs": 18359 },
       "hybrid-14": { "promptTps": 22.21, "generationTps": 3.6, "quick": true, "coldStartMs": 17240 },

@@ -142,7 +142,7 @@
                                     ]
                    },
                    {
-                       "alias":  "qwenstral-code-speculator",
+                       "alias":  "code-generation-agent",
                        "description":  "Code generation, transformation, and schema-constrained output",
                        "runtime":  "llama_server",
                        "port":  8183,

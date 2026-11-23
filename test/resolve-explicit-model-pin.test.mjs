@@ -14,7 +14,7 @@ function mockRegistry(states = {}) {
   const defaults = {
     'tool-router-agent': 'ready',
     'general-text-speculator': 'ready',
-    'qwenstral-code-speculator': 'ready',
+    'code-generation-agent': 'ready',
     'speech-synthesis-agent': 'unavailable',
     'image-generation-agent': 'unavailable',
     'vision-layout-agent': 'ready',
@@ -107,18 +107,18 @@ test('intentional auto / tool-router → nexus (do not break /auto)', () => {
 });
 
 test('available specialist without lock_alias → nexus (llama.app sticky ignore)', () => {
-  const reg = mockRegistry({ 'qwenstral-code-speculator': 'ready' });
+  const reg = mockRegistry({ 'code-generation-agent': 'ready' });
   assert.deepEqual(
-    resolveExplicitModelPin('qwenstral-code-speculator', reg),
+    resolveExplicitModelPin('code-generation-agent', reg),
     { decision: 'nexus' },
   );
 });
 
 test('available specialist with lock_alias → pin', () => {
-  const reg = mockRegistry({ 'qwenstral-code-speculator': 'ready' });
+  const reg = mockRegistry({ 'code-generation-agent': 'ready' });
   assert.deepEqual(
-    resolveExplicitModelPin('qwenstral-code-speculator', reg, { lockAlias: true }),
-    { decision: 'pin', alias: 'qwenstral-code-speculator', reason: 'lock_alias' },
+    resolveExplicitModelPin('code-generation-agent', reg, { lockAlias: true }),
+    { decision: 'pin', alias: 'code-generation-agent', reason: 'lock_alias' },
   );
 });
 

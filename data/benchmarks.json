@@ -3,7 +3,7 @@
   "results": {
     "e4a43e47e079607352a1eace04594b4afc07138609a9e1c182254375ac8c406f": {
       "key": "e4a43e47e079607352a1eace04594b4afc07138609a9e1c182254375ac8c406f",
-      "alias": "qwenstral-code-speculator",
+      "alias": "code-generation-agent",
       "profile": {
         "id": "vulkan-all",
         "args": [
@@ -39,7 +39,7 @@
     },
     "2583b4a651aa7b5e9a65f57efcc84e63dd4e697478ec30053c16c7f615a375a9": {
       "key": "2583b4a651aa7b5e9a65f57efcc84e63dd4e697478ec30053c16c7f615a375a9",
-      "alias": "qwenstral-code-speculator",
+      "alias": "code-generation-agent",
       "profile": {
         "id": "hybrid-12",
         "args": [
@@ -183,7 +183,7 @@
     },
     "7a3d60421340e02dbe039b210cb732f9629730fba03c659836ce6fc5912ba8f3": {
       "key": "7a3d60421340e02dbe039b210cb732f9629730fba03c659836ce6fc5912ba8f3",
-      "alias": "qwenstral-code-speculator",
+      "alias": "code-generation-agent",
       "profile": {
         "id": "cpu-4",
         "args": [
@@ -219,7 +219,7 @@
     },
     "e31fb32fa85e494382d4c30123b227ef59c5052f3711787bd12f87b05f566316": {
       "key": "e31fb32fa85e494382d4c30123b227ef59c5052f3711787bd12f87b05f566316",
-      "alias": "qwenstral-code-speculator",
+      "alias": "code-generation-agent",
       "profile": {
         "id": "hybrid-7",
         "args": [
@@ -256,7 +256,7 @@
     },
     "57fe930ff13a12f65e5a76b9c11d687409603dbd3786592916135092e5dd5079": {
       "key": "57fe930ff13a12f65e5a76b9c11d687409603dbd3786592916135092e5dd5079",
-      "alias": "qwenstral-code-speculator",
+      "alias": "code-generation-agent",
       "profile": {
         "id": "hybrid-14",
         "args": [
@@ -293,7 +293,7 @@
     },
     "39d31feadf4785e26df4c2f611437955a12701d8c9ff246b4eba6274081e9257": {
       "key": "39d31feadf4785e26df4c2f611437955a12701d8c9ff246b4eba6274081e9257",
-      "alias": "qwenstral-code-speculator",
+      "alias": "code-generation-agent",
       "profile": {
         "id": "hybrid-21",
         "args": [

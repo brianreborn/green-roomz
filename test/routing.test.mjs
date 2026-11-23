@@ -92,11 +92,11 @@ test('unavailable native model is still pinned so completions can 503', () => {
   assert.equal(routed.reason, 'requested_alias');
 });
 
-test('unavailable qwenstral-code-speculator is not pinned as requested_alias', () => {
+test('unavailable code-generation-agent is not pinned as requested_alias', () => {
   const reg = registry();
-  reg.setStatus('qwenstral-code-speculator', 'unavailable', { missing: ['impractical:RAM'] });
+  reg.setStatus('code-generation-agent', 'unavailable', { missing: ['impractical:RAM'] });
   const routed = hardRuleRoute({
-    model: 'qwenstral-code-speculator',
+    model: 'code-generation-agent',
     messages: [{ role: 'user', content: 'write hello' }],
   }, reg);
   assert.equal(routed.effectiveAlias, null);
@@ -105,7 +105,7 @@ test('unavailable qwenstral-code-speculator is not pinned as requested_alias', (
 
 test('text-only turns do not regex C++ or image intent; nexus decides', () => {
   const routed = routeRequest({
-    model: 'qwenstral-code-speculator',
+    model: 'code-generation-agent',
     messages: [
       { role: 'user', content: 'write a C++ program about a hero' },
       { role: 'assistant', content: '#include <iostream>' },
@@ -120,16 +120,16 @@ test('generic ChatGPT-compat model ids are not llama.app pins', () => {
   assert.equal(isGenericChatRequest({}), true);
   assert.equal(isGenericChatRequest({ model: 'general-text-speculator' }), true);
   assert.equal(isGenericChatRequest({ model: 'gpt-4o' }), true);
-  assert.equal(isGenericChatRequest({ model: 'qwenstral-code-speculator' }), false);
+  assert.equal(isGenericChatRequest({ model: 'code-generation-agent' }), false);
 });
 
 test('lock_alias honors the requested specialist', () => {
   const routed = hardRuleRoute({
     lock_alias: true,
-    model: 'qwenstral-code-speculator',
+    model: 'code-generation-agent',
     messages: [{ role: 'user', content: 'hello' }],
   }, registry());
-  assert.equal(routed.effectiveAlias, 'qwenstral-code-speculator');
+  assert.equal(routed.effectiveAlias, 'code-generation-agent');
   assert.equal(routed.reason, 'lock_alias');
 });
 
@@ -180,23 +180,23 @@ test('plain text does not hard-route to vision-layout-agent', () => {
   assert.notEqual(routed.effectiveAlias, 'vision-layout-agent');
 });
 
-test('/code slash pins qwenstral-code-speculator even when the model is general-text', () => {
+test('/code slash pins code-generation-agent even when the model is general-text', () => {
   const routed = hardRuleRoute({
     model: 'general-text-speculator',
     messages: [{ role: 'user', content: '/code write hello' }],
   }, registry());
-  assert.equal(routed.effectiveAlias, 'qwenstral-code-speculator');
+  assert.equal(routed.effectiveAlias, 'code-generation-agent');
   assert.equal(routed.reason, 'slash_code');
   const parsed = parseSlashCommand({ messages: [{ role: 'user', content: '/code write hello' }] });
   assert.equal(parsed.token, 'code');
-  assert.equal(parsed.alias, 'qwenstral-code-speculator');
+  assert.equal(parsed.alias, 'code-generation-agent');
   const stripped = stripSlashCommand({ messages: [{ role: 'user', content: '/code write hello' }] });
   assert.equal(stripped.messages[0].content, 'write hello');
 });
 
 test('/text slash pins general-text-speculator even on a python prompt', () => {
   const routed = hardRuleRoute({
-    model: 'qwenstral-code-speculator',
+    model: 'code-generation-agent',
     messages: [{ role: 'user', content: '/text write a python function named hello' }],
   }, registry());
   assert.equal(routed.effectiveAlias, 'general-text-speculator');
@@ -214,9 +214,9 @@ test('slash inside a fence is not an operator switch', () => {
 
 test('impractical aliases are skipped by availableAliases and aliasCanAdmit', () => {
   const reg = registry();
-  reg.setStatus('qwenstral-code-speculator', 'unavailable', { missing: ['impractical:RAM'] });
-  assert.equal(aliasCanAdmit(reg, 'qwenstral-code-speculator'), false);
-  assert.equal(availableAliases(reg).includes('qwenstral-code-speculator'), false);
+  reg.setStatus('code-generation-agent', 'unavailable', { missing: ['impractical:RAM'] });
+  assert.equal(aliasCanAdmit(reg, 'code-generation-agent'), false);
+  assert.equal(availableAliases(reg).includes('code-generation-agent'), false);
 });
 
 test('nexus candidates omit vision and audio on plain text', () => {
@@ -251,8 +251,8 @@ test('/council on|off toggles a session default; on + prompt also runs this turn
   assert.equal(on.council, undefined);
 
   const onRun = parseSlashCommand({ messages: [{ role: 'user', content: '/council on code refactor it' }] });
-  assert.equal(onRun.councilDefault.targets[0], 'qwenstral-code-speculator');
-  assert.deepEqual(onRun.council.targets, ['qwenstral-code-speculator']);
+  assert.equal(onRun.councilDefault.targets[0], 'code-generation-agent');
+  assert.deepEqual(onRun.council.targets, ['code-generation-agent']);
   assert.equal(onRun.rest, 'refactor it');
 
   const off = parseSlashCommand({ messages: [{ role: 'user', content: '/council off' }] });
@@ -265,7 +265,7 @@ test('parseCouncilArgs: pulls targets / judge / parallelism off the front, leave
   assert.deepEqual(parseCouncilArgs('vision-layout-agent similarity what brand is this'),
     { targets: ['vision-layout-agent'], judge: 'similarity', parallel: undefined, rest: 'what brand is this' });
   assert.deepEqual(parseCouncilArgs('code,general-text-speculator serial refactor it'),
-    { targets: ['qwenstral-code-speculator', 'general-text-speculator'], judge: null, parallel: false, rest: 'refactor it' });
+    { targets: ['code-generation-agent', 'general-text-speculator'], judge: null, parallel: false, rest: 'refactor it' });
   assert.deepEqual(parseCouncilArgs('extract the label fields as JSON'),
     { targets: null, judge: null, parallel: undefined, rest: 'extract the label fields as JSON' });
   assert.deepEqual(parseCouncilArgs('field-vote read this'),
@@ -298,13 +298,13 @@ test('model "tool-router-agent" without lock_alias is nexus-routed, not pinned t
 test('security slash dispatches route to their corresponding specialists', () => {
   const reg = registry();
   
-  // Code security & SAST -> qwenstral-code-speculator
+  // Code security & SAST -> code-generation-agent
   const sast = hardRuleRoute({ messages: [{ role: 'user', content: '/sast check buffer overflow' }] }, reg);
-  assert.equal(sast.effectiveAlias, 'qwenstral-code-speculator');
+  assert.equal(sast.effectiveAlias, 'code-generation-agent');
   assert.equal(sast.reason, 'slash_sast');
 
   const audit = hardRuleRoute({ messages: [{ role: 'user', content: '/audit review auth handler' }] }, reg);
-  assert.equal(audit.effectiveAlias, 'qwenstral-code-speculator');
+  assert.equal(audit.effectiveAlias, 'code-generation-agent');
   assert.equal(audit.reason, 'slash_audit');
 
   // Threat modeling & OSINT -> general-text-speculator
@@ -316,9 +316,9 @@ test('security slash dispatches route to their corresponding specialists', () =>
   assert.equal(osint.effectiveAlias, 'general-text-speculator');
   assert.equal(osint.reason, 'slash_osint');
 
-  // Detection rules -> qwenstral-code-speculator
+  // Detection rules -> code-generation-agent
   const rules = hardRuleRoute({ messages: [{ role: 'user', content: '/sigma generate rule for lolbin' }] }, reg);
-  assert.equal(rules.effectiveAlias, 'qwenstral-code-speculator');
+  assert.equal(rules.effectiveAlias, 'code-generation-agent');
   assert.equal(rules.reason, 'slash_sigma');
 
   // Monitor -> security-monitor-agent

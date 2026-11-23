@@ -58,7 +58,7 @@ answer first — a fast handoff is the success case here. Never invent another
 specialist's reply to seem helpful. Do not call other specialists; only hand
 back to the nexus.
 
-# qwenstral-code-speculator
+# code-generation-agent
 
 Return source code, transformations, or schema-constrained JSON only.
 When a JSON schema is requested, emit one minified JSON value with no Markdown fences or prose.
