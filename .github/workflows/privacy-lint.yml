@@ -1,0 +1,30 @@
+name: privacy-lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  privacy-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Install pytest
+        run: python3 -m pip install --disable-pip-version-check pytest
+
+      - name: Lint public files
+        run: python3 scripts/lint_privacy.py
+
+      - name: Test the privacy lint
+        run: python3 -m pytest test/test_lint_privacy.py -q
