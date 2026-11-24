@@ -2,20 +2,20 @@
 # Portable shebang (NewTermux may use a non-com.termux $PREFIX). Invoke as: bash <script>.sh
 : "${LANG:=C.UTF-8}"; export LANG
 # Refresh = a new cut through verify + flip. Nothing is copied into the live tree: the staged
-# runtime + tree (/data/local/tmp/grz) go through note9-verify-runtime.sh, anchored by
+# runtime + tree (/data/local/tmp/grz) go through termux-verify-runtime.sh, anchored by
 # GRZ_MANIFEST_SHA256, into a new $HOME/grz.<sha>; grz.current flips only on success. Then serve
 # restarts from grz.current. The verifier used is the one inside the currently verified tree.
 set -euo pipefail
 umask 077
 ST=${GRZ_STAGE_ROOT:-/data/local/tmp/grz}
 SELF_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-# shellcheck source=note9-common.sh
-. "$SELF_DIR/note9-common.sh"
+# shellcheck source=termux-common.sh
+. "$SELF_DIR/termux-common.sh"
 grz_sdk_check || exit 1
 grz_state_init || exit 1
 [[ -n ${GRZ_MANIFEST_SHA256:-} ]] || { echo "ERROR: GRZ_MANIFEST_SHA256 unset; refresh needs the new cut's manifest hash (out of band)" >&2; exit 1; }
 grz_resolve_current || exit 1
-VERIFY="$GRZ_TREE/scripts/note9-verify-runtime.sh"
+VERIFY="$GRZ_TREE/scripts/termux-verify-runtime.sh"
 [[ -f $VERIFY ]] || { echo "ERROR: $VERIFY missing in verified tree" >&2; exit 1; }
 # GRZ_STAGE_ROOT is an input only: classify it with the shared-storage helper and make sure
 # nothing we execute (the verifier) lives under it.

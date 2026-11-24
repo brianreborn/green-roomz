@@ -6,22 +6,22 @@
 set -uo pipefail
 umask 077
 SELF_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-# shellcheck source=note9-common.sh
-. "$SELF_DIR/note9-common.sh"
+# shellcheck source=termux-common.sh
+. "$SELF_DIR/termux-common.sh"
 # Android 9 (API 28) minimum (NDK API 28 build). See grz_sdk_check: refuses on empty/non-numeric
 # getprop, or missing getprop under Termux; skipped only on non-Android hosts.
 grz_sdk_check || exit 1
 HOME_REAL=$("$REALPATH" -e -- "$HOME") || { echo "ERROR: HOME missing" >&2; exit 1; }
 if grz_is_shared_storage "$HOME_REAL"; then echo "ERROR: HOME $HOME_REAL is on shared storage; refusing" >&2; exit 1; fi
 # setup:83 fix: setup + verifier + helpers run from the sha-checked release tarball
-# (note9-pack-release.sh), extracted under $HOME; never from shared/adb-writable storage.
+# (termux-pack-release.sh), extracted under $HOME; never from shared/adb-writable storage.
 SELF_REAL=$("$REALPATH" -e -- "$SELF_DIR")
 if grz_is_shared_storage "$SELF_REAL"; then echo "ERROR: setup is running from $SELF_REAL (shared/adb-writable storage); extract the sha-checked release tarball under \$HOME and run it from there; refusing" >&2; exit 1; fi
-# SD-31: the extracted release folder holds regular files only (see note9-extract-release.sh).
+# SD-31: the extracted release folder holds regular files only (see termux-extract-release.sh).
 REL_ROOT=$(dirname -- "$SELF_REAL")
 if [[ -n ${PREFIX:-} && -x ${PREFIX}/bin/find ]]; then FIND=$PREFIX/bin/find; else FIND="find"; fi
 badrel=$("$FIND" "$REL_ROOT" -path "$REL_ROOT/.git" -prune -o -mindepth 1 ! -type f ! -type d -print -quit 2>/dev/null)
-if [[ -n $badrel ]]; then echo "ERROR: non-regular entry $badrel in the release folder; re-extract with note9-extract-release.sh; refusing" >&2; exit 1; fi
+if [[ -n $badrel ]]; then echo "ERROR: non-regular entry $badrel in the release folder; re-extract with termux-extract-release.sh; refusing" >&2; exit 1; fi
 SD=/sdcard/Download/grz   # staged-tree fallback location only; nothing is ever written there
 SRC_TMP=/data/local/tmp/grz
 grz_state_init || exit 1
@@ -59,7 +59,7 @@ RT="$CUR/runtime"
 # (crash mid-flip), drop the link so the runner refuses until verify succeeds.
 if [[ -L $CUR ]]; then
   _d=$("$REALPATH" -e -- "$CUR" 2>/dev/null || true); _hex=${_d##*/grz.}
-  _man="$_d/tree/config/note9-runtime.SHA256SUMS"; _cur=""
+  _man="$_d/tree/config/termux-runtime.SHA256SUMS"; _cur=""
   [[ -f $_man ]] && _cur=$(sha256sum < "$_man" | cut -d' ' -f1)
   _st=""; [[ -f $_d/.verified ]] && _st=$(tr -d '[:space:]' < "$_d/.verified")
   if [[ -z $_cur || $_st != "$_cur" || $_hex != "$_cur" ]]; then
@@ -77,12 +77,12 @@ nm=$("$FIND" "$TREE_SRC" -name node_modules -not -path '*/.git/*' -print -quit 2
 if [[ -n $nm ]]; then echo "ERROR: node_modules present in staged tree ($nm); package.json has no runtime deps (npm-deps: none); refusing" >&2; exit 1; fi
 
 echo "=== copy + verify native runtime into \$HOME (never executed from $SRC_TMP) ==="
-# Manifest ships in the cut: tree/config/note9-runtime.SHA256SUMS, anchored by
+# Manifest ships in the cut: tree/config/termux-runtime.SHA256SUMS, anchored by
 # GRZ_MANIFEST_SHA256. Installs $HOME/grz.<sha>/{runtime,tree} and flips grz.current. Only listed
 # files are copied (runtime + JS tree); nothing is exec'd from $SRC_TMP. See docs/android-legacy-termux.md.
-# Verifier comes from setup's own dir (the sha-checked release tarball, note9-pack-release.sh),
+# Verifier comes from setup's own dir (the sha-checked release tarball, termux-pack-release.sh),
 # never from the staged, unverified tree.
-bash "$SELF_DIR/note9-verify-runtime.sh" "$SRC_TMP" "$TREE_SRC" || exit 1
+bash "$SELF_DIR/termux-verify-runtime.sh" "$SRC_TMP" "$TREE_SRC" || exit 1
 
 RUNNER="$HOME_GRZ/scripts/termux-run-llama-server.sh"
 test -x "$RUNNER" || { echo "ERROR: runner not executable at $RUNNER"; exit 1; }
@@ -95,7 +95,7 @@ MAN="$HOME_GRZ/config/agents.android-termux.json"
 # are JSON-encoded there, never through sed or a shell. tmp+mv, mode 600.
 PORT=${GRZ_PORT:-8080}
 [[ $PORT =~ ^[0-9]+$ ]] || { echo "ERROR: GRZ_PORT must be numeric"; exit 1; }
-OVR="$STATE/agents.android-legacy.local.json"
+OVR="$STATE/agents.android-termux.local.json"
 # API key (always required, loopback included): 0600 key in the state dir, generated if absent.
 KEYF="$STATE/api.key"
 grz_key_generate "$KEYF" || { echo "ERROR: generating $KEYF failed"; exit 1; }
@@ -120,8 +120,8 @@ echo "=== validate ==="
 VAL=$(grz_log_path validate "$LOG_OPT_IN")
 node ./bin/green-roomz.mjs validate --manifest ./config/agents.android-termux.json | tee -a "$VAL"
 
-# shellcheck source=note9-serve-pid.sh
-. "$GRZ_TREE/scripts/note9-serve-pid.sh"
+# shellcheck source=termux-serve-pid.sh
+. "$GRZ_TREE/scripts/termux-serve-pid.sh"
 grz_stop_serve
 
 echo "=== api key ==="

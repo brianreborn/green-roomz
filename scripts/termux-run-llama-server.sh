@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Portable shebang. Invoke as: bash android-legacy-run-llama-server.termux.sh [llama-server args]
+# Portable shebang. Invoke as: bash termux-run-llama-server.sh [llama-server args]
 # Under Termux: runs the verified $HOME/grz.current/runtime copy only. Refuses unless
 #   - grz.current is a symlink to $HOME/grz.<sha> with no other symlinks inside,
 #   - <sha> == .verified == sha256(manifest) == GRZ_MANIFEST_SHA256 (always required;
@@ -31,24 +31,24 @@ if [ "$is_android" = 1 ]; then
   if [ -n "${PREFIX:-}" ] && [ -x "$PREFIX/bin/realpath" ]; then REALPATH=$PREFIX/bin/realpath; else REALPATH=realpath; fi
   HOME_REAL=$("$REALPATH" -e -- "$HOME") || die "HOME missing"
   CUR=$HOME_REAL/grz.current
-  [ -L "$CUR" ] || die "$CUR missing or not a symlink. Run android-legacy-termux-setup.sh first; /data/local/tmp/grz/bin is adb-only (SELinux denies exec from Termux)."
+  [ -L "$CUR" ] || die "$CUR missing or not a symlink. Run termux-setup.sh first; /data/local/tmp/grz/bin is adb-only (SELinux denies exec from Termux)."
   D=$("$REALPATH" -e -- "$CUR") || die "$CUR is dangling; refusing"
   hex=${D#"$HOME_REAL"/grz.}
   [[ $D == "$HOME_REAL"/grz.* && $hex =~ ^[0-9a-f]{64}$ ]] || die "$CUR resolves to $D, not $HOME_REAL/grz.<sha256>; refusing"
   # SD-21: shared prefix list (config/shared-storage-prefixes.txt) via the one helper.
-  # shellcheck source=note9-shared-storage.sh
-  . "$D/tree/scripts/note9-shared-storage.sh" || die "shared-storage helper missing in $D/tree; refusing"
+  # shellcheck source=termux-shared-storage.sh
+  . "$D/tree/scripts/termux-shared-storage.sh" || die "shared-storage helper missing in $D/tree; refusing"
   if grz_is_shared_storage "$D"; then die "$D is on shared storage; refusing"; fi
   if [ -n "${PREFIX:-}" ] && [ -x "$PREFIX/bin/find" ]; then FIND=$PREFIX/bin/find; else FIND="find"; fi
   # npm-deps: none: any node_modules dir in the installed tree is refused.
   nm=$("$FIND" "$D/tree" -name node_modules -print -quit 2>/dev/null)
   [ -z "$nm" ] || die "node_modules present in $D/tree ($nm); npm-deps: none; refusing"
   RT=$D/runtime
-  MAN=$D/tree/config/note9-runtime.SHA256SUMS
+  MAN=$D/tree/config/termux-runtime.SHA256SUMS
   link=$("$FIND" "$D" -type l -print -quit 2>/dev/null)
   [ -z "$link" ] || die "symlink $link inside $D; refusing (only grz.current may be a symlink)"
   [ -x "$RT/bin/llama-server" ] || die "$RT/bin/llama-server missing or not executable"
-  [ -f "$D/.verified" ] || die "$D/.verified missing; runtime not verified. Re-run android-legacy-termux-setup.sh with GRZ_MANIFEST_SHA256."
+  [ -f "$D/.verified" ] || die "$D/.verified missing; runtime not verified. Re-run termux-setup.sh with GRZ_MANIFEST_SHA256."
   [ -f "$MAN" ] || die "manifest $MAN missing; refusing"
   stamp=$(tr -d '[:space:]' < "$D/.verified")
   cur=$(sha256sum < "$MAN" | cut -d' ' -f1)

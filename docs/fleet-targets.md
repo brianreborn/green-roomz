@@ -137,7 +137,7 @@ Rejected for not apparently very feasible as **workers**: K243Y, IMW1202, CKS5TW
 | **mvp-host** | Athlon II X2; **8600 GT 224 MB sm_1.1** (CUDA 6.5 back-compat goal); 16 GB DDR3 | Win11 | **3.0 meas** CPU interim (was 2.5) | N/A (PC; git + GGUF on disk) | live GRZ; GPU path = **build**, not Vulkan |
 | **bsd-laptop** | i7-620M; Ironlake/NVS; 8 GB | PQFreeBSD 15 | 4–8 est | FreeBSD install media / ZFS bootenv if set | CPU then GL |
 | **pixel8** | Tensor G3; EdgeTPU | Android+KernelSU | 20–40 est | **Yes** — factory images / Android Flash Tool / fastboot | Termux/sidecar |
-| **android-legacy** | **SM-N960U** `crownqltesq`; **SDM845**; Adreno 630 (GLES 3.2); 8× Kryo; **5.7 GB**; Android 10 / API 29; serial `27841130ae1c7ece` | Android 10 | **23.8 meas** CPU 4t tg32 (pp64 **36.8**); pack in `/data/local/tmp/grz`, server `:8080` via adb forward | **Yes** — Odin/Heimdall stock + combo firmware widely mirrored | **no-root ADB shell now**; Termux Node gateway needs `allow-external-apps` or manual; OpenCL/Vulkan later |
+| **android-legacy** | **SM-N960U** `crownqltesq`; **SDM845**; Adreno 630 (GLES 3.2); 8× Kryo; **5.7 GB**; Android 10 / API 29; serial `<adb-serial>` | Android 10 | **23.8 meas** CPU 4t tg32 (pp64 **36.8**); pack in `/data/local/tmp/grz`, server `:8080` via adb forward | **Yes** — Odin/Heimdall stock + combo firmware widely mirrored | **no-root ADB shell now**; Termux Node gateway needs `allow-external-apps` or manual; OpenCL/Vulkan later |
 | **QD65NF** | **55QD65NF** Costco Fire TV QLED; **MT9602** 4×A53 @ 1.5 GHz + Mali-G52 2EE MC1; SoC **max 2 GB** DDR3; 55" rated **125 W** | **Fire TV** | **2–6 est** | **Partial** — Fire TV USB recovery / Amazon factory reset; Hisense USB update packages exist by SKU; not as clean as Pixel fastboot. Confirm exact recovery menu on unit. | **ADB easy; full root not.** Sideload/dev options = Fire TV normal. No public one-click Magisk for this Fire OEM SKU. Cousin: Hisense **Google/VIDAA** U8N MT9618 has XDA Magisk (UART+fastboot unlock) — different OS/SoC. Fire sticks/Cubes have exploits; **OEM Fire panels generally do not.** |
 | **SAX2V1R** | Sercomm **IP6442B**; FCC **P27IP6442B**; Spectrum SAX2V1R; Wi‑Fi 6E (PHY up to 4803.9 Mbps); 12 V. Cousin SAX1V1K = Askey IPQ8072A + 2 GB + OpenWrt — **different SoC, do not assume 2 GB** | Spectrum Linux | **2–6 hyp** | **Partial** — dual U-Boot slots on Askey cousins; dump eMMC before flash; stock Spectrum image hard to re-fetch (ISP). Dump first. | UART |
 | **TU7000** | 2020 Crystal UHD; **Crystal Processor 4K** (4 cores advertised); Tizen 5.5; Bishop Fox path demoed on **UN43TU700D** | Tizen | **1–4 hyp** | **Yes** — Samsung USB firmware / SmartThings / factory reset; Tizen recovery documented | SDB |
@@ -260,11 +260,11 @@ Landed `b1c034f`. User-facing resident completions do **not** inject `tool-route
 
 ---
 
-## Note 9 test status (USB on win-host, 2026-08-29)
+## Android-legacy phone test status (USB on win-host, 2026-08-29)
 
 | gate | status |
 |---|---|
-| ADB | `27841130ae1c7ece device` SM-N960U, **no root** |
+| ADB | `<adb-serial> device` SM-N960U, **no root** |
 | CPU pack | llama.cpp 0.3.0 NDK 29 arm64; backends next to bin |
 | llama-bench 4t | **pp64 36.8** / **tg32 23.8** on 0.5B Q4 |
 | Termux Node | **v26.4.0**; GRZ cut in `~/grz.<sha>/{runtime,tree}` via `~/grz.current`; state in `~/.green-roomz-state` |
@@ -288,7 +288,7 @@ Reuse existing Android cross-build, do not invent a third SDK:
 | 0.5B Q4 | `C:\LocalAI\Qwenstral-Small-3.1-0.5B.Q4_K_M.gguf` (432 MiB) | copy last, with the ELF |
 | Gateway | this repo, Node, no native addon | Termux `nodejs`; `--manifest config/agents.android.json` |
 
-**Yes, CPU pack can be built entirely on win-host.** One **arm64-v8a** ELF: `ANDROID_PLATFORM=android-28` (Note 9), `ANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON` (Pixel 8 16K). `scripts/android-cross-build.ps1` is **CPU-only today** (`GGML_VULKAN` / `GGML_OPENCL` off). KleidiAI + `GGML_CPU_ALL_VARIANTS` is the shared CPU path, not a GPU path.
+**Yes, CPU pack can be built entirely on win-host.** One **arm64-v8a** ELF: `ANDROID_PLATFORM=android-28` (Android-legacy phone), `ANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON` (Pixel 8 16K). `scripts/android-cross-build.ps1` is **CPU-only today** (`GGML_VULKAN` / `GGML_OPENCL` off). KleidiAI + `GGML_CPU_ALL_VARIANTS` is the shared CPU path, not a GPU path.
 
 **GPU is not accommodated yet.** `GGML_BACKEND_DL=ON` is there so a later `ggml-vulkan.so` / `ggml-opencl.so` can load beside the same `llama-server`, but those .so files are not built. Pick the backend from the live SoC — not a guess:
 
@@ -297,11 +297,11 @@ Reuse existing Android cross-build, do not invent a third SDK:
 | **android-legacy SM-N960U** | **Adreno 630** (live GLES: Qualcomm, OpenGL ES 3.2) | **OpenCL first** (llama.cpp Snapdragon recipe) and/or Vulkan. Not Mali. Hexagon HTP packs target newer SoCs — do not assume SDM845 DSP. |
 | **pixel8** Tensor G3 | Mali-G715 | Vulkan + KleidiAI CPU |
 
-Until `adb` can `getprop ro.hardware` / `dumpsys SurfaceFlinger`, do not turn on OpenCL (needs Khronos ICD in the NDK sysroot) or Vulkan (needs glslc + Android loader). Hexagon is Snapdragon-only and not for this Note 9 until the SKU is SDM.
+Until `adb` can `getprop ro.hardware` / `dumpsys SurfaceFlinger`, do not turn on OpenCL (needs Khronos ICD in the NDK sysroot) or Vulkan (needs glslc + Android loader). Hexagon is Snapdragon-only and not for this Android-legacy phone until the SKU is SDM.
 
-**Note 9 USB (win-host, 2026-08-29):** first lead was charge-only (no ADB). Data cable + Allow RSA → `27841130ae1c7ece` **SM-N960U** / SDM845 / Adreno 630 / Android 10 / 5.7 GB. Host key `brian@SHALOM` (`.android\adbkey` 2026-08-19).
+**Android-legacy phone USB (win-host, 2026-08-29):** first lead was charge-only (no ADB). Data cable + Allow RSA → `<adb-serial>` **SM-N960U** / SDM845 / Adreno 630 / Android 10 / 5.7 GB. Host key `<user>@win-host` (`.android\adbkey` 2026-08-19).
 
-**Not in this pack yet:** GPU backends; llama.android **APK** (`minSdk 33` → Pixel 8 only, Note 9 is API 28); native sidecar (handshake stub only); 4B/7B GGUFs.
+**Not in this pack yet:** GPU backends; llama.android **APK** (`minSdk 33` → Pixel 8 only, Android-legacy phone is API 28); native sidecar (handshake stub only); 4B/7B GGUFs.
 
 Scripts: `scripts/android-sdk-ndk.ps1` then `scripts/android-cross-build.ps1` → `C:\LocalAI\android-pack\arm64-v8a`. On device: `GRZ_ROOT=... node bin/green-roomz.mjs serve --manifest config/agents.android.json`.
 

@@ -1,4 +1,4 @@
-# Note 9 Termux onboarding (2026-08-29, win-host USB)
+# Android-legacy phone Termux onboarding (2026-08-29, win-host USB)
 
 No root. Do not `adb push` into Termux private dirs. Do not `su`.
 
@@ -7,7 +7,7 @@ No root. Do not `adb push` into Termux private dirs. Do not `su`.
 | field | value |
 |---|---|
 | SKU | SM-N960U `crownqltesq` |
-| serial | `27841130ae1c7ece` |
+| serial | `<adb-serial>` |
 | SoC | SDM845 / Snapdragon 845, Adreno 630 |
 | RAM | 5.7 GB (MemTotal ~5710492 kB; ~3.0 GB free under load) |
 | OS | Android 10 / API 29 |
@@ -30,7 +30,7 @@ Pack on win-host: `C:\LocalAI\android-pack\arm64-v8a` (~219 MB). Model: `C:\Loca
 | `/data/local/tmp/grz` | `shell` 777 | adb drop zone (bin/lib/models + scripts). **SELinux: Termux cannot execute here.** |
 | `~/grz.<manifest-sha>/` | Termux (700) | one verified cut: `runtime/` (bin/lib/models), `tree/` (JS tree, `config/agents.android-termux.json`), `.verified` |
 | `~/grz.current` | Termux | the only symlink: → `grz.<sha>`; flipped by `ln -s` tmp + `mv -T` after verify |
-| `~/.green-roomz-state/` | Termux (700) | user state, never hashed or copied: `agents.android-legacy.local.json` override (600), `logs/` (opt-in, 600), `ext-apps.status` |
+| `~/.green-roomz-state/` | Termux (700) | user state, never hashed or copied: `agents.android-termux.local.json` override (600), `logs/` (opt-in, 600), `ext-apps.status` |
 | `/sdcard/Download/grz` | sdcard_rw | optional staged-tree drop only; **nothing is written here** (no logs, no pidfile) |
 
 Gateway: Termux `node` `127.0.0.1:8080`. From win-host: `adb forward tcp:18080 tcp:8080` then `http://127.0.0.1:18080`.
@@ -60,17 +60,17 @@ Resident **tool-router-agent** `:8187` is the only GGUF on the phone. Other alia
 |---|---|
 | `config/agents.android-termux.json` | Termux manifest (`${HOME}/grz.current/runtime/…`; runtime command = tree's runner) |
 | `scripts/termux-setup.sh` | pkg nodejs, verify + flip, write override, validate, serve |
-| `scripts/note9-common.sh` | sourced: SDK gate, `$REALPATH`, resolve `grz.current`, override port/log_opt_in, serve start |
-| `scripts/note9-refresh-src.sh` | new cut via the verified tree's verifier + flip (needs `GRZ_MANIFEST_SHA256`); then restart. Copies nothing into the tree |
+| `scripts/termux-common.sh` | sourced: SDK gate, `$REALPATH`, resolve `grz.current`, override port/log_opt_in, serve start |
+| `scripts/termux-refresh-src.sh` | new cut via the verified tree's verifier + flip (needs `GRZ_MANIFEST_SHA256`); then restart. Copies nothing into the tree |
 | `scripts/android-enable-external-apps.sh` | `allow-external-apps=true` |
 | `scripts/termux-restart-serve.sh` | kill pidfile, serve from `grz.current` (no stored path) |
 | `scripts/termux-run-llama-server.sh` | release runner, run from the hashed tree |
 
-Push the cut with `adb push` to `/data/local/tmp/grz/` (runtime in `bin/ lib/ models/`, JS tree in `green-roomz/`, `chmod 644`) push the release tarball too, then from a Termux prompt **check the tarball sha256 first**, extract it under `$HOME`, and run setup from there (see *Release tarball* below). Setup refuses to run from shared/adb-writable storage. All `scripts/android-legacy-*.sh` use `#!/usr/bin/env bash` (works under Termux and NewTermux with termux-exec); always invoke them as `bash script.sh`. `android-legacy-run-llama-server.termux.sh` runs `grz.current/runtime` under Termux and the `/data/local/tmp` path only as adb `shell` with `GRZ_ADB_DEBUG=1`. Setup options: `GRZ_PRUNE_APT_SOURCES=1` (persistent, needs Brian's per-host OK), `GRZ_PORT`, `GRZ_LOG_OPT_IN=1`. Android 9 (API 28)+ required: setup/runner refuse on SDK < 28, on empty/non-numeric `getprop`, or when `getprop` is missing on Android (`$TERMUX_VERSION` set or `uname -o` = `Android`; `$PREFIX` is not a signal); the check is skipped only on non-Android hosts.
+Push the cut with `adb push` to `/data/local/tmp/grz/` (runtime in `bin/ lib/ models/`, JS tree in `green-roomz/`, `chmod 644`) push the release tarball too, then from a Termux prompt **check the tarball sha256 first**, extract it under `$HOME`, and run setup from there (see *Release tarball* below). Setup refuses to run from shared/adb-writable storage. All `scripts/android-legacy-*.sh` use `#!/usr/bin/env bash` (works under Termux and NewTermux with termux-exec); always invoke them as `bash script.sh`. `termux-run-llama-server.sh` runs `grz.current/runtime` under Termux and the `/data/local/tmp` path only as adb `shell` with `GRZ_ADB_DEBUG=1`. Setup options: `GRZ_PRUNE_APT_SOURCES=1` (persistent, needs Brian's per-host OK), `GRZ_PORT`, `GRZ_LOG_OPT_IN=1`. Android 9 (API 28)+ required: setup/runner refuse on SDK < 28, on empty/non-numeric `getprop`, or when `getprop` is missing on Android (`$TERMUX_VERSION` set or `uname -o` = `Android`; `$PREFIX` is not a signal); the check is skipped only on non-Android hosts.
 
 ## RAM admission
 
-`src/memory.mjs`: headroom **2 GiB** if `os.totalmem() >= 8 GiB`, else **256 MiB**. Without that, Note 9 rejected cpu-4 (`estimate ~1.27 GiB + 2 GiB headroom > ~3.0 GiB free`).
+`src/memory.mjs`: headroom **2 GiB** if `os.totalmem() >= 8 GiB`, else **256 MiB**. Without that, Android-legacy phone rejected cpu-4 (`estimate ~1.27 GiB + 2 GiB headroom > ~3.0 GiB free`).
 
 ## Next (not done)
 
@@ -87,8 +87,8 @@ from `/data/local/tmp/grz`. Setup, the verifier and their sourced
 helpers come from the release tarball (sha-checked by Brian, extracted under `$HOME`), never from
 the staged tree. `npm-deps: none`: `package.json` has no runtime deps and no lockfile; setup never
 runs npm, and setup, the verifier and the runner refuse any `node_modules` dir.
-`scripts/note9-verify-runtime.sh` copies **only files listed** in the in-cut manifest
-`config/note9-runtime.SHA256SUMS` into a temp dir, checks every sha256, then installs it as
+`scripts/termux-verify-runtime.sh` copies **only files listed** in the in-cut manifest
+`config/termux-runtime.SHA256SUMS` into a temp dir, checks every sha256, then installs it as
 `$HOME/grz.<sha>/{runtime,tree}` and flips `grz.current`. No `node_modules`
 (npm-deps: none); the runner also refuses any unlisted `*.node`.
 
@@ -105,7 +105,7 @@ Re-running with the same, intact, already-current sha skips the copy and the fli
 sweeps only real dirs `grz.<64hex>.old.<n>` / `grz.unverified.<t>.<p>.old.<n>` / `.grz-verify.XXXXXX`; after a flip, the kept
 previous version is the one recorded in `~/.green-roomz-state/install-history` (never mtime).
 
-Host override `~/.green-roomz-state/agents.android-legacy.local.json`: ≤ 4 KB, no duplicate keys (counted after decoding, so `\u0070ort` = `port`), keys
+Host override `~/.green-roomz-state/agents.android-termux.local.json`: ≤ 4 KB, no duplicate keys (counted after decoding, so `\u0070ort` = `port`), keys
 `port` / `api_key_file` / `log_opt_in` only (accepted keys are logged at load). `api_key_file`
 is realpath'd, must be a regular non-symlink file under realpath(`$HOME`), mode 600 or 400,
 owned by the Termux uid, not on shared storage (allowlist first: realpath must be under
@@ -118,10 +118,10 @@ out of band (e.g. read from the build host, not from the phone). No signing yet.
 
 Build host:
 
-    bash scripts/note9-gen-manifest.sh <stage_root> <stage_root>/green-roomz config/note9-runtime.SHA256SUMS
+    bash scripts/termux-gen-manifest.sh <stage_root> <stage_root>/green-roomz config/termux-runtime.SHA256SUMS
     #   refuses zero tree/ lines, a missing model line (--allow-no-model = DRYRUN header, dry runs
     #   only) and node_modules; prints: manifest ... sha256=<M>  bin=N lib=N model=N tree=N
-    bash scripts/note9-pack-release.sh             # dist/grz-android-legacy-release.tar.gz
+    bash scripts/termux-pack-release.sh             # dist/grz-android-legacy-release.tar.gz
     #   git archive of HEAD (refuses a dirty tree), gzip -n: setup, verifier, extract script,
     #   common + shared-storage helpers, prefix list, manifest. Prints tarball sha256=<T> and manifest sha256=<M>.
 
@@ -138,7 +138,7 @@ Publish **T and M together** (out of band). Nothing is uploaded or pushed by the
       && $TAR -xzf "$T" -C ~/grz-release --no-same-owner --no-same-permissions
     GRZ_MANIFEST_SHA256=<M> bash ~/grz-release/scripts/termux-setup.sh
 
-Later updates: `bash ~/grz-release/scripts/note9-extract-release.sh <tarball> <fresh dir>` does
+Later updates: `bash ~/grz-release/scripts/termux-extract-release.sh <tarball> <fresh dir>` does
 the same checks (GNU `$PREFIX/bin/tar` only, list first, fresh 0700 folder, `--no-same-owner`).
 Setup refuses a release folder containing anything but regular files and directories.
 
@@ -158,4 +158,4 @@ Use only with Brian's per-host OK.
 
 **Serve process:** setup/restart track serve in `$HOME/grz-serve.pid` (mode 600) and kill
 only if `/proc/<pid>/cmdline` still matches `bin/green-roomz.mjs serve`. No `pkill -f`.
-Source updates go through `note9-refresh-src.sh` (verify + flip, never an in-place copy); `android-legacy-restart-serve.sh` only restarts, resolving `grz.current`.
+Source updates go through `termux-refresh-src.sh` (verify + flip, never an in-place copy); `termux-restart-serve.sh` only restarts, resolving `grz.current`.

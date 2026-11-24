@@ -2,18 +2,18 @@
 # Portable shebang (NewTermux may use a non-com.termux $PREFIX). Invoke as: bash <script>.sh
 : "${LANG:=C.UTF-8}"; export LANG
 # Restart serve only, from the verified tree resolved through $HOME/grz.current (no stored
-# runtime path). To update sources use note9-refresh-src.sh (verify + flip).
+# runtime path). To update sources use termux-refresh-src.sh (verify + flip).
 set -euo pipefail
 umask 077
 SELF_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-# shellcheck source=note9-common.sh
-. "$SELF_DIR/note9-common.sh"
+# shellcheck source=termux-common.sh
+. "$SELF_DIR/termux-common.sh"
 grz_sdk_check || exit 1
 grz_state_init || exit 1
 grz_resolve_current || exit 1
 # Helpers come from the verified tree, not from wherever this script was read.
-# shellcheck source=note9-serve-pid.sh
-. "$GRZ_TREE/scripts/note9-serve-pid.sh"
+# shellcheck source=termux-serve-pid.sh
+. "$GRZ_TREE/scripts/termux-serve-pid.sh"
 OPTIN=$(grz_log_opt_in "$GRZ_TREE") || { echo "ERROR: host override refused" >&2; exit 1; }
 PORT=$(grz_port "$GRZ_TREE") || exit 1
 KEYSRC=$(grz_key_check "$GRZ_TREE") || { echo "ERROR: no valid API key; not (re)starting the gateway" >&2; exit 1; }

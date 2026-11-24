@@ -41,3 +41,7 @@ local.env
 hosts.local.json
 private.env
 privacy-hosts.local.txt
+
+# Python bytecode — privacy lint also scans untracked files git would publish
+__pycache__/
+*.pyc

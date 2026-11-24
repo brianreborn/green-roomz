@@ -18,7 +18,7 @@ Read this file first. `main` does not have this work. The branch is `disclosure-
 - A locked alias streams straight through. `dogfood: true` skips the stock prompt so the model is not told to hand off.
 - Windows UAT passed 8/8 against a warm gateway on this Athlon. The first cold stream used to die at five minutes with no headers; a locked stream now writes `: open` first.
 - Instruct on this CPU: about 1.6–1.9 tok/s after the weights are resident. A 100-token prompt is about a minute of prefill. `--parallel 1` means a client that gives up still occupies the slot until generation ends.
-- Note 9 (`27841130ae1c7ece`) still runs an older tree. Sources were unpacked to `/data/local/tmp/grz/green-roomz`. Termux refused `RUN_COMMAND`, so `GET /` and `GET /unicorn` are still 404 there. Chat on the phone did answer. Do not restart that process unless the goal says so.
+- Android-legacy phone (`<adb-serial>`) still runs an older tree. Sources were unpacked to `/data/local/tmp/grz/green-roomz`. Termux refused `RUN_COMMAND`, so `GET /` and `GET /unicorn` are still 404 there. Chat on the phone did answer. Do not restart that process unless the goal says so.
 
 ## Next goals, in order
 
@@ -26,7 +26,7 @@ Read this file first. `main` does not have this work. The branch is `disclosure-
 2. If that diff is a real edit to one existing file, apply it with `GRZ_DOGFOOD_APPLY=1` only after `node --test` on the tests that cover the touch would pass. If the model emits a new-file diff over an existing path, reject it and tighten the prompt or the parser. Do not clobber the file.
 3. Cut prefill on that machine: one thread is the Athlon profile (`cpu-1` in `config/agents.windows-mvp.json`). On a box with more cores, stop forcing `--threads 1` for the alias you dogfood. Measure before and after.
 4. When `GREEN_BRAINZ_ROOT` is set, one chat turn must impress through Brainz and the next turn must recall from that store, not from a pasted transcript. Roomz already loads Brainz only when the variable is set (`src/brainz.mjs`).
-5. Leave Note 9, Headroom, and a merge of PR 25 until the four goals above are done.
+5. Leave Android-legacy phone, Headroom, and a merge of PR 25 until the four goals above are done.
 
 ## Prompt that points here
 

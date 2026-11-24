@@ -2,7 +2,7 @@
 # Build the android-legacy release bootstrap tarball: everything setup executes before verification
 # (setup, verifier, sourced helpers, shared-storage list) plus the manifest, in ONE file.
 # Deterministic: git archive of HEAD (refuses a dirty tree), gzip -n.
-# Usage: bash scripts/note9-pack-release.sh [out.tar.gz]   (default dist/grz-android-legacy-release.tar.gz)
+# Usage: bash scripts/termux-pack-release.sh [out.tar.gz]   (default dist/grz-android-legacy-release.tar.gz)
 # Prints the tarball sha256 and the manifest sha256 (GRZ_MANIFEST_SHA256); publish them together.
 # Brian checks the tarball sha256 on the device before extracting or running anything.
 # Local only: never uploads, pushes or publishes.
@@ -10,14 +10,14 @@ set -euo pipefail
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 OUT=${1:-$ROOT/dist/grz-android-legacy-release.tar.gz}
 FILES=(
-  config/note9-runtime.SHA256SUMS
+  config/termux-runtime.SHA256SUMS
   config/shared-storage-prefixes.txt
-  scripts/note9-common.sh
-  scripts/note9-shared-storage.sh
+  scripts/termux-common.sh
+  scripts/termux-shared-storage.sh
   scripts/termux-setup.sh
-  scripts/note9-verify-runtime.sh
+  scripts/termux-verify-runtime.sh
 )
-FILES+=(scripts/note9-extract-release.sh)
+FILES+=(scripts/termux-extract-release.sh)
 for f in "${FILES[@]}"; do
   [[ -f $ROOT/$f && ! -L $ROOT/$f ]] || { echo "ERROR: $f missing or a symlink" >&2; exit 1; }
 done
@@ -34,7 +34,7 @@ mapfile -t SORTED < <(printf '%s\n' "${FILES[@]}" | LC_ALL=C sort)
 git -C "$ROOT" -c tar.umask=0022 archive --format=tar HEAD -- "${SORTED[@]}" | gzip -n -9 > "$TMP"
 mv -f -- "$TMP" "$OUT"
 TSHA=$(sha256sum < "$OUT" | cut -d' ' -f1)
-MSHA=$(git -C "$ROOT" show HEAD:config/note9-runtime.SHA256SUMS | sha256sum | cut -d' ' -f1)
+MSHA=$(git -C "$ROOT" show HEAD:config/termux-runtime.SHA256SUMS | sha256sum | cut -d' ' -f1)
 echo "tarball  $OUT"
 echo "tarball  sha256=$TSHA"
 echo "manifest sha256=$MSHA  (GRZ_MANIFEST_SHA256)"

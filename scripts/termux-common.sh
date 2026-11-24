@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Sourced helper for android-legacy setup / refresh / restart. Layout (see note9-verify-runtime.sh):
+# Sourced helper for android-legacy setup / refresh / restart. Layout (see termux-verify-runtime.sh):
 #   $HOME/grz.current -> grz.<sha>/{runtime,tree,.verified}; user state in $HOME/.green-roomz-state.
 # Nothing here stores a runtime path: every caller resolves through grz.current.
 if [[ -n ${PREFIX:-} && -x ${PREFIX}/bin/realpath ]]; then REALPATH=$PREFIX/bin/realpath; else REALPATH="realpath"; fi
 GRZ_CUR="$HOME/grz.current"
 GRZ_STATE="$HOME/.green-roomz-state"
 
-# shellcheck source=note9-shared-storage.sh
-. "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/note9-shared-storage.sh"
+# shellcheck source=termux-shared-storage.sh
+. "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/termux-shared-storage.sh"
 
 # N5: Android host iff $TERMUX_VERSION is set or `uname -o` says Android ($PREFIX is not a signal).
 grz_is_android() { [[ -n ${TERMUX_VERSION:-} || $(uname -o 2>/dev/null) == Android ]]; }
@@ -35,7 +35,7 @@ grz_state_init() {
 grz_resolve_current() {
   local home_real hex
   home_real=$("$REALPATH" -e -- "$HOME") || return 1
-  [[ -L $GRZ_CUR ]] || { echo "ERROR: $GRZ_CUR missing or not a symlink; run android-legacy-termux-setup.sh" >&2; return 1; }
+  [[ -L $GRZ_CUR ]] || { echo "ERROR: $GRZ_CUR missing or not a symlink; run termux-setup.sh" >&2; return 1; }
   GRZ_DIR=$("$REALPATH" -e -- "$GRZ_CUR") || { echo "ERROR: $GRZ_CUR dangling" >&2; return 1; }
   hex=${GRZ_DIR#"$home_real"/grz.}
   [[ $GRZ_DIR == "$home_real"/grz.* && $hex =~ ^[0-9a-f]{64}$ ]] || { echo "ERROR: $GRZ_CUR -> $GRZ_DIR is not grz.<sha256>" >&2; return 1; }
@@ -117,7 +117,7 @@ grz_port() {
 
 # ---------------------------------------------------------------------------
 # Install / serve mutual exclusion (SD-24 / SD-33 / Race R1 / R2).
-# Same lock for note9-verify-runtime.sh and android-legacy-restart-serve.sh:
+# Same lock for termux-verify-runtime.sh and termux-restart-serve.sh:
 #   $HOME/.grz-install.lock  (mkdir + owner pid token)
 # Prefer $PREFIX/bin/flock when present (.grz-install.flock). Without flock the
 # mkdir path still holds the lock exclusively: cand dir is built with pid already

@@ -16,14 +16,14 @@ const sha = (p) => createHash('sha256').update(readFileSync(p)).digest('hex');
 function home(override, { mode = 0o600, dirMode = 0o700 } = {}) {
   const h = mkdtempSync(join(tmpdir(), 'grz-ovr-')); const st = join(h, '.green-roomz-state');
   mkdirSync(st); chmodSync(st, dirMode);
-  const f = join(st, 'agents.android-legacy.local.json');
+  const f = join(st, 'agents.android-termux.local.json');
   if (override !== undefined) { writeFileSync(f, JSON.stringify(override)); chmodSync(f, mode); }
   return { h, st, f };
 }
 const refused = (fn, re) => assert.throws(fn, (e) => re.test(JSON.stringify(e.details ?? e.message)));
 
 test('OVR: path is $HOME/.green-roomz-state/<name>.local.json (outside the versioned folder)', () => {
-  assert.equal(hostOverridePath('/x/grz.current/tree/config/agents.android-termux.json', { HOME: '/h' }), '/h/.green-roomz-state/agents.android-legacy.local.json');
+  assert.equal(hostOverridePath('/x/grz.current/tree/config/agents.android-termux.json', { HOME: '/h' }), '/h/.green-roomz-state/agents.android-termux.local.json');
 });
 test('OVR: allowlisted port applies; verified base file sha unchanged', async () => {
   const { h } = home({ port: 8099, log_opt_in: false });
@@ -72,7 +72,7 @@ test('SD-21: shared-storage prefix list is one file, same answers in JS and shel
     '/data/data/com.termux/files/home/k', '/sdcardx/k', '/storagex', '/data/local/tmpx/k'];
   for (const c of cases) {
     const js = isSharedStorage(c);
-    const sh = execFileSync('bash', ['-c', `source "${join(ROOT, 'scripts', 'note9-shared-storage.sh')}"; grz_is_shared_storage "$1" && echo y || echo n`, 'x', c]).toString().trim() === 'y';
+    const sh = execFileSync('bash', ['-c', `source "${join(ROOT, 'scripts', 'termux-shared-storage.sh')}"; grz_is_shared_storage "$1" && echo y || echo n`, 'x', c]).toString().trim() === 'y';
     assert.equal(js, sh, c);
     assert.equal(js, !/home|x\//.test(c) && !c.endsWith('x'), c);
   }
@@ -133,7 +133,7 @@ test('SD-21: allowlist is primary — $HOME reached via a symlinked prefix (/dat
   assert.equal(validateHostOverride({ api_key_file: key }, { HOME: home }).api_key_file, key);
   assert.equal(readApiKeyFile(key, { HOME: home }), 'tok');
   // shell helper agrees (allowlist under realpath(HOME), deny list second)
-  const sh = (k) => execFileSync('bash', ['-c', `source "${join(ROOT, 'scripts', 'note9-shared-storage.sh')}"; grz_key_path_ok "$1" && echo y || echo n`, 'x', k], { env: { ...process.env, HOME: home } }).toString().trim();
+  const sh = (k) => execFileSync('bash', ['-c', `source "${join(ROOT, 'scripts', 'termux-shared-storage.sh')}"; grz_key_path_ok "$1" && echo y || echo n`, 'x', k], { env: { ...process.env, HOME: home } }).toString().trim();
   assert.equal(sh(key), 'y');
   const out = join(t, 'outside'); writeFileSync(out, 'x'); chmodSync(out, 0o600);
   assert.equal(sh(out), 'n'); assert.match(apiKeyFileIssues(out, { HOME: home })[0], /outside \$HOME/);
@@ -183,7 +183,7 @@ test('P-1: win32 skips the mode check (Node reports 0o666) but still requires th
 });
 test('P-1: win32 host override with mode 666 is accepted; POSIX refuses', () => {
   const h = mkdtempSync(join(tmpdir(), 'grz-p1o-')); const st = join(h, '.green-roomz-state'); mkdirSync(st, { mode: 0o700 });
-  const f = join(st, 'agents.android-legacy.local.json'); writeFileSync(f, JSON.stringify({ port: 8099 })); chmodSync(f, 0o666);
+  const f = join(st, 'agents.android-termux.local.json'); writeFileSync(f, JSON.stringify({ port: 8099 })); chmodSync(f, 0o666);
   try {
     _setPlatformForTest('linux'); assert.throws(() => readHostOverride(f, { HOME: h }), /host override refused/);
     _setPlatformForTest('win32', h); assert.equal(readHostOverride(f, { HOME: h }).port, 8099);
@@ -206,26 +206,26 @@ const WIN_FS = (files) => ({
   realpath: (p) => { const k = p.toLowerCase(); if (k in files) return files[k]; const e = new Error('ENOENT'); e.code = 'ENOENT'; throw e; },
   lstat: (p) => { if (p.toLowerCase() in files) return { isSymbolicLink: () => false }; const e = new Error('ENOENT'); e.code = 'ENOENT'; throw e; },
 });
-test('P-1a: win32 with HOME unset uses os.homedir() (C:\\Users\\X) for the override path and key checks', () => {
-  const files = { 'c:\\users\\x': 'C:\\Users\\X', 'c:\\users\\x\\.green-roomz-state\\api.key': 'C:\\Users\\X\\.green-roomz-state\\api.key', 'c:\\users\\y\\api.key': 'C:\\Users\\Y\\api.key' };
+test('P-1a: win32 with HOME unset uses os.homedir() (C:\\Users\\example) for the override path and key checks', () => {
+  const files = { 'c:\\users\\example': 'C:\\Users\\example', 'c:\\users\\example\\.green-roomz-state\\api.key': 'C:\\Users\\example\\.green-roomz-state\\api.key', 'c:\\users\\user\\api.key': 'C:\\Users\\user\\api.key' };
   try {
-    _setPlatformForTest('win32', 'C:\\Users\\X', WIN_FS(files));
-    assert.equal(hostOverridePath('config\\agents.android-termux.json', {}), 'C:\\Users\\X\\.green-roomz-state\\agents.android-legacy.local.json');
-    assert.deepEqual(apiKeyFileIssues('C:\\Users\\X\\.green-roomz-state\\api.key', {}), []);
-    assert.match(apiKeyFileIssues('C:\\Users\\Y\\api.key', {}).join(), /outside the user profile/);
-    assert.deepEqual(validateHostOverride({ port: 8099, api_key_file: 'C:\\Users\\X\\.green-roomz-state\\api.key' }, {}).port, 8099);
+    _setPlatformForTest('win32', 'C:\\Users\\example', WIN_FS(files));
+    assert.equal(hostOverridePath('config\\agents.android-termux.json', {}), 'C:\\Users\\example\\.green-roomz-state\\agents.android-termux.local.json');
+    assert.deepEqual(apiKeyFileIssues('C:\\Users\\example\\.green-roomz-state\\api.key', {}), []);
+    assert.match(apiKeyFileIssues('C:\\Users\\user\\api.key', {}).join(), /outside the user profile/);
+    assert.deepEqual(validateHostOverride({ port: 8099, api_key_file: 'C:\\Users\\example\\.green-roomz-state\\api.key' }, {}).port, 8099);
     _setPlatformForTest('linux');
     assert.equal(hostOverridePath('agents.android-termux.json', {}), null, 'POSIX still needs env.HOME');
   } finally { _setPlatformForTest(null); }
 });
 test('P-1b: win32 compares lowercased path.win32 forms (drive-letter case, backslashes, sibling prefix)', () => {
   try {
-    _setPlatformForTest('win32', 'C:\\Users\\X');
-    assert.deepEqual(_keyPathIssuesForTest('c:\\users\\x\\.green-roomz-state\\api.key', 'C:\\Users\\X'), []);
-    assert.deepEqual(_keyPathIssuesForTest('C:/Users/X/state/api.key', 'c:\\USERS\\x\\'), []);
-    assert.match(_keyPathIssuesForTest('C:\\Users\\Xavier\\api.key', 'C:\\Users\\X').join(), /outside the user profile/);
-    assert.match(_keyPathIssuesForTest('D:\\Users\\X\\api.key', 'C:\\Users\\X').join(), /outside the user profile/);
+    _setPlatformForTest('win32', 'C:\\Users\\example');
+    assert.deepEqual(_keyPathIssuesForTest('c:\\users\\example\\.green-roomz-state\\api.key', 'C:\\Users\\example'), []);
+    assert.deepEqual(_keyPathIssuesForTest('C:/Users/example/state/api.key', 'c:\\USERS\\example\\'), []);
+    assert.match(_keyPathIssuesForTest('C:\\Users\\user\\api.key', 'C:\\Users\\example').join(), /outside the user profile/);
+    assert.match(_keyPathIssuesForTest('D:\\Users\\user\\api.key', 'C:\\Users\\example').join(), /outside the user profile/);
     _setPlatformForTest('linux');
-    assert.match(_keyPathIssuesForTest('/home/X/k', '/home/x').join(), /outside \$HOME/, 'POSIX stays case-sensitive');
+    assert.match(_keyPathIssuesForTest('/home/User/k', '/home/user').join(), /outside \$HOME/, 'POSIX stays case-sensitive');
   } finally { _setPlatformForTest(null); }
 });

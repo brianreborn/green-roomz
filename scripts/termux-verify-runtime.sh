@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Copy the staged native runtime and JS tree into ONE versioned folder under $HOME, verifying
 # every file, then flip $HOME/grz.current to it.
-# Usage: bash note9-verify-runtime.sh <stage_root> <tree_src>
+# Usage: bash termux-verify-runtime.sh <stage_root> <tree_src>
 #   stage_root  staged runtime root (device: /data/local/tmp/grz; bin/ lib/ models/). Never executed.
 #   tree_src    staged JS tree (device: /data/local/tmp/grz/green-roomz)
 # Layout: $HOME/grz.<manifest-sha>/{runtime,tree,.verified}; $HOME/grz.current -> grz.<sha>
@@ -9,19 +9,19 @@
 # User state (.git, local config, 0600 override) lives in $HOME/.green-roomz-state (700) and is
 # never copied into the versioned folder. Anything executed (node_modules, *.node) must be in
 # the hashed tree and listed.
-# Manifest (sha256sum format): <tree>/config/note9-runtime.SHA256SUMS, from the staged tree,
+# Manifest (sha256sum format): <tree>/config/termux-runtime.SHA256SUMS, from the staged tree,
 #   verified inside the temp dir. Plain entries are relative to runtime/ (bin/llama-server,
 #   bin/libggml.so, models/x.gguf); "tree/" entries are relative to tree/.
 # Trust anchor: GRZ_MANIFEST_SHA256 (operator-supplied out of band) must equal sha256(manifest).
-# Install lock: $HOME/.grz-install.lock via grz_install_lock_* in note9-common.sh (SD-24/33, Race R1);
-#   same lock used by android-legacy-restart-serve.sh (Race R2). Dead-pid locks are taken over; release is pid-checked.
+# Install lock: $HOME/.grz-install.lock via grz_install_lock_* in termux-common.sh (SD-24/33, Race R1);
+#   same lock used by termux-restart-serve.sh (Race R2). Dead-pid locks are taken over; release is pid-checked.
 # Startup sweep (SD-20): only real dirs named grz.<64hex>.old.<n>, grz.unverified.<t>.<p>.old.<n>
 #   or .grz-verify.XXXXXX (ours);
 #   never a bare *.old.*, never a symlink.
 # Same sha already current and intact (SD-25): no copy, no flip.
 # After the flip: keep current + the previous one named by the install record
 #   $HOME/.green-roomz-state/install-history (SD-24; never by mtime); other grz.* dirs removed.
-# $HOME (realpath) on Android shared storage is refused (SD-21, scripts/note9-shared-storage.sh).
+# $HOME (realpath) on Android shared storage is refused (SD-21, scripts/termux-shared-storage.sh).
 # Aborts on: unlisted or symlinked staged file, missing/empty manifest, copy failure, hash
 # mismatch, non-symlink grz.current, or non-GNU realpath/find/mv ahead in PATH.
 # Only escape: GRZ_ALLOW_UNVERIFIED_RUNTIME=1 (loud warning; folder grz.unverified.*, no
@@ -29,10 +29,10 @@
 set -euo pipefail
 umask 077
 _grz_vdir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-# shellcheck source=note9-common.sh
-source "$_grz_vdir/note9-common.sh"
+# shellcheck source=termux-common.sh
+source "$_grz_vdir/termux-common.sh"
 STAGE=${1:?stage root}; TSRC=${2:?tree src}
-MAN_REL=config/note9-runtime.SHA256SUMS
+MAN_REL=config/termux-runtime.SHA256SUMS
 die() { echo "ERROR: $*" >&2; exit 1; }
 
 # Tools: toybox realpath/find (/system/bin) lack -e / -print0 semantics we rely on.
@@ -85,7 +85,7 @@ STATE=$HOME_REAL/.green-roomz-state
 [[ -L $STATE ]] && die "$STATE is a symlink; refusing"
 [[ -d $STATE ]] || mkdir -m 700 -- "$STATE" || die "cannot create $STATE"
 HIST=$STATE/install-history
-# SD-24/SD-26/SD-33 + Race R1: shared grz_install_lock_* (note9-common.sh). Same lock as restart.
+# SD-24/SD-26/SD-33 + Race R1: shared grz_install_lock_* (termux-common.sh). Same lock as restart.
 grz_install_lock_acquire || die "install lock refused"
 LOCK=$GRZ_LOCK
 WORK=""
