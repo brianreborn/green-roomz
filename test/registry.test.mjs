@@ -21,6 +21,9 @@ test('missing artifacts degrade only the affected alias', async () => {
   assert.ok(vision.native_capabilities.includes('image'));
   assert.deepEqual(vision.callable_capabilities, []);
   assert.deepEqual(vision.ready_capabilities, []);
+  assert.deepEqual(vision.input_modalities, ['text', 'image']);
+  assert.deepEqual(vision.output_modalities, ['text']);
+  assert.equal(vision.modality_declaration, 'manifest');
   assert.deepEqual(vision.capability_readiness, {
     state: 'unavailable',
     callable: false,
@@ -36,6 +39,19 @@ test('missing artifacts degrade only the affected alias', async () => {
   assert.deepEqual(monitor.ready_capabilities, ['text', 'json']);
   assert.equal(monitor.capability_readiness.callable, true);
   assert.equal(monitor.capability_readiness.loaded, true);
+});
+
+test('model catalog separates declared media input from generated media output', () => {
+  const manifest = sampleManifest();
+  const agent = manifest.agents.find((item) => item.alias === 'image-generation-agent');
+  agent.native_capabilities = ['text', 'image-output', 'video-output', 'model3d-output', 'spatial-output'];
+  agent.gateway_accepted_capabilities = ['text', 'image', 'video', 'model3d', 'spatial'];
+  const registry = new AgentRegistry(manifest);
+  const record = registry.modelRecord(agent);
+
+  assert.deepEqual(record.input_modalities, ['text', 'image', 'video', 'model3d', 'spatial']);
+  assert.deepEqual(record.output_modalities, ['text', 'image', 'video', 'model3d', 'spatial']);
+  assert.equal(record.modality_declaration, 'manifest');
 });
 
 test('inspect marks a memory-tight specialist unavailable unless admit_when_tight=page', async () => {
