@@ -409,7 +409,7 @@ test('unknown paths are 404 rather than proxied', async (t) => {
   assert.equal(result.status, 404);
 });
 
-test('GET / is an operator HTML index, not JSON 404', async (t) => {
+test('GET / serves the browser UI without exposing protected model data', async (t) => {
   const { server } = await withServer(t);
   const { port } = server.address();
   const res = await new Promise((resolve, reject) => {
@@ -425,8 +425,16 @@ test('GET / is an operator HTML index, not JSON 404', async (t) => {
   });
   assert.equal(res.status, 200);
   assert.match(String(res.type), /text\/html/);
-  assert.match(res.body, /OpenAI-compatible/);
-  assert.match(res.body, /127\.0\.0\.1/);
+  assert.match(res.body, /Green Unicorn/);
+  assert.match(res.body, /caller-key/);
+  assert.doesNotMatch(res.body, /127\.0\.0\.1:8080/);
+  const apiRequest = await fetch(`http://127.0.0.1:${port}/`, { headers: { accept: 'application/json' } });
+  assert.equal(apiRequest.status, 406);
+  assert.match(await apiRequest.text(), /\/v1\//);
+  assert.equal((await fetch(`http://127.0.0.1:${port}/`, { headers: { accept: 'text/html;q=0, application/json' } })).status, 406);
+  assert.equal((await fetch(`http://127.0.0.1:${port}/`, { method: 'OPTIONS' })).status, 405);
+  assert.equal((await fetch(`http://127.0.0.1:${port}/llama-ui`)).status, 503);
+  assert.equal((await fetch(`http://127.0.0.1:${port}/hermes`)).status, 503);
 });
 
 test('TLS ClientHello is dropped instead of HTTP 400', async (t) => {
