@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { createServer } from 'node:http';
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -26,6 +26,8 @@ import { holdMs, resolveTimingPrivacy } from './timing-quant.mjs';
 const EXPLICIT_ROUTES = new Set([
   '/',
   '/unicorn',
+  '/llama-ui',
+  '/hermes',
   '/health',
   '/v1/health',
   '/v1/models',
@@ -77,7 +79,7 @@ function publicEvent(event) {
   return { ...event, ticket: hashTicket(event.ticket) };
 }
 
-const GET_ONLY = new Set(['/', '/unicorn', '/health', '/v1/health', '/v1/models', '/v1/weights', '/props', '/metrics', '/v1/monitor/recent']);
+const GET_ONLY = new Set(['/', '/unicorn', '/llama-ui', '/hermes', '/health', '/v1/health', '/v1/models', '/v1/weights', '/props', '/metrics', '/v1/monitor/recent']);
 
 function modelsRoute(pathname) {
   if (pathname === '/v1/models') return { list: true };
@@ -94,6 +96,16 @@ function modelsRoute(pathname) {
 
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1', 'localhost']);
 const COUNCIL_JUDGES = new Set(['field-vote', 'judge-model', 'similarity']);
+
+function acceptsHtml(value) {
+  if (!value) return true;
+  return String(value).split(',').some((entry) => {
+    const [type, ...params] = entry.trim().toLowerCase().split(';');
+    const q = params.find((param) => param.trim().startsWith('q='));
+    return (type === 'text/html' || type === '*/*')
+      && (!q || Number(q.trim().slice(2)) > 0);
+  });
+}
 
 /**
  * A council request, from either:
@@ -424,39 +436,15 @@ export class Gateway {
     this.brainz = brainz ?? null;
   }
 
-  serveHtml(response, cors, method, html) {
+  serveHtml(response, cors, method, html, headers = {}) {
     const data = Buffer.from(html);
     response.writeHead(200, {
       'content-type': 'text/html; charset=utf-8',
-      'content-length': method === 'HEAD' ? 0 : data.length,
+      'content-length': data.length,
+      ...headers,
       ...cors,
     });
     return response.end(method === 'HEAD' ? undefined : data);
-  }
-
-  serveOperatorIndex(response, cors, method = 'GET') {
-    const html = `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>Green-Roomz</title></head>
-<body>
-<h1>Green-Roomz</h1>
-<p>Use <strong>both</strong> clients against this same gateway. They do not conflict.</p>
-<ul>
-<li>Web / file-drop: <a href="/unicorn">Unicorn</a> &mdash; <code>scripts\\unicorn.cmd</code></li>
-<li>Console chat: <strong>chat-mvp</strong> &mdash; <code>scripts\\chat-mvp.cmd</code></li>
-<li>Desktop GUI: llama.app pointed at <code>http://127.0.0.1:8080</code></li>
-</ul>
-<p>This landing page is not a chat UI. Coding agent jail: <code>node bin\\green-roomz.mjs agent --goal "..."</code></p>
-<p>This URL is an OpenAI-compatible HTTP API. No TLS on :8080 &mdash; use <code>http://127.0.0.1:8080</code>, not https.</p>
-<ul>
-<li><a href="/health"><code>GET /health</code></a></li>
-<li><a href="/v1/models"><code>GET /v1/models</code></a></li>
-<li><a href="/v1/weights"><code>GET /v1/weights</code></a></li>
-<li><code>POST /v1/chat/completions</code></li>
-</ul>
-<p>Other clients: curl, any OpenAI SDK at this origin.</p>
-</body></html>
-`;
-    return this.serveHtml(response, cors, method, html);
   }
 
   serveUnicorn(response, cors, method = 'GET') {
@@ -467,7 +455,14 @@ export class Gateway {
       html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Green Unicorn</title></head>
 <body><h1>Green Unicorn</h1><p>Missing <code>web/unicorn.html</code> next to the gateway. Use <code>scripts\\chat-mvp.cmd</code> until that file is restored.</p></body></html>`;
     }
-    return this.serveHtml(response, cors, method, html);
+    const nonce = randomBytes(16).toString('base64');
+    html = html.replace(/<style>/g, `<style nonce="${nonce}">`)
+      .replace(/<script>/g, `<script nonce="${nonce}">`);
+    return this.serveHtml(response, cors, method, html, {
+      'cache-control': 'no-store',
+      'content-security-policy': `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; connect-src 'self'; img-src 'self' blob: data:; media-src 'self' blob:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
+      'x-content-type-options': 'nosniff',
+    });
   }
 
   async attachCognitiveTurn(request, issuedSession, identity, body) {
@@ -585,6 +580,9 @@ export class Gateway {
         return jsonResponse(response, 403, { error: { message: 'Peer not allowed', type: 'forbidden_peer' } }, cors);
       }
       if (method === 'OPTIONS') {
+        if (url.pathname === '/') {
+          return jsonResponse(response, 405, { error: { message: 'Method not allowed' } }, { allow: 'GET, HEAD', ...cors });
+        }
         response.writeHead(204, cors);
         return response.end();
       }
@@ -594,6 +592,20 @@ export class Gateway {
         if ((cl != null && String(cl) !== '' && String(cl) !== '0') || te) {
           throw new ValidationError('GET-family requests must not include a body');
         }
+      }
+      if (url.pathname === '/' || url.pathname === '/unicorn'
+          || url.pathname === '/llama-ui' || url.pathname === '/hermes') {
+        if (method !== 'GET' && method !== 'HEAD') {
+          return jsonResponse(response, 405, { error: { message: 'Method not allowed' } }, { allow: 'GET, HEAD', ...cors });
+        }
+        if (url.pathname === '/' && !acceptsHtml(request.headers.accept)) {
+          response.writeHead(406, { 'content-type': 'text/plain; charset=utf-8', ...cors });
+          return response.end(method === 'HEAD' ? undefined : 'Browser UI is at /; use /v1/ for APIs.\n');
+        }
+        if (url.pathname === '/' || url.pathname === '/unicorn') {
+          return this.serveUnicorn(response, cors, method);
+        }
+        return jsonResponse(response, 503, { error: { message: `${url.pathname} browser UI is unavailable`, type: 'unavailable_ui' } }, cors);
       }
       const identity = identityFrom(request, this.apiKey);
       if (!identity) return jsonResponse(response, 401, { error: { message: 'Unauthorized', type: 'auth_error' } }, cors);
@@ -611,12 +623,6 @@ export class Gateway {
       if (GET_ONLY.has(url.pathname) || modelRoute) {
         if (method !== 'GET' && method !== 'HEAD') {
           return jsonResponse(response, 405, { error: { message: 'Method not allowed' } }, { allow: 'GET, HEAD, OPTIONS', ...cors });
-        }
-        if (url.pathname === '/') {
-          return this.serveOperatorIndex(response, cors, method);
-        }
-        if (url.pathname === '/unicorn') {
-          return this.serveUnicorn(response, cors, method);
         }
         if (url.pathname === '/health' || url.pathname === '/v1/health') {
           return headJson(200, this.health());

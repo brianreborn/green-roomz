@@ -15,6 +15,7 @@
   header a { color: var(--acc); }
   .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   select, button, input[type=checkbox] { font: inherit; }
+  input[type=password] { background: #12190f; color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; min-width: 12rem; }
   select, button { background: #12190f; color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; }
   button { cursor: pointer; }
   button.primary { background: #23401c; border-color: #3d6a32; color: #d8ffce; }
@@ -40,14 +41,17 @@
 <body>
 <header>
   <h1>Green Unicorn</h1>
-  <span class="hint">Web / file-drop client for the same Roomz gateway as <code>scripts\chat-mvp.cmd</code>. HTTP only — <code>http://127.0.0.1:8080/unicorn</code>, not https.</span>
+  <span class="hint">Web / file-drop client for this Green RoomZ gateway. The caller key stays in this page's memory.</span>
   <div class="row">
     <label>model
       <select id="model"></select>
     </label>
     <label><input type="checkbox" id="lock" checked> lock alias</label>
+    <label>API key <input id="caller-key" type="password" autocomplete="off" spellcheck="false" placeholder="Paste caller key"></label>
+    <button id="connect" type="button">Connect</button>
+    <button id="clear-key" type="button">Clear key</button>
     <span id="health">checking…</span>
-    <a href="/">operator</a>
+    <a href="/">home</a>
     <a href="/health">health</a>
     <a href="/v1/models">models</a>
   </div>
@@ -74,6 +78,9 @@
   const stopEl = document.getElementById('stop');
   const healthEl = document.getElementById('health');
   const fileEl = document.getElementById('file');
+  const keyEl = document.getElementById('caller-key');
+  let callerKey = '';
+  const callerHeaders = () => callerKey ? { Authorization: 'Bearer ' + callerKey } : {};
   const messages = [];
   const pending = [];
   let abort = null;
@@ -163,7 +170,8 @@
       healthEl.className = 'bad';
     }
     try {
-      const r = await fetch('/v1/models', { signal: AbortSignal.timeout(4000) });
+      const r = await fetch('/v1/models', { headers: callerHeaders(), signal: AbortSignal.timeout(4000) });
+      if (!r.ok) throw new Error('catalog HTTP ' + r.status);
       const j = await r.json();
       const ids = (j.data || []).map((m) => m.id);
       const keep = modelEl.value;
@@ -174,7 +182,7 @@
         modelEl.appendChild(o);
       });
       if (ids.includes(keep)) modelEl.value = keep;
-      else if (ids.includes('general-text-speculator')) modelEl.value = 'general-text-speculator';
+      else if (ids.length) modelEl.value = ids[0];
     } catch { /* health already shown */ }
   }
 
@@ -246,6 +254,10 @@
     const text = promptEl.value.trim();
     if (!text && !pending.length) return;
     if (abort) return;
+    if (!modelEl.value) {
+      addLog('error', 'Connect with a caller key and choose a model.');
+      return;
+    }
     const content = await buildUserContent(text);
     const shown = text || pending.map((p) => p.name).join(', ');
     promptEl.value = '';
@@ -257,14 +269,14 @@
     abort = new AbortController();
     sendEl.disabled = true;
     stopEl.disabled = false;
-    const headers = { 'content-type': 'application/json' };
+    const headers = { 'content-type': 'application/json', ...callerHeaders() };
     if (sessionId) headers['x-session-id'] = sessionId;
     try {
       const res = await fetch('/v1/chat/completions', {
         method: 'POST',
         headers,
         body: JSON.stringify({
-          model: modelEl.value || 'general-text-speculator',
+          model: modelEl.value,
           stream: true,
           lock_alias: lockEl.checked,
           messages,
@@ -327,6 +339,17 @@
   }
 
   sendEl.onclick = send;
+  document.getElementById('connect').onclick = () => {
+    callerKey = keyEl.value;
+    refreshHealth();
+  };
+  document.getElementById('clear-key').onclick = () => {
+    callerKey = '';
+    keyEl.value = '';
+    modelEl.replaceChildren();
+    sessionId = null;
+    healthEl.textContent = 'Key cleared';
+  };
   stopEl.onclick = () => { if (abort) abort.abort(); };
   document.getElementById('clear').onclick = () => {
     messages.length = 0;
