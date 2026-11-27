@@ -127,6 +127,10 @@ test('health is degraded when artifacts are missing and models stay truthful', a
   assert.deepEqual(vision.native_capabilities, ['text', 'image']);
   const models = await request(server, { path: '/v1/models' });
   assert.equal(models.body.data.length, REQUIRED_ALIASES.length);
+  const catalogVision = models.body.data.find((agent) => agent.id === 'vision-layout-agent');
+  assert.equal(catalogVision.availability, 'unavailable');
+  assert.deepEqual(catalogVision.input_modalities, ['text', 'image']);
+  assert.deepEqual(catalogVision.output_modalities, ['text']);
 });
 
 test('GET /v1/models/:id and /v1/weights disclose GGUF identity when the file exists', async (t) => {
@@ -1877,4 +1881,3 @@ test('Boundary: llama upstream key set + empty client apiKey refuses keyless mod
   assert.doesNotThrow(() => requireClientKeyWhenUpstreamKeyed('', ''));
   assert.doesNotThrow(() => requireClientKeyWhenUpstreamKeyed('client', ''));
 });
-

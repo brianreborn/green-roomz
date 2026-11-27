@@ -4,6 +4,17 @@ import { ValidationError } from './errors.mjs';
 import { admitWhenTightOf, agentCanAdmit } from './memory.mjs';
 import { quantizationLabel, readGgufInfo } from './gguf.mjs';
 
+const MEDIA_MODALITIES = Object.freeze(['text', 'image', 'video', 'audio', 'model3d', 'spatial']);
+
+function declaredMediaModalities(agent) {
+  const accepted = new Set(agent.gateway_accepted_capabilities ?? []);
+  const native = new Set(agent.native_capabilities ?? []);
+  return {
+    input: MEDIA_MODALITIES.filter((kind) => accepted.has(kind)),
+    output: MEDIA_MODALITIES.filter((kind) => native.has(kind === 'text' ? 'text' : `${kind}-output`)),
+  };
+}
+
 function routingBehavior(alias) {
   if (alias === 'tool-router-agent') return 'nexus';
   if (alias === 'security-monitor-agent') return 'mailbox';
@@ -73,17 +84,10 @@ export class AgentRegistry {
   }
 
   listModels() {
-    return [...this.agents.values()]
-      .filter((agent) => {
-        // Always list resident agents and the nexus/health set.
-        if (isResidentAgent(agent)) return true;
-        const healthAliases = this.manifest?.gateway?.health_aliases ?? [];
-        if (healthAliases.includes(agent.alias)) return true;
-        // Specialist aliases are only published when their artifacts exist on disk (#6).
-        const status = this.availability.get(agent.alias);
-        return !status || status.state !== 'unavailable';
-      })
-      .map((agent) => this.modelRecord(agent));
+    // The manifest is the complete routable catalog. Keep unavailable entries
+    // visible with their readiness reasons so clients can distinguish a known
+    // route from an alias the gateway does not recognize.
+    return [...this.agents.values()].map((agent) => this.modelRecord(agent));
   }
 
   getModel(alias) {
@@ -95,6 +99,7 @@ export class AgentRegistry {
     const status = this.status(agent.alias);
     const callable = status.state === 'ready' || status.state === 'cold';
     const loaded = status.state === 'ready';
+    const mediaModalities = declaredMediaModalities(agent);
     const checkpoint = typeof agent.model === 'string' && agent.model ? agent.model : null;
     const gguf = checkpoint && existsSync(checkpoint) ? readGgufInfo(checkpoint, { tensors: false }) : null;
     const identity = gguf?.format === 'gguf' ? gguf : null;
@@ -104,6 +109,9 @@ export class AgentRegistry {
       owned_by: 'green-roomz',
       native_capabilities: agent.native_capabilities,
       gateway_accepted_capabilities: agent.gateway_accepted_capabilities,
+      input_modalities: mediaModalities.input,
+      output_modalities: mediaModalities.output,
+      modality_declaration: 'manifest',
       callable_capabilities: callable ? agent.native_capabilities : [],
       ready_capabilities: loaded ? agent.native_capabilities : [],
       capability_readiness: {
